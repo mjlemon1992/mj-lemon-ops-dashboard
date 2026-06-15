@@ -21,6 +21,7 @@ const targetsRoutes = require('./routes/targets');
 const usersRoutes = require('./routes/users');
 const metricsRoutes = require('./routes/metrics');
 const techEfficiencyRoutes = require('./routes/techEfficiency');
+const shopmonkeySyncRoutes = require('./routes/shopmonkeySync');
 
 app.use('/api/auth', authRoutes(pool));
 app.use('/api/locations', locationsRoutes(pool));
@@ -28,6 +29,7 @@ app.use('/api/targets', targetsRoutes(pool));
 app.use('/api/users', usersRoutes(pool));
 app.use('/api/metrics', metricsRoutes(pool));
 app.use('/api/tech-efficiency', techEfficiencyRoutes(pool));
+app.use('/api/sync', shopmonkeySyncRoutes(pool));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
