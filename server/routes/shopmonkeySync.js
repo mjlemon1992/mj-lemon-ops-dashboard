@@ -12,6 +12,47 @@ function centsToDollars(c) {
   return (typeof c === 'number' ? c : 0) / 100;
 }
 
+// Fetch orders by paginating through all pages, then the caller filters in Node.
+// NOTE: Shopmonkey's `where:{invoiced:true}` filter is unreliable on this account
+// (returns only ~4 records even though the orders genuinely have invoiced:true).
+// So we query WITHOUT that filter and filter for invoiced + date in Node, where
+// we have full control. We use status:'Invoice' as a light server-side narrowing
+// since that field filters correctly.
+// Fetch orders invoiced on/after sinceDate. We anchor on invoicedDate (NOT
+// createdDate) because Shopmonkey's monthly report counts orders by when they
+// were invoiced, and we deliberately apply NO status filter: completed big jobs
+// move from "Invoice" to "Paid"/"Closed" status, and a status:'Invoice' filter
+// would wrongly exclude exactly those high-value paid rebuilds. The working
+// operator is `gte` (no $ prefix) with an ISO string. The caller still filters
+// to the precise month window in Node.
+async function fetchOrdersSince(apiKey, sinceDate, maxPages = 12) {
+  const pageSize = 100;
+  const iso = sinceDate.toISOString();
+  let all = [];
+  for (let page = 0; page < maxPages; page++) {
+    const params = new URLSearchParams({
+      where: JSON.stringify({ invoicedDate: { gte: iso } }),
+      limit: String(pageSize),
+      skip: String(page * pageSize)
+    });
+    const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${params}`, {
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Shopmonkey API error ${res.status}: ${txt.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    const batch = (data && data.data && data.data.data) ? data.data.data : (data.data || []);
+    if (!batch.length) break;
+    all = all.concat(batch);
+    if (batch.length < pageSize) break; // last page reached
+  }
+  // Keep non-deleted orders that actually carry an invoicedDate (i.e. real
+  // invoiced revenue, whether still "Invoice" or moved to "Paid"/"Closed").
+  return all.filter(o => !o.deleted && o.invoicedDate && o.invoicedDate !== 'empty');
+}
+
 module.exports = (pool) => {
   const router = express.Router();
 
@@ -31,30 +72,23 @@ module.exports = (pool) => {
       const techWage = parseFloat(process.env.TECH_WAGE) || 40;
       const partsMarginTarget = parseFloat(loc.parts_margin_target) || 55;
 
-      // Pull invoiced, non-archived orders from Shopmonkey
-      const params = new URLSearchParams({
-        where: JSON.stringify({ invoiced: true, archived: false, deleted: false }),
-        limit: '100'
-      });
-      const smRes = await fetch(`https://api.shopmonkey.cloud/v3/order?${params}`, {
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
-      });
-      if (!smRes.ok) {
-        const txt = await smRes.text();
-        return res.status(502).json({ error: `Shopmonkey API error ${smRes.status}`, detail: txt.slice(0, 300) });
-      }
-      const smData = await smRes.json();
-      const orders = (smData && smData.data && smData.data.data) ? smData.data.data : (smData.data || []);
-
       // Current month boundaries
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
+      // Pull invoiced orders newest-first, covering this month
+      let orders;
+      try {
+        orders = await fetchOrdersSince(apiKey, monthStart);
+      } catch (e) {
+        return res.status(502).json({ error: e.message });
+      }
+
       // Filter to this month's invoiced orders for this location
       const mtdOrders = orders.filter(o => {
         if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) return false;
-        const created = parseShopmonkeyDate(o.createdDate);
-        return created && created >= monthStart && created <= now;
+        const invoiced = parseShopmonkeyDate(o.invoicedDate);
+        return invoiced && invoiced >= monthStart && invoiced <= now;
       });
 
       let revenue = 0, partsRetail = 0, partsWholesale = 0, labourRev = 0, totalProfit = 0;
@@ -174,30 +208,22 @@ module.exports = (pool) => {
         }
       } catch (e) { /* technician endpoint optional - fall back to IDs */ }
 
-      // Pull this month's invoiced orders
-      const params = new URLSearchParams({
-        where: JSON.stringify({ invoiced: true, archived: false, deleted: false }),
-        limit: '100'
-      });
-      const smRes = await fetch(`https://api.shopmonkey.cloud/v3/order?${params}`, {
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
-      });
-      if (!smRes.ok) {
-        const txt = await smRes.text();
-        return res.status(502).json({ error: `Shopmonkey API error ${smRes.status}`, detail: txt.slice(0, 300) });
-      }
-      const smData = await smRes.json();
-      const orders = (smData && smData.data && smData.data.data) ? smData.data.data : (smData.data || []);
-
+      // Pull this month's invoiced orders (newest-first, paginated)
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      let orders;
+      try {
+        orders = await fetchOrdersSince(apiKey, monthStart);
+      } catch (e) {
+        return res.status(502).json({ error: e.message });
+      }
 
       // Aggregate hours sold + labour revenue per technician
       const byTech = {};
       for (const o of orders) {
         if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) continue;
-        const created = parseShopmonkeyDate(o.createdDate);
-        if (!created || created < monthStart || created > now) continue;
+        const invoiced = parseShopmonkeyDate(o.invoicedDate);
+        if (!invoiced || invoiced < monthStart || invoiced > now) continue;
 
         const techIds = Array.isArray(o.assignedTechnicianIdsArray) ? o.assignedTechnicianIdsArray : [];
         const labourHours = (typeof o.totalLaborHours === 'number' && o.totalLaborHours > 0)
