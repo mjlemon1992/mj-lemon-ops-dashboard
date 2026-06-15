@@ -1,0 +1,106 @@
+import React, { useState } from 'react';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+const NAV = [
+  { path: '/', label: 'Home', icon: '⌂', section: 'Overview' },
+  { path: '/performance', label: 'Performance', icon: '◈', section: null },
+  { path: '/alerts', label: 'Alerts', icon: '◉', section: null },
+  { path: '/reports', label: 'Reports', icon: '▤', section: 'Reports', roles: ['owner', 'partner'] },
+  { path: '/locations', label: 'Locations', icon: '◎', section: 'Settings', roles: ['owner'] },
+  { path: '/targets', label: 'Targets', icon: '◎', section: null, roles: ['owner', 'partner'] },
+  { path: '/users', label: 'Users', icon: '◈', section: null, roles: ['owner'] },
+];
+
+export default function Layout() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [alertCount] = useState(5);
+
+  const visibleNav = NAV.filter(n => !n.roles || n.roles.includes(user?.role));
+
+  const initials = user?.name ? user.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : 'U';
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
+      {/* Sidebar */}
+      <div style={{ width: 220, flexShrink: 0, background: 'var(--bg2)', borderRight: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '18px 16px 14px', borderBottom: '0.5px solid var(--border)' }}>
+          <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>MJ Lemon Ops</div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>Multi-location dashboard</div>
+        </div>
+
+        <div style={{ margin: '12px', padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)', fontSize: '12px' }}>
+          <div style={{ fontWeight: '500', color: 'var(--text)' }}>All locations</div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '1px', textTransform: 'capitalize' }}>{user?.role} view</div>
+        </div>
+
+        <nav style={{ padding: '4px 8px', flex: 1, overflowY: 'auto' }}>
+          {visibleNav.map((item, i) => {
+            const active = location.pathname === item.path;
+            const prevItem = visibleNav[i - 1];
+            const showSection = item.section && (!prevItem || prevItem.section !== item.section);
+            return (
+              <React.Fragment key={item.path}>
+                {showSection && (
+                  <div style={{ fontSize: '10px', fontWeight: '500', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '12px 8px 4px' }}>
+                    {item.section}
+                  </div>
+                )}
+                <div
+                  onClick={() => navigate(item.path)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    padding: '7px 8px', borderRadius: 'var(--radius)',
+                    cursor: 'pointer', fontSize: '13px',
+                    color: active ? 'var(--text)' : 'var(--text2)',
+                    background: active ? 'var(--bg3)' : 'transparent',
+                    fontWeight: active ? '500' : '400',
+                    marginBottom: '1px'
+                  }}
+                >
+                  <span style={{ fontSize: '14px' }}>{item.icon}</span>
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.path === '/alerts' && alertCount > 0 && (
+                    <span style={{ background: 'rgba(255,77,77,0.15)', color: 'var(--danger)', fontSize: '10px', padding: '1px 6px', borderRadius: '10px' }}>{alertCount}</span>
+                  )}
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </nav>
+
+        <div style={{ padding: '12px', borderTop: '0.5px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(77,184,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '500', color: 'var(--info)', flexShrink: 0 }}>{initials}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.name}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text3)', textTransform: 'capitalize' }}>{user?.role}</div>
+            </div>
+            <button onClick={logout} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: '16px', padding: '4px', cursor: 'pointer' }} title="Sign out">⏻</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ background: 'var(--bg2)', borderBottom: '0.5px solid var(--border)', padding: '0 24px', height: '52px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div style={{ fontSize: '15px', fontWeight: '500', color: 'var(--text)' }}>
+            {visibleNav.find(n => n.path === location.pathname)?.label || 'Dashboard'}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {alertCount > 0 && (
+              <div className="badge danger" style={{ cursor: 'pointer' }} onClick={() => navigate('/alerts')}>
+                ⚠ {alertCount} active alerts
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+          <Outlet />
+        </div>
+      </div>
+    </div>
+  );
+}
