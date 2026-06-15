@@ -69,6 +69,22 @@ CREATE TABLE IF NOT EXISTS metrics_cache (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS tech_efficiency (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id UUID NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+  snapshot_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  tech_id VARCHAR(255),
+  tech_name VARCHAR(255) NOT NULL,
+  hours_available DECIMAL(10,2),
+  hours_worked DECIMAL(10,2),
+  hours_sold DECIMAL(10,2),
+  efficiency DECIMAL(5,2),
+  labour_revenue DECIMAL(12,2),
+  parts_gp DECIMAL(12,2),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tech_efficiency_location_date ON tech_efficiency(location_id, snapshot_date DESC);
 CREATE INDEX IF NOT EXISTS idx_metrics_cache_location_date ON metrics_cache(location_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_targets_location_year ON targets(location_id, year);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
