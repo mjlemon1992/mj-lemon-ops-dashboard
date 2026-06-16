@@ -184,6 +184,21 @@ module.exports = (pool) => {
   // Includes ALL invoiced orders (even $0 comebacks carry real assigned labour hours).
   // hours_sold mirrors hours_billed at line level; worked hours / efficiency stay null
   // until QBO Time connects. Costs one extra API call per order.
+
+  // Refresh tech efficiency using LINE-LEVEL attribution from /v3/order/{id}/service.
+  // Validated penny-exact to Shopmonkey's "Summary by Technician" report:
+  //   hours_sold    = sum of every labour line's `hours`, grouped by labors[].technicianId
+  //                   (total 275.7 reconciles to the report's "Total Billed Hours" column)
+  //   hours_billed  = hours ONLY on lines that generated revenue (calculatedLaborCents > 0);
+  //                   a line comped 100% to $0 contributes to sold but NOT billed, so the
+  //                   sold-vs-billed gap surfaces discounted/goodwill labour per tech
+  //   labour_revenue= each parent line's calculatedLaborCents (net of discounts + lump-sum/
+  //                   matrix pricing), split across the line's techs proportional to hours
+  //   vehicle_count = distinct vehicleId where the tech has any labour line
+  // Includes ALL invoiced orders (even $0 comebacks carry real assigned labour hours).
+  // Techs with zero sold hours this month are omitted (they did no labour work).
+  // Worked hours / efficiency stay null until QBO Time connects. Costs one extra API
+  // call per order, so it is heavier than the order-level path.
   router.post('/:locationId/refresh-tech', authenticateToken, async (req, res) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
@@ -215,7 +230,8 @@ module.exports = (pool) => {
         if (!byTech[id]) byTech[id] = {
           tech_id: id,
           tech_name: name,
-          hours: 0,
+          hours_sold: 0,
+          hours_billed: 0,
           labour_revenue: 0,
           _vehicles: new Set()
         };
@@ -238,11 +254,13 @@ module.exports = (pool) => {
           if (!labs.length) continue;
           const lineLaborDollars = centsToDollars(ln.calculatedLaborCents);
           const lineHours = labs.reduce((s, l) => s + (Number(l.hours) || 0), 0);
+          const lineGeneratedRevenue = lineLaborDollars > 0;
           for (const lab of labs) {
             const tid = lab.technicianId;
             const hrs = Number(lab.hours) || 0;
             const b = ensure(tid, techNames[tid] || `Tech ${String(tid).slice(0, 6)}`);
-            b.hours += hrs;
+            b.hours_sold += hrs;
+            if (lineGeneratedRevenue) b.hours_billed += hrs;
             b.labour_revenue += lineHours > 0
               ? lineLaborDollars * (hrs / lineHours)
               : lineLaborDollars / labs.length;
@@ -251,17 +269,19 @@ module.exports = (pool) => {
         }
       }
 
-      const techs = Object.values(byTech).map(t => ({
-        tech_id: t.tech_id,
-        tech_name: t.tech_name,
-        hours_available: null,
-        hours_worked: null,
-        hours_sold: Math.round(t.hours * 10) / 10,
-        hours_billed: Math.round(t.hours * 10) / 10,
-        vehicle_count: t._vehicles.size,
-        labour_revenue: Math.round(t.labour_revenue * 100) / 100,
-        parts_gp: null
-      }));
+      const techs = Object.values(byTech)
+        .filter(t => t.hours_sold > 0)
+        .map(t => ({
+          tech_id: t.tech_id,
+          tech_name: t.tech_name,
+          hours_available: null,
+          hours_worked: null,
+          hours_sold: Math.round(t.hours_sold * 10) / 10,
+          hours_billed: Math.round(t.hours_billed * 10) / 10,
+          vehicle_count: t._vehicles.size,
+          labour_revenue: Math.round(t.labour_revenue * 100) / 100,
+          parts_gp: null
+        }));
 
       const date = new Date().toISOString().slice(0, 10);
       const client = await pool.connect();
@@ -284,7 +304,7 @@ module.exports = (pool) => {
       }
 
       res.json({
-        message: 'Tech efficiency refreshed (line-level attribution, validated to Shopmonkey report)',
+        message: 'Tech efficiency refreshed (line-level; sold = all hours, billed = revenue-generating hours)',
         orders_scanned: monthOrders.length,
         techs_found: techs.length,
         techs
