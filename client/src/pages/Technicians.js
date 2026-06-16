@@ -129,7 +129,7 @@ export default function Technicians() {
           </div>
 
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
-            Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks, goodwill). Labour revenue is pre-tax, after discounts. Efficiency and profit/hour need clocked hours from payroll (QBO Time), which connects at close. Multi-tech jobs are split evenly across assigned techs, and warranty/$0 comebacks aren&rsquo;t counted here.
+            Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks, goodwill). Labour revenue is pre-tax, after discounts. Efficiency and profit/hour need clocked hours from payroll (QBO Time), which connects at close. Multi-tech jobs attribute each labour line to the tech who performed it, matching Shopmonkey&rsquo;s per-technician report.
           </div>
         </>
       )}

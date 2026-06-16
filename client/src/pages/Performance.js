@@ -180,7 +180,7 @@ export default function Performance() {
           <div style={{ fontSize: '11px', color: 'var(--text3)' }}>live roster from Shopmonkey</div>
         </div>
         <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px' }}>
-          Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks). Worked hours, efficiency and profit/hour need clocked time (QBO Time) &mdash; connecting at close.
+          Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks). Hours billed counts only revenue-generating lines, so the gap is labour discounted to $0. Worked hours, efficiency and profit/hour need clocked time (QBO Time) &mdash; connecting at close.
         </div>
         {techs.length === 0 ? (
           <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)', fontSize: '12px' }}>

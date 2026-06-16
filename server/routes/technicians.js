@@ -64,7 +64,10 @@ module.exports = (pool) => {
         }
       }
 
-      const technicians = roster.map(t => {
+      // Only show techs who logged labour this month (present in tech_efficiency).
+      // Drops roster members who did no tech work (e.g. owners on the roster).
+      const activeRoster = snapshotDate ? roster.filter(t => statsByTech[t.tech_id]) : roster;
+      const technicians = activeRoster.map(t => {
         const h = statsByTech[t.tech_id];
         return {
           tech_id: t.tech_id,
