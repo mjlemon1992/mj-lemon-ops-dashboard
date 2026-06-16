@@ -124,6 +124,33 @@ module.exports = (pool) => {
         }
       }
 
+      // Rate-aware labour hours from line-level /service data (handles $170 + $200
+      // vehicles, and comped $0 lines). Billed hours = hours on revenue-generating
+      // lines (calculatedLaborCents > 0); worked hours = all labour-line hours.
+      // PPH uses billed hours so comped/give-away time doesn't depress the metric.
+      let labourHoursBilled = 0, labourHoursWorked = 0;
+      for (const o of mtdOrders) {
+        let lines = [];
+        try {
+          const sr = await fetch(`https://api.shopmonkey.cloud/v3/order/${o.id}/service?limit=100`, {
+            headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+          });
+          if (!sr.ok) continue;
+          const sj = await sr.json();
+          lines = (sj && sj.data && sj.data.data) ? sj.data.data : (sj.data || []);
+        } catch (e) { continue; }
+        for (const ln of (lines || [])) {
+          const lineGeneratedRevenue = (ln.calculatedLaborCents || 0) > 0;
+          for (const lab of (ln.labors || [])) {
+            const hrs = Number(lab.hours) || 0;
+            if (hrs === 0) continue;
+            labourHoursWorked += hrs;
+            if (lineGeneratedRevenue) labourHoursBilled += hrs;
+          }
+        }
+      }
+      const labourHoursComped = labourHoursWorked - labourHoursBilled;
+
       let partsMargin;
       if (partsWholesaleWithData > 0 && partsRetailWithData > 0) {
         partsMargin = ((partsRetailWithData - partsWholesaleWithData) / partsRetailWithData) * 100;
@@ -131,7 +158,9 @@ module.exports = (pool) => {
         partsMargin = partsMarginTarget;
       }
 
-      const labourHoursSold = labourRate > 0 ? labourRev / labourRate : 0;
+      // Was: labourRev / labourRate (single $170 assumption -> wrong with $200 jobs
+      // and comped hours). Now the real billed line hours, rate-agnostic.
+      const labourHoursSold = labourHoursBilled;
       const labourCost = labourHoursSold * techWage;
       const labourMargin = labourRev > 0 ? ((labourRev - labourCost) / labourRev) * 100 : 0;
 
@@ -151,16 +180,20 @@ module.exports = (pool) => {
         labour_margin: Math.round(labourMargin * 10) / 10,
         avg_ro_value: Math.round(avgRoValue * 100) / 100,
         labour_hours_sold: Math.round(labourHoursSold * 10) / 10,
+        labour_hours_worked: Math.round(labourHoursWorked * 10) / 10,
+        labour_hours_comped: Math.round(labourHoursComped * 10) / 10,
         efficiency_avg: null,
         pph: Math.round(pph * 100) / 100,
         total_profit: Math.round(totalProfit * 100) / 100,
         alerts: []
       };
 
+      await pool.query('ALTER TABLE metrics_cache ADD COLUMN IF NOT EXISTS labour_hours_worked NUMERIC');
+      await pool.query('ALTER TABLE metrics_cache ADD COLUMN IF NOT EXISTS labour_hours_comped NUMERIC');
       await pool.query(
-        `INSERT INTO metrics_cache (location_id, revenue_mtd, car_count_mtd, parts_margin, labour_margin, avg_ro_value, labour_hours_sold, efficiency_avg, pph, total_profit, alerts, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())`,
-        [req.params.locationId, payload.revenue_mtd, payload.car_count_mtd, payload.parts_margin, payload.labour_margin, payload.avg_ro_value, payload.labour_hours_sold, payload.efficiency_avg, payload.pph, payload.total_profit, JSON.stringify(payload.alerts)]
+        `INSERT INTO metrics_cache (location_id, revenue_mtd, car_count_mtd, parts_margin, labour_margin, avg_ro_value, labour_hours_sold, labour_hours_worked, labour_hours_comped, efficiency_avg, pph, total_profit, alerts, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())`,
+        [req.params.locationId, payload.revenue_mtd, payload.car_count_mtd, payload.parts_margin, payload.labour_margin, payload.avg_ro_value, payload.labour_hours_sold, payload.labour_hours_worked, payload.labour_hours_comped, payload.efficiency_avg, payload.pph, payload.total_profit, JSON.stringify(payload.alerts)]
       );
 
       res.json({ message: 'Metrics refreshed from Shopmonkey (pre-tax revenue)', orders_pulled: orders.length, mtd_orders: mtdOrders.length, profitability_data_available: partsWholesaleWithData > 0, metrics: payload });
@@ -168,11 +201,6 @@ module.exports = (pool) => {
       res.status(500).json({ error: err.message });
     }
   });
-
-  // Per-tech at ORDER level (no labour-line endpoint on this account). Split
-  // evenly across assignedTechnicianIds so totals reconcile:
-  //   hours_sold = totalLaborHours, hours_billed = completedLaborHours,
-  //   labour_revenue = laborCents (pre-tax), vehicle_count = distinct vehicleId.
 
   // Refresh tech efficiency using LINE-LEVEL attribution from /v3/order/{id}/service.
   // Validated penny-exact to Shopmonkey's "Summary by Technician" report:
