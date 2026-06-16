@@ -72,9 +72,22 @@ async function fetchTechNames(apiKey) {
 }
 
 module.exports = (pool) => {
+  // syncAuth: machine-to-machine auth for scheduled refreshes (e.g. Make).
+  // Accepts a valid X-Sync-Key header matching SYNC_SECRET as an alternative
+  // to a JWT, but ONLY on the refresh routes it's attached to. Fails closed:
+  // if SYNC_SECRET is unset, the key path is disabled and JWT is required.
+  const syncAuth = (req, res, next) => {
+    const secret = process.env.SYNC_SECRET;
+    const provided = req.get('X-Sync-Key');
+    if (secret && provided && provided === secret) {
+      req.user = { role: 'owner', via: 'sync-key' };
+      return next();
+    }
+    return authenticateToken(req, res, next);
+  };
   const router = express.Router();
 
-  router.post('/:locationId/refresh', authenticateToken, async (req, res) => {
+  router.post('/:locationId/refresh', syncAuth, async (req, res) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     try {
@@ -229,7 +242,7 @@ module.exports = (pool) => {
   // Techs with zero sold hours this month are omitted (they did no labour work).
   // Worked hours / efficiency stay null until QBO Time connects. Costs one extra API
   // call per order, so it is heavier than the order-level path.
-  router.post('/:locationId/refresh-tech', authenticateToken, async (req, res) => {
+  router.post('/:locationId/refresh-tech', syncAuth, async (req, res) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
 
