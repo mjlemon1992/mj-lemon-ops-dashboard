@@ -58,7 +58,14 @@ export default function Locations() {
           </div>
           <div className="form-section">
             <div className="form-section-title">Configuration</div>
-            <div className="form-row">{field('num_technicians','Number of technicians','number',{min:1})} {field('labour_rate','Labour rate ($/hr)','number',{min:1})}</div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Technicians (auto-derived)</label>
+                <input type="text" value={`${form.num_technicians ?? '—'} · synced from Shopmonkey`} disabled readOnly />
+                <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>Pulled live from the Shopmonkey roster (see the Technicians page) — no longer set by hand.</div>
+              </div>
+              {field('labour_rate','Labour rate ($/hr)','number',{min:1})}
+            </div>
             <div className="form-row">{field('stale_threshold_days','Stale vehicle threshold (days)','number',{min:1})} {field('pph_target','PPH target ($/hr)','number',{min:1})}</div>
             <div className="form-row">{field('parts_margin_target','Parts margin target (%)','number',{min:0,max:100})} {field('efficiency_target','Efficiency target (%)','number',{min:0,max:100})}</div>
           </div>
@@ -101,7 +108,7 @@ export default function Locations() {
               ['Shopmonkey ID', loc.shopmonkey_location_id || 'Not set'],
               ['QBO Company', loc.qbo_company_id || 'Connect after closing'],
               ['Slack channel', loc.slack_channel || 'Not set'],
-              ['Technicians', loc.num_technicians],
+              ['Technicians (live)', loc.num_technicians],
               ['Labour rate', `$${loc.labour_rate}/hr`],
               ['Stale threshold', `${loc.stale_threshold_days} days`],
               ['Parts margin target', `${loc.parts_margin_target}%`],

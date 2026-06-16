@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import Performance from './pages/Performance';
+import Technicians from './pages/Technicians';
 import Alerts from './pages/Alerts';
 import Reports from './pages/Reports';
 import Comebacks from './pages/Comebacks';
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route index element={<Home />} />
             <Route path="performance" element={<Performance />} />
+            <Route path="technicians" element={<Technicians />} />
             <Route path="alerts" element={<Alerts />} />
             <Route path="reports" element={<ProtectedRoute ownerOrPartner><Reports /></ProtectedRoute>} />
             <Route path="comebacks" element={<Comebacks />} />
