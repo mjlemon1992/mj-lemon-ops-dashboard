@@ -38,6 +38,7 @@ export default function Technicians() {
   const totalBilled = techs.reduce((s, t) => s + num(t.hours_billed), 0);
   const totalRev = techs.reduce((s, t) => s + num(t.labour_revenue), 0);
   const totalVehicles = techs.reduce((s, t) => s + num(t.vehicle_count), 0);
+  const distinctVehicles = data?.distinct_vehicles_mtd != null ? data.distinct_vehicles_mtd : null;
 
   const cols = showFinancials ? 6 : 5;
 
@@ -119,7 +120,7 @@ export default function Technicians() {
                     <td style={{ padding: '8px 12px' }} className="strong">Group total</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{hrsNum(totalSold)}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{hrsNum(totalBilled)}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text3)' }} className="strong">{'\u2014'}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{distinctVehicles != null ? distinctVehicles : '\u2014'}</td>
                     {showFinancials && <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{money0(totalRev)}</td>}
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text3)' }}>&mdash;</td>
                   </tr>

@@ -95,6 +95,7 @@ module.exports = (pool) => {
         technicians,
         count: technicians.length,
         derived_count: derivedCount,
+        distinct_vehicles_mtd: loc.distinct_vehicles_mtd != null ? loc.distinct_vehicles_mtd : null,
         hours_snapshot_date: snapshotDate,
         has_hours: !!snapshotDate,
         roster_source: rosterError ? 'unavailable' : 'shopmonkey_live',

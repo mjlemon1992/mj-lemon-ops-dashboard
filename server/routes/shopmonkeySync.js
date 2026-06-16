@@ -268,7 +268,9 @@ module.exports = (pool) => {
         return byTech[id];
       };
 
+      const monthVehicles = new Set();
       for (const o of monthOrders) {
+        if (o.vehicleId) monthVehicles.add(o.vehicleId);
         let lines = [];
         try {
           const sr = await fetch(`https://api.shopmonkey.cloud/v3/order/${o.id}/service?limit=100`, {
@@ -318,6 +320,8 @@ module.exports = (pool) => {
       try {
         await client.query('BEGIN');
         await client.query('DELETE FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2', [req.params.locationId, date]);
+        await client.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS distinct_vehicles_mtd INTEGER');
+        await client.query('UPDATE locations SET distinct_vehicles_mtd = $1, updated_at = NOW() WHERE id = $2', [monthVehicles.size, req.params.locationId]);
         for (const t of techs) {
           await client.query(
             `INSERT INTO tech_efficiency (location_id, snapshot_date, tech_id, tech_name, hours_available, hours_worked, hours_sold, hours_billed, vehicle_count, efficiency, labour_revenue, parts_gp)
@@ -337,6 +341,7 @@ module.exports = (pool) => {
         message: 'Tech efficiency refreshed (line-level; sold = all hours, billed = revenue-generating hours)',
         orders_scanned: monthOrders.length,
         techs_found: techs.length,
+        distinct_vehicles_mtd: monthVehicles.size,
         techs
       });
     } catch (err) {
