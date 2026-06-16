@@ -110,3 +110,11 @@ CREATE INDEX IF NOT EXISTS idx_tech_efficiency_location_date ON tech_efficiency(
 CREATE INDEX IF NOT EXISTS idx_metrics_cache_location_date ON metrics_cache(location_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_targets_location_year ON targets(location_id, year);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- Committed WIP cache: authorized orders not yet invoiced (potential revenue on the floor).
+-- Stored as a JSONB snapshot like the metrics cache; refreshed on the same schedule.
+CREATE TABLE IF NOT EXISTS committed_wip_cache (
+    location_id UUID PRIMARY KEY REFERENCES locations(id) ON DELETE CASCADE,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
