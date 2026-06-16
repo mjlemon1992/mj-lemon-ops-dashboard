@@ -142,6 +142,8 @@ module.exports = (pool) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     try {
+      // Fire-and-forget: refresh Committed WIP cache alongside metrics (non-blocking; never affects this response).
+      buildCommittedWip(apiKey, req.params.locationId).then(w => pool.query(`INSERT INTO committed_wip_cache (location_id, payload, created_at) VALUES ($1,$2,NOW()) ON CONFLICT (location_id) DO UPDATE SET payload=EXCLUDED.payload, created_at=NOW()`, [req.params.locationId, JSON.stringify(w)])).catch(e => console.error('wip refresh (via /refresh) failed:', e.message));
       const locResult = await pool.query('SELECT * FROM locations WHERE id = $1', [req.params.locationId]);
       if (!locResult.rows.length) return res.status(404).json({ error: 'Location not found' });
       const loc = locResult.rows[0];
