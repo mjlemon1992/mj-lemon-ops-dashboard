@@ -12,6 +12,7 @@ import Comebacks from './pages/Comebacks';
 import Locations from './pages/Locations';
 import Targets from './pages/Targets';
 import Users from './pages/Users';
+import Wip from './pages/Wip';
 
 function ProtectedRoute({ children, ownerOnly, ownerOrPartner }) {
   const { user, loading } = useAuth();
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="alerts" element={<Alerts />} />
             <Route path="reports" element={<ProtectedRoute ownerOrPartner><Reports /></ProtectedRoute>} />
             <Route path="comebacks" element={<Comebacks />} />
+  <Route path="wip" element={<Wip />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />
             <Route path="targets" element={<ProtectedRoute ownerOrPartner><Targets /></ProtectedRoute>} />
             <Route path="users" element={<ProtectedRoute ownerOnly><Users /></ProtectedRoute>} />
