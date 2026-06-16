@@ -27,7 +27,7 @@ module.exports = (pool) => {
         rosterError = 'SHOPMONKEY_API_KEY not configured';
       } else {
         try {
-          const r = await fetch('https://api.shopmonkey.cloud/v3/technician?limit=100', {
+          const r = await fetch('https://api.shopmonkey.cloud/v3/user?limit=200', {
             headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
           });
           if (!r.ok) {
@@ -36,7 +36,7 @@ module.exports = (pool) => {
             const td = await r.json();
             const list = (td && td.data && td.data.data) ? td.data.data : (td.data || []);
             roster = list
-              .filter(t => t.archived !== true)
+              .filter(t => t.assignedTechnician === true && t.active !== false)
               .map(t => ({
                 tech_id: t.id,
                 tech_name: t.name || [t.firstName, t.lastName].filter(Boolean).join(' ') || 'Unknown'

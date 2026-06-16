@@ -206,7 +206,7 @@ module.exports = (pool) => {
       // Pull technicians list from Shopmonkey for name mapping
       let techNames = {};
       try {
-        const techRes = await fetch('https://api.shopmonkey.cloud/v3/technician?limit=100', {
+        const techRes = await fetch('https://api.shopmonkey.cloud/v3/user?limit=200', {
           headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
         });
         if (techRes.ok) {
@@ -318,7 +318,7 @@ module.exports = (pool) => {
       // Technician name mapping
       let techNames = {};
       try {
-        const techRes = await fetch('https://api.shopmonkey.cloud/v3/technician?limit=100', {
+        const techRes = await fetch('https://api.shopmonkey.cloud/v3/user?limit=200', {
           headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
         });
         if (techRes.ok) {
