@@ -76,6 +76,7 @@ export default function Performance() {
   const totalSold = techs.reduce((s, t) => s + num(t.hours_sold), 0);
   const totalBilled = techs.reduce((s, t) => s + num(t.hours_billed), 0);
   const totalVehicles = techs.reduce((s, t) => s + num(t.vehicle_count), 0);
+  const distinctVehicles = techData && techData.distinct_vehicles_mtd != null ? techData.distinct_vehicles_mtd : null;
   const totalLabRev = techs.reduce((s, t) => s + num(t.labour_revenue), 0);
 
   const metricsVsTarget = [
@@ -221,7 +222,7 @@ export default function Performance() {
                   <td className="strong">Group total</td>
                   <td className="strong">{hasHours ? hrsNum(totalSold) : '\u2014'}</td>
                   <td className="strong">{hasHours ? hrsNum(totalBilled) : '\u2014'}</td>
-                  <td className="strong">{hasHours ? totalVehicles : '\u2014'}</td>
+                  <td className="strong">{distinctVehicles != null ? distinctVehicles : '\u2014'}</td>
                   {showFinancials && <td className="strong">{hasHours ? money0(totalLabRev) : '\u2014'}</td>}
                   <td style={{ color: 'var(--text3)' }}>{'\u2014'}</td>
                 </tr>
