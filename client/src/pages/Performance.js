@@ -56,6 +56,8 @@ export default function Performance() {
   const carCount = num(metrics?.car_count_mtd);
   const avgRO = num(metrics?.avg_ro_value);
   const labourHoursSold = num(metrics?.labour_hours_sold);
+  const labourHoursWorked = num(metrics?.labour_hours_worked);
+  const labourHoursComped = num(metrics?.labour_hours_comped);
   const pph = num(metrics?.pph);
   const efficiency = metrics?.efficiency_avg == null ? null : num(metrics.efficiency_avg);
   const labourRate = num(loc?.labour_rate) || 170;
@@ -79,7 +81,7 @@ export default function Performance() {
     ['Parts margin', partsMargin > 0 ? `${partsMargin.toFixed(1)}%` : '\u2014', `vs ${pmTarget}%`, partsMargin >= pmTarget],
     ['Labour margin', labourMargin > 0 ? `${labourMargin.toFixed(1)}%` : '\u2014', target && target.labour_margin ? `vs ${num(target.labour_margin)}%` : 'vs 70%', labourMargin >= num((target && target.labour_margin) || 70)],
     ['Avg RO value', avgRO > 0 ? money0(avgRO) : '\u2014', target && target.avg_ro_value ? `vs ${money0(num(target.avg_ro_value))}` : 'per car', target && target.avg_ro_value ? avgRO >= num(target.avg_ro_value) : true],
-    ['Labour hours sold', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '\u2014', target && target.labour_hours ? `vs ${Math.round(num(target.labour_hours))}` : 'this month', target && target.labour_hours ? labourHoursSold >= num(target.labour_hours) : true],
+    ['Labour hours billed', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '\u2014', labourHoursComped > 0 ? `${hrsNum(labourHoursWorked)} worked, ${hrsNum(labourHoursComped)} comped` : 'this month', target && target.labour_hours ? labourHoursSold >= num(target.labour_hours) : true],
     ['Efficiency', efficiency != null && efficiency > 0 ? `${Math.round(efficiency)}%` : '\u2014', efficiency != null && efficiency > 0 ? `vs ${effTarget}%` : 'pending QBO Time', efficiency != null ? efficiency >= effTarget : true],
   ];
 
@@ -87,8 +89,9 @@ export default function Performance() {
     ['Total profit', hasMetrics ? money0(profit) : '\u2014', `${profitMargin.toFixed(1)}% margin`],
     ['Labour revenue', hasMetrics ? money0(labourRevenue) : '\u2014', 'hours sold \u00d7 rate'],
     ['Parts & other revenue', hasMetrics ? money0(partsOtherRevenue) : '\u2014', 'revenue \u2212 labour'],
-    ['Labour hours sold', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '\u2014', 'billed this month'],
-    ['Profit per hour', pph > 0 ? `$${Math.round(pph)}` : '\u2014', 'hours sold basis'],
+    ['Labour hours billed', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '\u2014', 'revenue-generating lines'],
+    ['Labour hours comped', labourHoursComped > 0 ? hrsNum(labourHoursComped) : '\u2014', 'discounted to $0 (give-away)'],
+    ['Profit per hour', pph > 0 ? `$${Math.round(pph)}` : '\u2014', 'billed-hours basis'],
   ];
 
   return (
