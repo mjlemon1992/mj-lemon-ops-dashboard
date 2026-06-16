@@ -119,7 +119,7 @@ export default function Technicians() {
                     <td style={{ padding: '8px 12px' }} className="strong">Group total</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{hrsNum(totalSold)}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{hrsNum(totalBilled)}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{totalVehicles}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text3)' }} className="strong">{'\u2014'}</td>
                     {showFinancials && <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{money0(totalRev)}</td>}
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text3)' }}>&mdash;</td>
                   </tr>

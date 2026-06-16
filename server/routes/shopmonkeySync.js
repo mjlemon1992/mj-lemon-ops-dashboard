@@ -178,6 +178,7 @@ module.exports = (pool) => {
         car_count_mtd: carCount,
         parts_margin: Math.round(partsMargin * 10) / 10,
         labour_margin: Math.round(labourMargin * 10) / 10,
+        labour_revenue: Math.round(labourRev * 100) / 100,
         avg_ro_value: Math.round(avgRoValue * 100) / 100,
         labour_hours_sold: Math.round(labourHoursSold * 10) / 10,
         labour_hours_worked: Math.round(labourHoursWorked * 10) / 10,
@@ -189,11 +190,12 @@ module.exports = (pool) => {
       };
 
       await pool.query('ALTER TABLE metrics_cache ADD COLUMN IF NOT EXISTS labour_hours_worked NUMERIC');
+      await pool.query('ALTER TABLE metrics_cache ADD COLUMN IF NOT EXISTS labour_revenue NUMERIC');
       await pool.query('ALTER TABLE metrics_cache ADD COLUMN IF NOT EXISTS labour_hours_comped NUMERIC');
       await pool.query(
-        `INSERT INTO metrics_cache (location_id, revenue_mtd, car_count_mtd, parts_margin, labour_margin, avg_ro_value, labour_hours_sold, labour_hours_worked, labour_hours_comped, efficiency_avg, pph, total_profit, alerts, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())`,
-        [req.params.locationId, payload.revenue_mtd, payload.car_count_mtd, payload.parts_margin, payload.labour_margin, payload.avg_ro_value, payload.labour_hours_sold, payload.labour_hours_worked, payload.labour_hours_comped, payload.efficiency_avg, payload.pph, payload.total_profit, JSON.stringify(payload.alerts)]
+        `INSERT INTO metrics_cache (location_id, revenue_mtd, car_count_mtd, parts_margin, labour_margin, avg_ro_value, labour_hours_sold, labour_hours_worked, labour_hours_comped, labour_revenue, efficiency_avg, pph, total_profit, alerts, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())`,
+        [req.params.locationId, payload.revenue_mtd, payload.car_count_mtd, payload.parts_margin, payload.labour_margin, payload.avg_ro_value, payload.labour_hours_sold, payload.labour_hours_worked, payload.labour_hours_comped, payload.labour_revenue, payload.efficiency_avg, payload.pph, payload.total_profit, JSON.stringify(payload.alerts)]
       );
 
       res.json({ message: 'Metrics refreshed from Shopmonkey (pre-tax revenue)', orders_pulled: orders.length, mtd_orders: mtdOrders.length, profitability_data_available: partsWholesaleWithData > 0, metrics: payload });

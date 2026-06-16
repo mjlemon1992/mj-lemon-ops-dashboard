@@ -61,7 +61,9 @@ export default function Performance() {
   const pph = num(metrics?.pph);
   const efficiency = metrics?.efficiency_avg == null ? null : num(metrics.efficiency_avg);
   const labourRate = num(loc?.labour_rate) || 170;
-  const labourRevenue = labourHoursSold * labourRate;
+  // Real net labour revenue from Shopmonkey (rate-aware: handles $170/$200 mix).
+  // Falls back to hours*rate only if the field isn't present yet.
+  const labourRevenue = metrics?.labour_revenue != null ? num(metrics.labour_revenue) : labourHoursSold * labourRate;
   const partsOtherRevenue = revenue - labourRevenue;
 
   const pphTarget = num(loc?.pph_target) || 254;
@@ -87,7 +89,7 @@ export default function Performance() {
 
   const profitRows = [
     ['Total profit', hasMetrics ? money0(profit) : '\u2014', `${profitMargin.toFixed(1)}% margin`],
-    ['Labour revenue', hasMetrics ? money0(labourRevenue) : '\u2014', 'hours sold \u00d7 rate'],
+    ['Labour revenue', hasMetrics ? money0(labourRevenue) : '\u2014', 'billed, pre-tax'],
     ['Parts & other revenue', hasMetrics ? money0(partsOtherRevenue) : '\u2014', 'revenue \u2212 labour'],
     ['Labour hours billed', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '\u2014', 'revenue-generating lines'],
     ['Labour hours comped', labourHoursComped > 0 ? hrsNum(labourHoursComped) : '\u2014', 'discounted to $0 (give-away)'],
