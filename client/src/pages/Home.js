@@ -11,25 +11,42 @@ export default function Home() {
   const [metrics, setMetrics] = useState({});
   const [targets, setTargets] = useState({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
 
   const currentMonth = new Date().getMonth() + 1;
   const currentYear = new Date().getFullYear();
 
-  useEffect(() => {
-    Promise.all([
-      api('/locations').catch(() => []),
-    ]).then(([locs]) => {
+  const loadData = () => {
+    return api('/locations').catch(() => []).then(locs => {
       setLocations(locs);
-      locs.forEach(loc => {
-        api(`/metrics/${loc.id}/summary`).then(m => setMetrics(prev => ({ ...prev, [loc.id]: m }))).catch(() => {});
-        api(`/targets/${loc.id}/${currentYear}`).then(t => {
-          const monthTarget = t.find(r => r.month === currentMonth);
-          setTargets(prev => ({ ...prev, [loc.id]: monthTarget }));
-        }).catch(() => {});
-      });
-      setLoading(false);
+      return Promise.all((locs || []).map(loc =>
+        Promise.all([
+          api(`/metrics/${loc.id}/summary`).then(m => setMetrics(prev => ({ ...prev, [loc.id]: m }))).catch(() => {}),
+          api(`/targets/${loc.id}/${currentYear}`).then(t => {
+            const monthTarget = t.find(r => r.month === currentMonth);
+            setTargets(prev => ({ ...prev, [loc.id]: monthTarget }));
+          }).catch(() => {})
+        ])
+      ));
     });
-  }, []);
+  };
+
+  useEffect(() => { loadData().then(() => setLoading(false)); }, []);
+
+  // Manual "Refresh now": force a live Shopmonkey sync, then reload the cache.
+  const handleRefresh = () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    const active = locations.filter(l => l.active);
+    Promise.all(active.flatMap(loc => [
+      api(`/sync/${loc.id}/refresh`, { method: 'POST' }).catch(() => {}),
+      api(`/sync/${loc.id}/refresh-tech`, { method: 'POST' }).catch(() => {})
+    ]))
+      .then(() => loadData())
+      .then(() => setLastSync(new Date()))
+      .finally(() => setRefreshing(false));
+  };
 
   if (loading) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading...</div>;
 
@@ -57,6 +74,14 @@ export default function Home() {
 
   return (
     <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
+        {lastSync && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Last synced {lastSync.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })}</span>}
+        <button onClick={handleRefresh} disabled={refreshing}
+          style={{ fontSize: '12px', fontWeight: '500', padding: '6px 14px', borderRadius: '6px', cursor: refreshing ? 'default' : 'pointer',
+            background: refreshing ? 'var(--surface2)' : 'var(--accent)', color: refreshing ? 'var(--text3)' : '#fff', border: 'none' }}>
+          {refreshing ? 'Syncing…' : 'Refresh now'}
+        </button>
+      </div>
       {alertCount > 0 && (
         <div className="alert-strip">
           <span style={{ fontSize: '14px', color: 'var(--warning)' }}>⚠</span>
