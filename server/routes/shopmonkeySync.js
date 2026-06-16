@@ -24,6 +24,57 @@ function isComeback(o) {
   return orderSubtotalCents(o) === 0;
 }
 
+// ---- Committed WIP helpers (added) ----------------------------------------
+let _wfCache = { at: 0, map: {} };
+async function fetchWorkflowStatusMap(apiKey, locationId) {
+  if (Date.now() - _wfCache.at < 10 * 60 * 1000 && Object.keys(_wfCache.map).length) return _wfCache.map;
+  const params = new URLSearchParams({ locationId, limit: '50' });
+  const res = await fetch(`https://api.shopmonkey.cloud/v3/workflow_status?${params}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+  if (!res.ok) return _wfCache.map;
+  const data = await res.json();
+  const rows = (data && data.data && data.data.data) ? data.data.data : (data.data || []);
+  const map = {};
+  rows.forEach((w) => { map[w.id] = w.name; });
+  _wfCache = { at: Date.now(), map };
+  return map;
+}
+async function fetchCommittedOrders(apiKey, locationId) {
+  const pageSize = 100;
+  let all = [];
+  for (let page = 0; page < 12; page++) {
+    const params = new URLSearchParams({ locationId, where: JSON.stringify({ authorized: true, invoicedDate: null, archived: false }), limit: String(pageSize), skip: String(page * pageSize) });
+    const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${params}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+    if (!res.ok) { const txt = await res.text(); throw new Error(`Shopmonkey API error ${res.status}: ${txt.slice(0, 200)}`); }
+    const data = await res.json();
+    const batch = (data && data.data && data.data.data) ? data.data.data : (data.data || []);
+    if (!batch.length) break;
+    all = all.concat(batch);
+    if (batch.length < pageSize) break;
+  }
+  const seen = new Map();
+  for (const o of all) { const key = o.number || o.id; if (!seen.has(key)) seen.set(key, o); }
+  return [...seen.values()];
+}
+async function buildCommittedWip(apiKey, locationId) {
+  const AGING_DAYS = 14;
+  const now = Date.now();
+  const DAY = 86400000;
+  const wf = await fetchWorkflowStatusMap(apiKey, locationId);
+  const stageOf = (o) => wf[o.workflowStatusId] || o.status || 'Unknown';
+  const committed = await fetchCommittedOrders(apiKey, locationId);
+  const rows = committed.map((o) => {
+    const authMs = o.authorizedDate ? new Date(o.authorizedDate).getTime() : now;
+    const ageDays = Math.floor((now - authMs) / DAY);
+    return { order_number: o.number || o.id, order_id: o.id, stage: stageOf(o), subtotal: centsToDollars(orderSubtotalCents(o)), authorized_date: o.authorizedDate || null, age_days: ageDays, aging: ageDays > AGING_DAYS };
+  });
+  const active = rows.filter((r) => !r.aging);
+  const aging = rows.filter((r) => r.aging);
+  const sum = (arr) => arr.reduce((s, r) => s + r.subtotal, 0);
+  const byStage = {};
+  for (const r of rows) { byStage[r.stage] = byStage[r.stage] || { stage: r.stage, count: 0, total: 0 }; byStage[r.stage].count += 1; byStage[r.stage].total += r.subtotal; }
+  return { total_count: rows.length, total_value: sum(rows), active_count: active.length, active_value: sum(active), aging_count: aging.length, aging_value: sum(aging), aging_days: AGING_DAYS, by_stage: Object.values(byStage).sort((a, b) => b.total - a.total), active: active.sort((a, b) => new Date(b.authorized_date) - new Date(a.authorized_date)), aging: aging.sort((a, b) => new Date(a.authorized_date) - new Date(b.authorized_date)) };
+}
+// ---- end Committed WIP helpers --------------------------------------------
 async function fetchOrdersSince(apiKey, sinceDate, maxPages = 12) {
   const pageSize = 100;
   const iso = sinceDate.toISOString();
@@ -458,6 +509,32 @@ module.exports = (pool) => {
       res.status(500).json({ error: err.message });
     }
   });
-
+// // ---- Committed WIP routes (added) ----
+      router.post('/:locationId/refresh-wip', syncAuth, async (req, res) => {
+        const apiKey = process.env.SHOPMONKEY_API_KEY;
+        if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
+        const { locationId } = req.params;
+        try {
+          const wip = await buildCommittedWip(apiKey, locationId);
+          await pool.query(`INSERT INTO committed_wip_cache (location_id, payload, created_at) VALUES ($1, $2, NOW()) ON CONFLICT (location_id) DO UPDATE SET payload = EXCLUDED.payload, created_at = NOW()`, [locationId, JSON.stringify(wip)]);
+          res.json({ ok: true, ...wip });
+        } catch (err) {
+          console.error('refresh-wip failed:', err);
+          res.status(500).json({ error: String(err.message || err) });
+        }
+      });
+      router.get('/:locationId/wip', authenticateToken, async (req, res) => {
+        const { locationId } = req.params;
+        try {
+          const { rows } = await pool.query(`SELECT payload, created_at FROM committed_wip_cache WHERE location_id = $1`, [locationId]);
+          if (!rows.length) return res.json({ total_count: 0, total_value: 0, active: [], aging: [], by_stage: [], cached: false });
+          const payload = typeof rows[0].payload === 'string' ? JSON.parse(rows[0].payload) : rows[0].payload;
+          res.json({ ...payload, cached: true, synced_at: rows[0].created_at });
+        } catch (err) {
+          console.error('GET wip failed:', err);
+          res.status(500).json({ error: String(err.message || err) });
+        }
+      });
+      
   return router;
 };
