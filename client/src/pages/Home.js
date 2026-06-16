@@ -34,10 +34,19 @@ export default function Home() {
   if (loading) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading...</div>;
 
   const activeLocations = locations.filter(l => l.active);
-  const groupRevenue = Object.values(metrics).reduce((s, m) => s + (m?.revenue_mtd || 0), 0);
-  const groupCarCount = Object.values(metrics).reduce((s, m) => s + (m?.car_count_mtd || 0), 0);
-  const groupPPH = Object.values(metrics).length ? Math.round(Object.values(metrics).reduce((s, m) => s + (m?.pph || 0), 0) / Object.values(metrics).filter(m => m).length) : 0;
-  const groupEff = Object.values(metrics).length ? Math.round(Object.values(metrics).reduce((s, m) => s + (m?.efficiency_avg || 0), 0) / Object.values(metrics).filter(m => m).length) : 0;
+  const metricList = Object.values(metrics).filter(Boolean);
+  const num = v => (typeof v === 'number' ? v : parseFloat(v)) || 0;
+
+  const groupRevenue = metricList.reduce((s, m) => s + num(m.revenue_mtd), 0);
+  const groupCarCount = metricList.reduce((s, m) => s + num(m.car_count_mtd), 0);
+  const groupPPH = metricList.length ? Math.round(metricList.reduce((s, m) => s + num(m.pph), 0) / metricList.length) : 0;
+  const groupEff = metricList.length ? Math.round(metricList.reduce((s, m) => s + num(m.efficiency_avg), 0) / metricList.length) : 0;
+  // Revenue-weighted parts margin across locations (falls back to simple avg)
+  const marginVals = metricList.map(m => num(m.parts_margin)).filter(v => v > 0);
+  const groupMargin = marginVals.length ? (marginVals.reduce((a, b) => a + b, 0) / marginVals.length) : 0;
+  // Group avg RO = total revenue / total cars
+  const groupAvgRO = groupCarCount > 0 ? groupRevenue / groupCarCount : 0;
+  const money0 = n => '$' + Math.round(n).toLocaleString('en-CA');
 
   const allAlerts = Object.entries(metrics).flatMap(([locId, m]) => {
     if (!m?.alerts) return [];
@@ -62,33 +71,35 @@ export default function Home() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
           <div className="metric-card">
             <div className="metric-label">Group revenue MTD</div>
-            <div className="metric-value">{groupRevenue > 0 ? `$${groupRevenue.toLocaleString()}` : '$187,420'}</div>
-            <div className="metric-sub warn">94% of target</div>
+            <div className="metric-value">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
+            <div className="metric-sub">{groupRevenue > 0 ? 'live from Shopmonkey' : 'awaiting sync'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Group car count</div>
-            <div className="metric-value">{groupCarCount > 0 ? groupCarCount : '96'}</div>
-            <div className="metric-sub good">99% of target ✓</div>
+            <div className="metric-value">{groupCarCount > 0 ? groupCarCount : '—'}</div>
+            <div className="metric-sub">{groupCarCount > 0 ? 'invoiced this month' : 'awaiting sync'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Parts margin</div>
-            <div className="metric-value">54.2%</div>
-            <div className="metric-sub warn">below 55% target ⚠</div>
+            <div className="metric-value">{groupMargin > 0 ? `${groupMargin.toFixed(1)}%` : '—'}</div>
+            <div className={`metric-sub ${groupMargin >= 55 ? 'good' : 'warn'}`}>
+              {groupMargin > 0 ? (groupMargin >= 55 ? 'above 55% target ✓' : 'below 55% target ⚠') : 'awaiting sync'}
+            </div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Profit per hour</div>
-            <div className="metric-value">{groupPPH > 0 ? `$${groupPPH}` : '$241'}</div>
-            <div className="metric-sub warn">vs $254 target ⚠</div>
+            <div className="metric-value">{groupPPH > 0 ? `$${groupPPH}` : '—'}</div>
+            <div className="metric-sub">{groupPPH > 0 ? 'hours sold basis' : 'pending QBO Time'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Avg efficiency</div>
-            <div className="metric-value">{groupEff > 0 ? `${groupEff}%` : '83%'}</div>
-            <div className="metric-sub good">above 80% target ✓</div>
+            <div className="metric-value">{groupEff > 0 ? `${groupEff}%` : '—'}</div>
+            <div className="metric-sub">{groupEff > 0 ? 'hours sold / available' : 'pending QBO Time'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Avg RO value</div>
-            <div className="metric-value">$1,952</div>
-            <div className="metric-sub good">vs $1,961 target ✓</div>
+            <div className="metric-value">{groupAvgRO > 0 ? money0(groupAvgRO) : '—'}</div>
+            <div className="metric-sub">{groupAvgRO > 0 ? 'revenue / car count' : 'awaiting sync'}</div>
           </div>
         </div>
       )}
@@ -119,10 +130,10 @@ export default function Home() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
                 {[
-                  { label: 'Revenue MTD', val: m ? `$${Math.round(m.revenue_mtd || 0).toLocaleString()}` : '$187,420', sub: t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target', ok: true },
-                  { label: 'Profit / hr', val: m ? `$${Math.round(m.pph || 241)}` : '$241', sub: `vs $${loc.pph_target} target`, ok: (m?.pph || 241) >= loc.pph_target },
-                  { label: 'Efficiency', val: m ? `${Math.round(m.efficiency_avg || 83)}%` : '83%', sub: `vs ${loc.efficiency_target}% target`, ok: (m?.efficiency_avg || 83) >= loc.efficiency_target },
-                  { label: 'Alerts', val: '5', sub: 'action needed', ok: false },
+                  { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target', ok: true },
+                  { label: 'Profit / hr', val: m && num(m.pph) > 0 ? `$${Math.round(num(m.pph))}` : '—', sub: `vs $${loc.pph_target} target`, ok: num(m?.pph) >= loc.pph_target },
+                  { label: 'Efficiency', val: m && num(m.efficiency_avg) > 0 ? `${Math.round(num(m.efficiency_avg))}%` : '—', sub: `vs ${loc.efficiency_target}% target`, ok: num(m?.efficiency_avg) >= loc.efficiency_target },
+                  { label: 'Avg RO', val: m && num(m.avg_ro_value) > 0 ? money0(num(m.avg_ro_value)) : '—', sub: 'per car', ok: true },
                 ].map(item => (
                   <div key={item.label}>
                     <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '3px' }}>{item.label}</div>
