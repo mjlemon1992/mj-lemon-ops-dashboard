@@ -2,8 +2,8 @@ const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 
 // GET /api/technicians/:locationId
-// Live technician roster from Shopmonkey (/v3/technician), merged with the
-// latest hours-sold snapshot from tech_efficiency. Also auto-derives the
+// Live technician roster from Shopmonkey (/v3/user, assignedTechnician===true),
+// merged with the latest snapshot from tech_efficiency. Also auto-derives the
 // location's technician count from the live roster (replaces the manual field).
 // Worked hours / efficiency stay null until QBO Time (clocked hours) connects.
 module.exports = (pool) => {
@@ -20,7 +20,6 @@ module.exports = (pool) => {
       if (!locResult.rows.length) return res.status(404).json({ error: 'Location not found' });
       const loc = locResult.rows[0];
 
-      // 1) Live roster from Shopmonkey (same response-shape handling as sync routes).
       let roster = [];
       let rosterError = null;
       if (!apiKey) {
@@ -47,8 +46,7 @@ module.exports = (pool) => {
         }
       }
 
-      // 2) Latest hours-sold snapshot per tech from tech_efficiency.
-      let hoursByTech = {};
+      let statsByTech = {};
       let snapshotDate = null;
       const teLatest = await pool.query(
         'SELECT MAX(snapshot_date) AS d FROM tech_efficiency WHERE location_id = $1',
@@ -57,29 +55,29 @@ module.exports = (pool) => {
       snapshotDate = teLatest.rows[0] && teLatest.rows[0].d ? teLatest.rows[0].d : null;
       if (snapshotDate) {
         const te = await pool.query(
-          `SELECT tech_id, tech_name, hours_sold, hours_worked, efficiency, labour_revenue
+          `SELECT tech_id, tech_name, hours_sold, hours_billed, vehicle_count, hours_worked, efficiency, labour_revenue
            FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2`,
           [req.params.locationId, snapshotDate]
         );
         for (const row of te.rows) {
-          if (row.tech_id) hoursByTech[row.tech_id] = row;
+          if (row.tech_id) statsByTech[row.tech_id] = row;
         }
       }
 
-      // 3) Merge roster + hours. Roster is the source of truth for who exists.
       const technicians = roster.map(t => {
-        const h = hoursByTech[t.tech_id];
+        const h = statsByTech[t.tech_id];
         return {
           tech_id: t.tech_id,
           tech_name: t.tech_name,
           hours_sold: h && h.hours_sold != null ? Number(h.hours_sold) : null,
+          hours_billed: h && h.hours_billed != null ? Number(h.hours_billed) : null,
+          vehicle_count: h && h.vehicle_count != null ? Number(h.vehicle_count) : null,
           hours_worked: h && h.hours_worked != null ? Number(h.hours_worked) : null,
           efficiency: h && h.efficiency != null ? Number(h.efficiency) : null,
           labour_revenue: h && h.labour_revenue != null ? Number(h.labour_revenue) : null
         };
       });
 
-      // 4) Auto-derive the location's technician count from the live roster.
       let derivedCount = technicians.length;
       if (!rosterError && derivedCount > 0) {
         await pool.query(

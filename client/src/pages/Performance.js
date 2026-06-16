@@ -3,7 +3,6 @@ import { useAuth } from '../context/AuthContext';
 
 const num = v => (typeof v === 'number' ? v : parseFloat(v)) || 0;
 const money0 = n => '$' + Math.round(num(n)).toLocaleString('en-CA');
-const hrs = n => (Math.round(num(n) * 10) / 10).toLocaleString('en-CA') + ' hrs';
 const hrsNum = n => (Math.round(num(n) * 10) / 10).toLocaleString('en-CA');
 
 export default function Performance() {
@@ -46,7 +45,7 @@ export default function Performance() {
   const loc = locations.find(l => l.id === locId);
   const showFinancials = user?.role !== 'manager';
 
-  if (loading) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading…</div>;
+  if (loading) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading&hellip;</div>;
 
   const hasMetrics = !!metrics && num(metrics.revenue_mtd) > 0;
   const revenue = num(metrics?.revenue_mtd);
@@ -71,28 +70,29 @@ export default function Performance() {
   const techCount = techData?.count ?? (loc ? loc.num_technicians : 0);
   const hasHours = !!(techData && techData.has_hours);
   const totalSold = techs.reduce((s, t) => s + num(t.hours_sold), 0);
+  const totalBilled = techs.reduce((s, t) => s + num(t.hours_billed), 0);
+  const totalVehicles = techs.reduce((s, t) => s + num(t.vehicle_count), 0);
   const totalLabRev = techs.reduce((s, t) => s + num(t.labour_revenue), 0);
 
   const metricsVsTarget = [
-    ['Car count', hasMetrics ? (String(carCount) + (target && target.car_count ? ` / ${target.car_count}` : '')) : '—', target && target.car_count ? `${Math.round(carCount / num(target.car_count) * 100)}%` : 'this month', target && target.car_count ? carCount >= num(target.car_count) : true],
-    ['Parts margin', partsMargin > 0 ? `${partsMargin.toFixed(1)}%` : '—', `vs ${pmTarget}%`, partsMargin >= pmTarget],
-    ['Labour margin', labourMargin > 0 ? `${labourMargin.toFixed(1)}%` : '—', target && target.labour_margin ? `vs ${num(target.labour_margin)}%` : 'vs 70%', labourMargin >= num((target && target.labour_margin) || 70)],
-    ['Avg RO value', avgRO > 0 ? money0(avgRO) : '—', target && target.avg_ro_value ? `vs ${money0(num(target.avg_ro_value))}` : 'per car', target && target.avg_ro_value ? avgRO >= num(target.avg_ro_value) : true],
-    ['Labour hours sold', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '—', target && target.labour_hours ? `vs ${Math.round(num(target.labour_hours))}` : 'this month', target && target.labour_hours ? labourHoursSold >= num(target.labour_hours) : true],
-    ['Efficiency', efficiency != null && efficiency > 0 ? `${Math.round(efficiency)}%` : '—', efficiency != null && efficiency > 0 ? `vs ${effTarget}%` : 'pending QBO Time', efficiency != null ? efficiency >= effTarget : true],
+    ['Car count', hasMetrics ? (String(carCount) + (target && target.car_count ? ` / ${target.car_count}` : '')) : '\u2014', target && target.car_count ? `${Math.round(carCount / num(target.car_count) * 100)}%` : 'this month', target && target.car_count ? carCount >= num(target.car_count) : true],
+    ['Parts margin', partsMargin > 0 ? `${partsMargin.toFixed(1)}%` : '\u2014', `vs ${pmTarget}%`, partsMargin >= pmTarget],
+    ['Labour margin', labourMargin > 0 ? `${labourMargin.toFixed(1)}%` : '\u2014', target && target.labour_margin ? `vs ${num(target.labour_margin)}%` : 'vs 70%', labourMargin >= num((target && target.labour_margin) || 70)],
+    ['Avg RO value', avgRO > 0 ? money0(avgRO) : '\u2014', target && target.avg_ro_value ? `vs ${money0(num(target.avg_ro_value))}` : 'per car', target && target.avg_ro_value ? avgRO >= num(target.avg_ro_value) : true],
+    ['Labour hours sold', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '\u2014', target && target.labour_hours ? `vs ${Math.round(num(target.labour_hours))}` : 'this month', target && target.labour_hours ? labourHoursSold >= num(target.labour_hours) : true],
+    ['Efficiency', efficiency != null && efficiency > 0 ? `${Math.round(efficiency)}%` : '\u2014', efficiency != null && efficiency > 0 ? `vs ${effTarget}%` : 'pending QBO Time', efficiency != null ? efficiency >= effTarget : true],
   ];
 
   const profitRows = [
-    ['Total profit', hasMetrics ? money0(profit) : '—', `${profitMargin.toFixed(1)}% margin`],
-    ['Labour revenue', hasMetrics ? money0(labourRevenue) : '—', 'hours sold × rate'],
-    ['Parts & other revenue', hasMetrics ? money0(partsOtherRevenue) : '—', 'revenue − labour'],
-    ['Labour hours sold', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '—', 'billed this month'],
-    ['Profit per hour', pph > 0 ? `$${Math.round(pph)}` : '—', 'hours sold basis'],
+    ['Total profit', hasMetrics ? money0(profit) : '\u2014', `${profitMargin.toFixed(1)}% margin`],
+    ['Labour revenue', hasMetrics ? money0(labourRevenue) : '\u2014', 'hours sold \u00d7 rate'],
+    ['Parts & other revenue', hasMetrics ? money0(partsOtherRevenue) : '\u2014', 'revenue \u2212 labour'],
+    ['Labour hours sold', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '\u2014', 'billed this month'],
+    ['Profit per hour', pph > 0 ? `$${Math.round(pph)}` : '\u2014', 'hours sold basis'],
   ];
 
   return (
     <div>
-      {/* location + period */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center' }}>
         {locations.length > 1 ? (
           <select value={locId || ''} onChange={e => setLocId(e.target.value)} style={{ width: 'auto' }}>
@@ -101,14 +101,13 @@ export default function Performance() {
         ) : (
           <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>{loc?.name || 'Location'}</div>
         )}
-        <div style={{ fontSize: '11px', color: 'var(--text3)' }}>This month · {hasMetrics ? 'live from Shopmonkey' : 'awaiting sync'}</div>
+        <div style={{ fontSize: '11px', color: 'var(--text3)' }}>This month &middot; {hasMetrics ? 'live from Shopmonkey \u00b7 pre-tax' : 'awaiting sync'}</div>
       </div>
 
-      {/* PPH / efficiency banner */}
       <div style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
         <div>
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '4px' }}>Profit per hour</div>
-          <div style={{ fontSize: '30px', fontWeight: '500', color: 'var(--text)' }}>{pph > 0 ? `$${Math.round(pph)}` : '—'}<span style={{ fontSize: '13px', color: 'var(--text3)', fontWeight: '400' }}>/hr</span></div>
+          <div style={{ fontSize: '30px', fontWeight: '500', color: 'var(--text)' }}>{pph > 0 ? `$${Math.round(pph)}` : '\u2014'}<span style={{ fontSize: '13px', color: 'var(--text3)', fontWeight: '400' }}>/hr</span></div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '4px' }}>vs ${pphTarget} target</div>
@@ -121,33 +120,31 @@ export default function Performance() {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '4px' }}>Group efficiency</div>
-          <div style={{ fontSize: '30px', fontWeight: '500', color: 'var(--text)' }}>{efficiency != null && efficiency > 0 ? `${Math.round(efficiency)}%` : '—'}</div>
-          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{efficiency != null && efficiency > 0 ? (efficiency >= effTarget ? `above ${effTarget}% target ✓` : `below ${effTarget}% target`) : 'pending QBO Time'}</div>
+          <div style={{ fontSize: '30px', fontWeight: '500', color: 'var(--text)' }}>{efficiency != null && efficiency > 0 ? `${Math.round(efficiency)}%` : '\u2014'}</div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{efficiency != null && efficiency > 0 ? (efficiency >= effTarget ? `above ${effTarget}% target \u2713` : `below ${effTarget}% target`) : 'pending QBO Time'}</div>
         </div>
       </div>
 
-      {/* headline cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '12px', marginBottom: '16px' }}>
         <div className="metric-card">
-          <div className="metric-label">Revenue MTD</div>
-          <div className="metric-value">{hasMetrics ? money0(revenue) : '—'}</div>
+          <div className="metric-label">Revenue MTD (pre-tax)</div>
+          <div className="metric-value">{hasMetrics ? money0(revenue) : '\u2014'}</div>
           <div className="metric-sub">{target && target.revenue ? `vs $${Math.round(num(target.revenue) / 1000)}k target` : (hasMetrics ? 'live from Shopmonkey' : 'awaiting sync')}</div>
         </div>
         {showFinancials && (
           <div className="metric-card">
             <div className="metric-label">Total profit</div>
-            <div className="metric-value">{hasMetrics ? money0(profit) : '—'}</div>
+            <div className="metric-value">{hasMetrics ? money0(profit) : '\u2014'}</div>
             <div className={`metric-sub ${profitMargin > 0 ? 'good' : ''}`}>{hasMetrics ? `${profitMargin.toFixed(1)}% margin` : 'awaiting sync'}</div>
           </div>
         )}
         <div className="metric-card">
           <div className="metric-label">Parts margin</div>
-          <div className="metric-value">{partsMargin > 0 ? `${partsMargin.toFixed(1)}%` : '—'}</div>
-          <div className={`metric-sub ${partsMargin >= pmTarget ? 'good' : 'warn'}`}>{partsMargin > 0 ? (partsMargin >= pmTarget ? `above ${pmTarget}% target ✓` : `vs ${pmTarget}% target ⚠`) : 'awaiting sync'}</div>
+          <div className="metric-value">{partsMargin > 0 ? `${partsMargin.toFixed(1)}%` : '\u2014'}</div>
+          <div className={`metric-sub ${partsMargin >= pmTarget ? 'good' : 'warn'}`}>{partsMargin > 0 ? (partsMargin >= pmTarget ? `above ${pmTarget}% target \u2713` : `vs ${pmTarget}% target \u26a0`) : 'awaiting sync'}</div>
         </div>
       </div>
 
-      {/* metrics vs target + profit & labour */}
       <div style={{ display: 'grid', gridTemplateColumns: showFinancials ? '1fr 1fr' : '1fr', gap: '12px', marginBottom: '16px' }}>
         <div className="card">
           <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '12px' }}>Metrics vs target</div>
@@ -177,14 +174,13 @@ export default function Performance() {
         )}
       </div>
 
-      {/* technician table */}
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
           <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>Technicians ({techCount})</div>
           <div style={{ fontSize: '11px', color: 'var(--text3)' }}>live roster from Shopmonkey</div>
         </div>
         <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px' }}>
-          Hours sold is live from Shopmonkey. Worked hours, efficiency and profit/hour need clocked time (QBO Time) — connecting at close.
+          Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks). Worked hours, efficiency and profit/hour need clocked time (QBO Time) &mdash; connecting at close.
         </div>
         {techs.length === 0 ? (
           <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)', fontSize: '12px' }}>
@@ -197,8 +193,9 @@ export default function Performance() {
                 <tr>
                   <th>Technician</th>
                   <th>Hours sold</th>
+                  <th>Hours billed</th>
+                  <th>Vehicles</th>
                   {showFinancials && <th>Labour revenue</th>}
-                  <th>Worked</th>
                   <th>Efficiency</th>
                 </tr>
               </thead>
@@ -206,9 +203,10 @@ export default function Performance() {
                 {techs.map(t => (
                   <tr key={t.tech_id || t.tech_name}>
                     <td className="strong">{t.tech_name}</td>
-                    <td>{t.hours_sold != null ? hrs(t.hours_sold) : <span style={{ color: 'var(--text3)' }}>—</span>}</td>
-                    {showFinancials && <td>{t.labour_revenue != null ? money0(t.labour_revenue) : <span style={{ color: 'var(--text3)' }}>—</span>}</td>}
-                    <td style={{ color: 'var(--text3)' }}>awaiting payroll</td>
+                    <td>{t.hours_sold != null ? hrsNum(t.hours_sold) : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>
+                    <td>{t.hours_billed != null ? hrsNum(t.hours_billed) : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>
+                    <td>{t.vehicle_count != null ? t.vehicle_count : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>
+                    {showFinancials && <td>{t.labour_revenue != null ? money0(t.labour_revenue) : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>}
                     <td style={{ color: 'var(--text3)' }}>awaiting payroll</td>
                   </tr>
                 ))}
@@ -216,10 +214,11 @@ export default function Performance() {
               <tfoot>
                 <tr style={{ borderTop: '0.5px solid var(--border2)' }}>
                   <td className="strong">Group total</td>
-                  <td className="strong">{hasHours ? hrs(totalSold) : '—'}</td>
-                  {showFinancials && <td className="strong">{hasHours ? money0(totalLabRev) : '—'}</td>}
-                  <td style={{ color: 'var(--text3)' }}>—</td>
-                  <td style={{ color: 'var(--text3)' }}>—</td>
+                  <td className="strong">{hasHours ? hrsNum(totalSold) : '\u2014'}</td>
+                  <td className="strong">{hasHours ? hrsNum(totalBilled) : '\u2014'}</td>
+                  <td className="strong">{hasHours ? totalVehicles : '\u2014'}</td>
+                  {showFinancials && <td className="strong">{hasHours ? money0(totalLabRev) : '\u2014'}</td>}
+                  <td style={{ color: 'var(--text3)' }}>{'\u2014'}</td>
                 </tr>
               </tfoot>
             </table>
@@ -227,7 +226,7 @@ export default function Performance() {
         )}
         {!hasHours && techs.length > 0 && (
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
-            Roster is live. Hours-sold figures populate after the next tech sync (same schedule as metrics).
+            Roster is live. Per-tech figures populate after the next tech sync (same schedule as metrics).
           </div>
         )}
       </div>
