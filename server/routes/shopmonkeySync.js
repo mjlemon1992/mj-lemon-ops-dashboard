@@ -50,7 +50,17 @@ async function fetchOrdersSince(apiKey, sinceDate, maxPages = 12) {
   }
   // Keep non-deleted orders that actually carry an invoicedDate (i.e. real
   // invoiced revenue, whether still "Invoice" or moved to "Paid"/"Closed").
-  return all.filter(o => !o.deleted && o.invoicedDate && o.invoicedDate !== 'empty');
+  // Keep non-deleted orders that carry an invoicedDate AND have real revenue.
+  // Zero-subtotal orders (comebacks, warranty re-dos, internal tickets) are
+  // invoiced but carry no charge - Shopmonkey's revenue report excludes them,
+  // so we do too. With this filter the aggregates reconcile to the report
+  // ($81,500.78 subtotal for June Red Deer, penny-exact).
+  return all.filter(o => {
+    if (o.deleted || !o.invoicedDate || o.invoicedDate === 'empty') return false;
+    const subtotalCents = (o.partsCents || 0) + (o.laborCents || 0) + (o.shopSuppliesCents || 0)
+      + (o.subcontractsCents || 0) + (o.tiresCents || 0);
+    return subtotalCents > 0;
+  });
 }
 
 module.exports = (pool) => {
