@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { pacePct as wdPacePct } from '../utils/pace';
 import { useAuth } from '../context/AuthContext';
 
 const num = v => (typeof v === 'number' ? v : parseFloat(v)) || 0;
@@ -69,10 +70,7 @@ export default function Performance() {
   const pphTarget = num(loc?.pph_target) || 254;
   const effTarget = num(loc?.efficiency_target) || 80;
   const pmTarget = num(loc?.parts_margin_target) || 55;
-  const _now = new Date();
-  const _daysInMonth = new Date(_now.getFullYear(), _now.getMonth() + 1, 0).getDate();
-  const _paceFrac = _now.getDate() / _daysInMonth;
-  const pacePct = (actual, tgt) => { if (!tgt || tgt <= 0 || !actual) return null; const e = tgt * _paceFrac; return e > 0 ? Math.round((actual / e) * 100) : null; };
+  const pacePct = (actual, tgt) => wdPacePct(actual, tgt, loc?.province);
   const targetPct = (actual, tgt) => { if (!tgt || tgt <= 0 || !actual) return null; return Math.round((actual / tgt) * 100); };
 
   const techs = (techData && techData.technicians) || [];

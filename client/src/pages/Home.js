@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { pacePct as wdPacePct } from '../utils/pace';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -65,16 +66,11 @@ export default function Home() {
   const groupAvgRO = groupCarCount > 0 ? groupRevenue / groupCarCount : 0;
 
   // --- target attainment helpers ---
-  const _now = new Date();
-  const _daysInMonth = new Date(_now.getFullYear(), _now.getMonth() + 1, 0).getDate();
-  const _paceFrac = _now.getDate() / _daysInMonth;
-  // Pace-aware: for cumulative MTD totals (revenue, car count). Compares against
-  // where you should be this far into the month.
-  const pacePct = (actual, target) => {
-    if (!target || target <= 0 || !actual) return null;
-    const expected = target * _paceFrac;
-    return expected > 0 ? Math.round((actual / expected) * 100) : null;
-  };
+  // Pace-aware (working days, province-aware) for cumulative MTD totals.
+  // Group cards pace against the first active location's province as the
+  // representative calendar; per-location rows use each location's own province.
+  const _groupProv = (activeLocations[0] && activeLocations[0].province) || 'ab';
+  const pacePct = (actual, target, prov) => wdPacePct(actual, target, prov || _groupProv);
   // Straight: for rate/average metrics (avg RO, PPH, margin) that should hit 100% any day.
   const targetPct = (actual, target) => {
     if (!target || target <= 0 || !actual) return null;
@@ -179,7 +175,7 @@ export default function Home() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
                 {[
-                  { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: (m && t && t.revenue) ? `${pacePct(num(m.revenue_mtd), num(t.revenue))}% of pace` : (t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target'), ok: (m && t && t.revenue) ? pacePct(num(m.revenue_mtd), num(t.revenue)) >= 90 : true },
+                  { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: (m && t && t.revenue) ? `${pacePct(num(m.revenue_mtd), num(t.revenue), loc.province)}% of pace` : (t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target'), ok: (m && t && t.revenue) ? pacePct(num(m.revenue_mtd), num(t.revenue), loc.province) >= 90 : true },
                   { label: 'Profit / hr', val: m && num(m.pph) > 0 ? `$${Math.round(num(m.pph))}` : '—', sub: (m && num(m.pph) > 0 && loc.pph_target) ? `${targetPct(num(m.pph), num(loc.pph_target))}% of target` : `vs $${loc.pph_target} target`, ok: num(m?.pph) >= loc.pph_target },
                   { label: 'Efficiency', val: m && num(m.efficiency_avg) > 0 ? `${Math.round(num(m.efficiency_avg))}%` : '—', sub: `vs ${loc.efficiency_target}% target`, ok: num(m?.efficiency_avg) >= loc.efficiency_target },
                   { label: 'Avg RO', val: m && num(m.avg_ro_value) > 0 ? money0(num(m.avg_ro_value)) : '—', sub: (m && num(m.avg_ro_value) > 0 && t && t.avg_ro_value) ? `${targetPct(num(m.avg_ro_value), num(t.avg_ro_value))}% of target` : 'per car', ok: (m && t && t.avg_ro_value) ? num(m.avg_ro_value) >= num(t.avg_ro_value) : true },
