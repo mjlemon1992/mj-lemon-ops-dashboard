@@ -173,60 +173,91 @@ module.exports = (pool) => {
   // evenly across assignedTechnicianIds so totals reconcile:
   //   hours_sold = totalLaborHours, hours_billed = completedLaborHours,
   //   labour_revenue = laborCents (pre-tax), vehicle_count = distinct vehicleId.
+
+  // Refresh tech efficiency using LINE-LEVEL attribution from /v3/order/{id}/service.
+  // Validated penny-exact to Shopmonkey's "Summary by Technician" report:
+  //   hours_billed  = sum of each labour line's `hours`, grouped by labors[].technicianId
+  //   labour_revenue= each parent service line's calculatedLaborCents (already net of
+  //                   discounts + lump-sum/matrix pricing), split across the line's techs
+  //                   proportional to their hours
+  //   vehicle_count = distinct vehicleId where the tech has any labour line
+  // Includes ALL invoiced orders (even $0 comebacks carry real assigned labour hours).
+  // hours_sold mirrors hours_billed at line level; worked hours / efficiency stay null
+  // until QBO Time connects. Costs one extra API call per order.
   router.post('/:locationId/refresh-tech', authenticateToken, async (req, res) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
+
     try {
       const locResult = await pool.query('SELECT * FROM locations WHERE id = $1', [req.params.locationId]);
       if (!locResult.rows.length) return res.status(404).json({ error: 'Location not found' });
       const loc = locResult.rows[0];
-      const labourRate = parseFloat(loc.labour_rate) || 170;
 
       const techNames = await fetchTechNames(apiKey);
 
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
       let orders;
-      try { orders = await fetchOrdersSince(apiKey, monthStart); }
-      catch (e) { return res.status(502).json({ error: e.message }); }
+      try {
+        orders = await fetchOrdersSince(apiKey, monthStart);
+      } catch (e) {
+        return res.status(502).json({ error: e.message });
+      }
+
+      const monthOrders = orders.filter(o => {
+        if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) return false;
+        const invoiced = parseShopmonkeyDate(o.invoicedDate);
+        return invoiced && invoiced >= monthStart && invoiced <= now;
+      });
 
       const byTech = {};
       const ensure = (id, name) => {
-        if (!byTech[id]) byTech[id] = { tech_id: id === 'unassigned' ? null : id, tech_name: name, hours_sold: 0, hours_billed: 0, labour_revenue: 0, _vehicles: new Set() };
+        if (!byTech[id]) byTech[id] = {
+          tech_id: id,
+          tech_name: name,
+          hours: 0,
+          labour_revenue: 0,
+          _vehicles: new Set()
+        };
         return byTech[id];
       };
 
-      for (const o of orders) {
-        if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) continue;
-        const invoiced = parseShopmonkeyDate(o.invoicedDate);
-        if (!invoiced || invoiced < monthStart || invoiced > now) continue;
-        if (isComeback(o)) continue;
+      for (const o of monthOrders) {
+        let lines = [];
+        try {
+          const sr = await fetch(`https://api.shopmonkey.cloud/v3/order/${o.id}/service?limit=100`, {
+            headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+          });
+          if (!sr.ok) continue;
+          const sj = await sr.json();
+          lines = (sj && sj.data && sj.data.data) ? sj.data.data : (sj.data || []);
+        } catch (e) { continue; }
 
-        const techIds = Array.isArray(o.assignedTechnicianIds) ? o.assignedTechnicianIds : [];
-        const sold = (typeof o.totalLaborHours === 'number' && o.totalLaborHours > 0) ? o.totalLaborHours : centsToDollars(o.laborCents) / labourRate;
-        const billed = (typeof o.completedLaborHours === 'number' && o.completedLaborHours > 0) ? o.completedLaborHours : 0;
-        const labourRev = centsToDollars(o.laborCents);
-        const vehicleId = o.vehicleId || null;
-
-        if (techIds.length === 0) {
-          const b = ensure('unassigned', 'Unassigned');
-          b.hours_sold += sold; b.hours_billed += billed; b.labour_revenue += labourRev;
-          if (vehicleId) b._vehicles.add(vehicleId);
-        } else {
-          const share = 1 / techIds.length;
-          for (const tid of techIds) {
+        for (const ln of (lines || [])) {
+          const labs = (ln.labors || []).filter(l => l.technicianId);
+          if (!labs.length) continue;
+          const lineLaborDollars = centsToDollars(ln.calculatedLaborCents);
+          const lineHours = labs.reduce((s, l) => s + (Number(l.hours) || 0), 0);
+          for (const lab of labs) {
+            const tid = lab.technicianId;
+            const hrs = Number(lab.hours) || 0;
             const b = ensure(tid, techNames[tid] || `Tech ${String(tid).slice(0, 6)}`);
-            b.hours_sold += sold * share; b.hours_billed += billed * share; b.labour_revenue += labourRev * share;
-            if (vehicleId) b._vehicles.add(vehicleId);
+            b.hours += hrs;
+            b.labour_revenue += lineHours > 0
+              ? lineLaborDollars * (hrs / lineHours)
+              : lineLaborDollars / labs.length;
+            if (o.vehicleId) b._vehicles.add(o.vehicleId);
           }
         }
       }
 
       const techs = Object.values(byTech).map(t => ({
-        tech_id: t.tech_id, tech_name: t.tech_name,
-        hours_available: null, hours_worked: null,
-        hours_sold: Math.round(t.hours_sold * 10) / 10,
-        hours_billed: Math.round(t.hours_billed * 10) / 10,
+        tech_id: t.tech_id,
+        tech_name: t.tech_name,
+        hours_available: null,
+        hours_worked: null,
+        hours_sold: Math.round(t.hours * 10) / 10,
+        hours_billed: Math.round(t.hours * 10) / 10,
         vehicle_count: t._vehicles.size,
         labour_revenue: Math.round(t.labour_revenue * 100) / 100,
         parts_gp: null
@@ -246,10 +277,18 @@ module.exports = (pool) => {
         }
         await client.query('COMMIT');
       } catch (err) {
-        await client.query('ROLLBACK'); throw err;
-      } finally { client.release(); }
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
 
-      res.json({ message: 'Tech efficiency refreshed (sold + billed hours, vehicle count; worked hours pending QBO Time)', techs_found: techs.length, techs });
+      res.json({
+        message: 'Tech efficiency refreshed (line-level attribution, validated to Shopmonkey report)',
+        orders_scanned: monthOrders.length,
+        techs_found: techs.length,
+        techs
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
