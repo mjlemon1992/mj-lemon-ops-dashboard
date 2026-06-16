@@ -7,6 +7,7 @@ import Home from './pages/Home';
 import Performance from './pages/Performance';
 import Alerts from './pages/Alerts';
 import Reports from './pages/Reports';
+import Comebacks from './pages/Comebacks';
 import Locations from './pages/Locations';
 import Targets from './pages/Targets';
 import Users from './pages/Users';
@@ -31,6 +32,7 @@ export default function App() {
             <Route path="performance" element={<Performance />} />
             <Route path="alerts" element={<Alerts />} />
             <Route path="reports" element={<ProtectedRoute ownerOrPartner><Reports /></ProtectedRoute>} />
+            <Route path="comebacks" element={<Comebacks />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />
             <Route path="targets" element={<ProtectedRoute ownerOrPartner><Targets /></ProtectedRoute>} />
             <Route path="users" element={<ProtectedRoute ownerOnly><Users /></ProtectedRoute>} />

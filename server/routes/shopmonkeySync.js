@@ -12,19 +12,28 @@ function centsToDollars(c) {
   return (typeof c === 'number' ? c : 0) / 100;
 }
 
-// Fetch orders by paginating through all pages, then the caller filters in Node.
-// NOTE: Shopmonkey's `where:{invoiced:true}` filter is unreliable on this account
-// (returns only ~4 records even though the orders genuinely have invoiced:true).
-// So we query WITHOUT that filter and filter for invoiced + date in Node, where
-// we have full control. We use status:'Invoice' as a light server-side narrowing
-// since that field filters correctly.
+// Subtotal (pre-tax revenue) in cents for an order.
+function orderSubtotalCents(o) {
+  return (o.partsCents || 0) + (o.laborCents || 0) + (o.shopSuppliesCents || 0)
+    + (o.subcontractsCents || 0) + (o.tiresCents || 0);
+}
+
+// A "comeback" is an invoiced order that carries no charge: warranty re-dos,
+// goodwill work, internal tickets. Excluded from revenue (so metrics reconcile
+// to the Shopmonkey report) but tracked separately as a quality + cost signal.
+function isComeback(o) {
+  return orderSubtotalCents(o) === 0;
+}
+
 // Fetch orders invoiced on/after sinceDate. We anchor on invoicedDate (NOT
 // createdDate) because Shopmonkey's monthly report counts orders by when they
 // were invoiced, and we deliberately apply NO status filter: completed big jobs
 // move from "Invoice" to "Paid"/"Closed" status, and a status:'Invoice' filter
 // would wrongly exclude exactly those high-value paid rebuilds. The working
-// operator is `gte` (no $ prefix) with an ISO string. The caller still filters
-// to the precise month window in Node.
+// operator is `gte` (no $ prefix) with an ISO string. Note also that
+// `where:{invoiced:true}` is unreliable on this account (collapses to ~4 rows),
+// which is why we filter on invoicedDate presence in Node instead. Returns ALL
+// invoiced, non-deleted orders (revenue AND comebacks); callers split as needed.
 async function fetchOrdersSince(apiKey, sinceDate, maxPages = 12) {
   const pageSize = 100;
   const iso = sinceDate.toISOString();
@@ -48,19 +57,10 @@ async function fetchOrdersSince(apiKey, sinceDate, maxPages = 12) {
     all = all.concat(batch);
     if (batch.length < pageSize) break; // last page reached
   }
-  // Keep non-deleted orders that actually carry an invoicedDate (i.e. real
-  // invoiced revenue, whether still "Invoice" or moved to "Paid"/"Closed").
-  // Keep non-deleted orders that carry an invoicedDate AND have real revenue.
-  // Zero-subtotal orders (comebacks, warranty re-dos, internal tickets) are
-  // invoiced but carry no charge - Shopmonkey's revenue report excludes them,
-  // so we do too. With this filter the aggregates reconcile to the report
-  // ($81,500.78 subtotal for June Red Deer, penny-exact).
-  return all.filter(o => {
-    if (o.deleted || !o.invoicedDate || o.invoicedDate === 'empty') return false;
-    const subtotalCents = (o.partsCents || 0) + (o.laborCents || 0) + (o.shopSuppliesCents || 0)
-      + (o.subcontractsCents || 0) + (o.tiresCents || 0);
-    return subtotalCents > 0;
-  });
+  // Keep non-deleted orders that carry an invoicedDate. We do NOT drop $0 orders
+  // here anymore - callers decide: revenue path keeps subtotal>0, comeback path
+  // keeps subtotal==0.
+  return all.filter(o => !o.deleted && o.invoicedDate && o.invoicedDate !== 'empty');
 }
 
 module.exports = (pool) => {
@@ -94,11 +94,12 @@ module.exports = (pool) => {
         return res.status(502).json({ error: e.message });
       }
 
-      // Filter to this month's invoiced orders for this location
+      // Filter to this month's REVENUE orders for this location (subtotal > 0).
+      // Comebacks ($0 invoices) are handled by the comebacks endpoint, not here.
       const mtdOrders = orders.filter(o => {
         if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) return false;
         const invoiced = parseShopmonkeyDate(o.invoicedDate);
-        return invoiced && invoiced >= monthStart && invoiced <= now;
+        return invoiced && invoiced >= monthStart && invoiced <= now && !isComeback(o);
       });
 
       let revenue = 0, partsRetail = 0, partsWholesale = 0, labourRev = 0, totalProfit = 0;
@@ -234,6 +235,7 @@ module.exports = (pool) => {
         if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) continue;
         const invoiced = parseShopmonkeyDate(o.invoicedDate);
         if (!invoiced || invoiced < monthStart || invoiced > now) continue;
+        if (isComeback(o)) continue; // comebacks are $0 billed - not "hours sold"
 
         const techIds = Array.isArray(o.assignedTechnicianIdsArray) ? o.assignedTechnicianIdsArray : [];
         const labourHours = (typeof o.totalLaborHours === 'number' && o.totalLaborHours > 0)
@@ -292,6 +294,151 @@ module.exports = (pool) => {
         message: 'Tech efficiency refreshed (hours sold only - hours worked pending QBO Time)',
         techs_found: techs.length,
         techs
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Refresh comebacks ($0 invoices) for a location.
+  // These are invoiced orders carrying no charge: warranty re-dos, goodwill
+  // work, internal tickets. Tracked as (a) a quality signal - the comeback rate
+  // - and (b) cost leakage - unbilled labour hours x tech wage.
+  router.post('/:locationId/refresh-comebacks', authenticateToken, async (req, res) => {
+    const apiKey = process.env.SHOPMONKEY_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
+
+    try {
+      const locResult = await pool.query('SELECT * FROM locations WHERE id = $1', [req.params.locationId]);
+      if (!locResult.rows.length) return res.status(404).json({ error: 'Location not found' });
+      const loc = locResult.rows[0];
+      const labourRate = parseFloat(loc.labour_rate) || 170;
+      const techWage = parseFloat(process.env.TECH_WAGE) || 40;
+
+      // Technician name mapping
+      let techNames = {};
+      try {
+        const techRes = await fetch('https://api.shopmonkey.cloud/v3/technician?limit=100', {
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+        });
+        if (techRes.ok) {
+          const td = await techRes.json();
+          const list = (td && td.data && td.data.data) ? td.data.data : (td.data || []);
+          for (const t of list) {
+            techNames[t.id] = t.name || [t.firstName, t.lastName].filter(Boolean).join(' ') || 'Unknown';
+          }
+        }
+      } catch (e) { /* optional */ }
+
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      let orders;
+      try {
+        orders = await fetchOrdersSince(apiKey, monthStart);
+      } catch (e) {
+        return res.status(502).json({ error: e.message });
+      }
+
+      // Keep this month's comebacks for this location
+      const comebacks = orders.filter(o => {
+        if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) return false;
+        const invoiced = parseShopmonkeyDate(o.invoicedDate);
+        return invoiced && invoiced >= monthStart && invoiced <= now && isComeback(o);
+      });
+
+      const rows = comebacks.map(o => {
+        const techIds = Array.isArray(o.assignedTechnicianIdsArray) ? o.assignedTechnicianIdsArray : [];
+        const techId = techIds[0] || null;
+        const techName = techId ? (techNames[techId] || `Tech ${String(techId).slice(0, 6)}`) : 'Unassigned';
+        // Labour hours on a $0 order: prefer recorded hours, else fall back to
+        // completed/authorized labour hours if present.
+        const hours = (typeof o.totalLaborHours === 'number' && o.totalLaborHours > 0)
+          ? o.totalLaborHours
+          : (typeof o.completedLaborHours === 'number' ? o.completedLaborHours : 0);
+        return {
+          order_number: o.number != null ? String(o.number) : null,
+          order_id: o.id || null,
+          invoiced_date: parseShopmonkeyDate(o.invoicedDate),
+          customer_name: o.generatedCustomerName || null,
+          vehicle_name: o.generatedVehicleName || null,
+          tech_id: techId,
+          tech_name: techName,
+          labour_hours: Math.round(hours * 10) / 10,
+          unbilled_wage_cost: Math.round(hours * techWage * 100) / 100,
+          complaint: (o.complaint && o.complaint !== 'empty') ? String(o.complaint).slice(0, 500) : null
+        };
+      });
+
+      const date = new Date().toISOString().slice(0, 10);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM comebacks WHERE location_id = $1 AND snapshot_date = $2', [req.params.locationId, date]);
+        for (const r of rows) {
+          await client.query(
+            `INSERT INTO comebacks (location_id, snapshot_date, order_number, order_id, invoiced_date, customer_name, vehicle_name, tech_id, tech_name, labour_hours, unbilled_wage_cost, complaint)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            [req.params.locationId, date, r.order_number, r.order_id, r.invoiced_date, r.customer_name, r.vehicle_name, r.tech_id, r.tech_name, r.labour_hours, r.unbilled_wage_cost, r.complaint]
+          );
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      const totalHours = rows.reduce((s, r) => s + r.labour_hours, 0);
+      const totalCost = rows.reduce((s, r) => s + r.unbilled_wage_cost, 0);
+      res.json({
+        message: 'Comebacks refreshed',
+        count: rows.length,
+        total_unbilled_hours: Math.round(totalHours * 10) / 10,
+        total_unbilled_wage_cost: Math.round(totalCost * 100) / 100,
+        comebacks: rows
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Read the latest comebacks snapshot for a location (current month).
+  router.get('/:locationId/comebacks', authenticateToken, async (req, res) => {
+    try {
+      const latest = await pool.query(
+        'SELECT MAX(snapshot_date) AS d FROM comebacks WHERE location_id = $1',
+        [req.params.locationId]
+      );
+      const d = latest.rows[0] && latest.rows[0].d;
+      if (!d) return res.json({ snapshot_date: null, count: 0, total_unbilled_hours: 0, total_unbilled_wage_cost: 0, comebacks: [] });
+
+      const result = await pool.query(
+        `SELECT order_number, order_id, invoiced_date, customer_name, vehicle_name, tech_name, labour_hours, unbilled_wage_cost, complaint
+         FROM comebacks WHERE location_id = $1 AND snapshot_date = $2
+         ORDER BY unbilled_wage_cost DESC, invoiced_date DESC`,
+        [req.params.locationId, d]
+      );
+      const totalHours = result.rows.reduce((s, r) => s + Number(r.labour_hours || 0), 0);
+      const totalCost = result.rows.reduce((s, r) => s + Number(r.unbilled_wage_cost || 0), 0);
+
+      // per-tech rollup (which tech has the most comebacks)
+      const byTech = {};
+      for (const r of result.rows) {
+        const k = r.tech_name || 'Unassigned';
+        if (!byTech[k]) byTech[k] = { tech_name: k, count: 0, hours: 0, cost: 0 };
+        byTech[k].count++;
+        byTech[k].hours += Number(r.labour_hours || 0);
+        byTech[k].cost += Number(r.unbilled_wage_cost || 0);
+      }
+
+      res.json({
+        snapshot_date: d,
+        count: result.rows.length,
+        total_unbilled_hours: Math.round(totalHours * 10) / 10,
+        total_unbilled_wage_cost: Math.round(totalCost * 100) / 100,
+        by_tech: Object.values(byTech).sort((a, b) => b.count - a.count),
+        comebacks: result.rows
       });
     } catch (err) {
       res.status(500).json({ error: err.message });

@@ -84,6 +84,28 @@ CREATE TABLE IF NOT EXISTS tech_efficiency (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Comebacks / $0 invoices: warranty re-dos, goodwill work, internal tickets.
+-- These are invoiced but carry no charge, so they're excluded from revenue
+-- metrics. Tracked separately because they represent (a) a quality signal
+-- (comeback rate) and (b) cost leakage (unbilled labour hours x wage).
+CREATE TABLE IF NOT EXISTS comebacks (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id UUID NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+  snapshot_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  order_number VARCHAR(100),
+  order_id VARCHAR(255),
+  invoiced_date TIMESTAMPTZ,
+  customer_name VARCHAR(255),
+  vehicle_name VARCHAR(255),
+  tech_id VARCHAR(255),
+  tech_name VARCHAR(255),
+  labour_hours DECIMAL(10,2) DEFAULT 0,
+  unbilled_wage_cost DECIMAL(12,2) DEFAULT 0,
+  complaint TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_comebacks_location_date ON comebacks(location_id, snapshot_date DESC);
 CREATE INDEX IF NOT EXISTS idx_tech_efficiency_location_date ON tech_efficiency(location_id, snapshot_date DESC);
 CREATE INDEX IF NOT EXISTS idx_metrics_cache_location_date ON metrics_cache(location_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_targets_location_year ON targets(location_id, year);
