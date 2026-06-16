@@ -237,7 +237,7 @@ module.exports = (pool) => {
         if (!invoiced || invoiced < monthStart || invoiced > now) continue;
         if (isComeback(o)) continue; // comebacks are $0 billed - not "hours sold"
 
-        const techIds = Array.isArray(o.assignedTechnicianIdsArray) ? o.assignedTechnicianIdsArray : [];
+        const techIds = Array.isArray(o.assignedTechnicianIds) ? o.assignedTechnicianIds : [];
         const labourHours = (typeof o.totalLaborHours === 'number' && o.totalLaborHours > 0)
           ? o.totalLaborHours
           : centsToDollars(o.laborCents) / labourRate;
@@ -347,7 +347,7 @@ module.exports = (pool) => {
       });
 
       const rows = comebacks.map(o => {
-        const techIds = Array.isArray(o.assignedTechnicianIdsArray) ? o.assignedTechnicianIdsArray : [];
+        const techIds = Array.isArray(o.assignedTechnicianIds) ? o.assignedTechnicianIds : [];
         const techId = techIds[0] || null;
         const techName = techId ? (techNames[techId] || `Tech ${String(techId).slice(0, 6)}`) : 'Unassigned';
         // Labour hours on a $0 order: prefer recorded hours, else fall back to
