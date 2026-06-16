@@ -63,6 +63,30 @@ export default function Home() {
   const groupMargin = marginVals.length ? (marginVals.reduce((a, b) => a + b, 0) / marginVals.length) : 0;
   // Group avg RO = total revenue / total cars
   const groupAvgRO = groupCarCount > 0 ? groupRevenue / groupCarCount : 0;
+
+  // --- target attainment helpers ---
+  const _now = new Date();
+  const _daysInMonth = new Date(_now.getFullYear(), _now.getMonth() + 1, 0).getDate();
+  const _paceFrac = _now.getDate() / _daysInMonth;
+  // Pace-aware: for cumulative MTD totals (revenue, car count). Compares against
+  // where you should be this far into the month.
+  const pacePct = (actual, target) => {
+    if (!target || target <= 0 || !actual) return null;
+    const expected = target * _paceFrac;
+    return expected > 0 ? Math.round((actual / expected) * 100) : null;
+  };
+  // Straight: for rate/average metrics (avg RO, PPH, margin) that should hit 100% any day.
+  const targetPct = (actual, target) => {
+    if (!target || target <= 0 || !actual) return null;
+    return Math.round((actual / target) * 100);
+  };
+  const pctColor = p => p == null ? 'var(--text3)' : (p >= 100 ? 'var(--success)' : (p >= 90 ? 'var(--warning)' : 'var(--danger)'));
+  // Group targets = sum of per-location targets (revenue, car_count) / first loc for rates.
+  const _locTargets = Object.values(targets).filter(Boolean);
+  const _sumT = key => _locTargets.reduce((s, t) => s + (parseFloat(t && t[key]) || 0), 0);
+  const gRevTarget = _sumT('revenue');
+  const gCarTarget = _sumT('car_count');
+  const gRoTarget = _locTargets.length ? (_locTargets.reduce((s,t)=>s+(parseFloat(t.avg_ro_value)||0),0) / _locTargets.length) : 0;
   const money0 = n => '$' + Math.round(n).toLocaleString('en-CA');
 
   const allAlerts = Object.entries(metrics).flatMap(([locId, m]) => {
@@ -97,12 +121,12 @@ export default function Home() {
           <div className="metric-card">
             <div className="metric-label">Group revenue MTD</div>
             <div className="metric-value">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
-            <div className="metric-sub">{groupRevenue > 0 ? 'live from Shopmonkey' : 'awaiting sync'}</div>
+            <div className="metric-sub" style={{ color: pctColor(pacePct(groupRevenue, gRevTarget)) }}>{groupRevenue > 0 ? (pacePct(groupRevenue, gRevTarget) != null ? `${pacePct(groupRevenue, gRevTarget)}% of pace` : 'live from Shopmonkey') : 'awaiting sync'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Group car count</div>
             <div className="metric-value">{groupCarCount > 0 ? groupCarCount : '—'}</div>
-            <div className="metric-sub">{groupCarCount > 0 ? 'invoiced this month' : 'awaiting sync'}</div>
+            <div className="metric-sub" style={{ color: pctColor(pacePct(groupCarCount, gCarTarget)) }}>{groupCarCount > 0 ? (pacePct(groupCarCount, gCarTarget) != null ? `${pacePct(groupCarCount, gCarTarget)}% of pace` : 'invoiced this month') : 'awaiting sync'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Parts margin</div>
@@ -124,7 +148,7 @@ export default function Home() {
           <div className="metric-card">
             <div className="metric-label">Avg RO value</div>
             <div className="metric-value">{groupAvgRO > 0 ? money0(groupAvgRO) : '—'}</div>
-            <div className="metric-sub">{groupAvgRO > 0 ? 'revenue / car count' : 'awaiting sync'}</div>
+            <div className="metric-sub" style={{ color: pctColor(targetPct(groupAvgRO, gRoTarget)) }}>{groupAvgRO > 0 ? (targetPct(groupAvgRO, gRoTarget) != null ? `${targetPct(groupAvgRO, gRoTarget)}% of target` : 'revenue / car count') : 'awaiting sync'}</div>
           </div>
         </div>
       )}
@@ -155,10 +179,10 @@ export default function Home() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
                 {[
-                  { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target', ok: true },
-                  { label: 'Profit / hr', val: m && num(m.pph) > 0 ? `$${Math.round(num(m.pph))}` : '—', sub: `vs $${loc.pph_target} target`, ok: num(m?.pph) >= loc.pph_target },
+                  { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: (m && t && t.revenue) ? `${pacePct(num(m.revenue_mtd), num(t.revenue))}% of pace` : (t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target'), ok: (m && t && t.revenue) ? pacePct(num(m.revenue_mtd), num(t.revenue)) >= 90 : true },
+                  { label: 'Profit / hr', val: m && num(m.pph) > 0 ? `$${Math.round(num(m.pph))}` : '—', sub: (m && num(m.pph) > 0 && loc.pph_target) ? `${targetPct(num(m.pph), num(loc.pph_target))}% of target` : `vs $${loc.pph_target} target`, ok: num(m?.pph) >= loc.pph_target },
                   { label: 'Efficiency', val: m && num(m.efficiency_avg) > 0 ? `${Math.round(num(m.efficiency_avg))}%` : '—', sub: `vs ${loc.efficiency_target}% target`, ok: num(m?.efficiency_avg) >= loc.efficiency_target },
-                  { label: 'Avg RO', val: m && num(m.avg_ro_value) > 0 ? money0(num(m.avg_ro_value)) : '—', sub: 'per car', ok: true },
+                  { label: 'Avg RO', val: m && num(m.avg_ro_value) > 0 ? money0(num(m.avg_ro_value)) : '—', sub: (m && num(m.avg_ro_value) > 0 && t && t.avg_ro_value) ? `${targetPct(num(m.avg_ro_value), num(t.avg_ro_value))}% of target` : 'per car', ok: (m && t && t.avg_ro_value) ? num(m.avg_ro_value) >= num(t.avg_ro_value) : true },
                 ].map(item => (
                   <div key={item.label}>
                     <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '3px' }}>{item.label}</div>

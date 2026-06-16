@@ -69,6 +69,11 @@ export default function Performance() {
   const pphTarget = num(loc?.pph_target) || 254;
   const effTarget = num(loc?.efficiency_target) || 80;
   const pmTarget = num(loc?.parts_margin_target) || 55;
+  const _now = new Date();
+  const _daysInMonth = new Date(_now.getFullYear(), _now.getMonth() + 1, 0).getDate();
+  const _paceFrac = _now.getDate() / _daysInMonth;
+  const pacePct = (actual, tgt) => { if (!tgt || tgt <= 0 || !actual) return null; const e = tgt * _paceFrac; return e > 0 ? Math.round((actual / e) * 100) : null; };
+  const targetPct = (actual, tgt) => { if (!tgt || tgt <= 0 || !actual) return null; return Math.round((actual / tgt) * 100); };
 
   const techs = (techData && techData.technicians) || [];
   const techCount = techData?.count ?? (loc ? loc.num_technicians : 0);
@@ -80,10 +85,10 @@ export default function Performance() {
   const totalLabRev = techs.reduce((s, t) => s + num(t.labour_revenue), 0);
 
   const metricsVsTarget = [
-    ['Car count', hasMetrics ? (String(carCount) + (target && target.car_count ? ` / ${target.car_count}` : '')) : '\u2014', target && target.car_count ? `${Math.round(carCount / num(target.car_count) * 100)}%` : 'this month', target && target.car_count ? carCount >= num(target.car_count) : true],
+    ['Car count', hasMetrics ? (String(carCount) + (target && target.car_count ? ` / ${target.car_count}` : '')) : '\u2014', (target && target.car_count) ? `${pacePct(carCount, num(target.car_count))}% of pace` : 'this month', (target && target.car_count) ? pacePct(carCount, num(target.car_count)) >= 90 : true],
     ['Parts margin', partsMargin > 0 ? `${partsMargin.toFixed(1)}%` : '\u2014', `vs ${pmTarget}%`, partsMargin >= pmTarget],
     ['Labour margin', labourMargin > 0 ? `${labourMargin.toFixed(1)}%` : '\u2014', target && target.labour_margin ? `vs ${num(target.labour_margin)}%` : 'vs 70%', labourMargin >= num((target && target.labour_margin) || 70)],
-    ['Avg RO value', avgRO > 0 ? money0(avgRO) : '\u2014', target && target.avg_ro_value ? `vs ${money0(num(target.avg_ro_value))}` : 'per car', target && target.avg_ro_value ? avgRO >= num(target.avg_ro_value) : true],
+    ['Avg RO value', avgRO > 0 ? money0(avgRO) : '\u2014', (target && target.avg_ro_value) ? `${targetPct(avgRO, num(target.avg_ro_value))}% of target` : 'per car', target && target.avg_ro_value ? avgRO >= num(target.avg_ro_value) : true],
     ['Labour hours billed', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '\u2014', labourHoursComped > 0 ? `${hrsNum(labourHoursWorked)} worked, ${hrsNum(labourHoursComped)} comped` : 'this month', target && target.labour_hours ? labourHoursSold >= num(target.labour_hours) : true],
     ['Efficiency', efficiency != null && efficiency > 0 ? `${Math.round(efficiency)}%` : '\u2014', efficiency != null && efficiency > 0 ? `vs ${effTarget}%` : 'pending QBO Time', efficiency != null ? efficiency >= effTarget : true],
   ];
@@ -135,7 +140,7 @@ export default function Performance() {
         <div className="metric-card">
           <div className="metric-label">Revenue MTD (pre-tax)</div>
           <div className="metric-value">{hasMetrics ? money0(revenue) : '\u2014'}</div>
-          <div className="metric-sub">{target && target.revenue ? `vs $${Math.round(num(target.revenue) / 1000)}k target` : (hasMetrics ? 'live from Shopmonkey' : 'awaiting sync')}</div>
+          <div className="metric-sub">{(hasMetrics && target && target.revenue) ? `${pacePct(revenue, num(target.revenue))}% of pace` : (target && target.revenue ? `vs $${Math.round(num(target.revenue) / 1000)}k target` : (hasMetrics ? 'live from Shopmonkey' : 'awaiting sync'))}</div>
         </div>
         {showFinancials && (
           <div className="metric-card">
