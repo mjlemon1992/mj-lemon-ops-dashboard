@@ -134,6 +134,72 @@ async function computeTechSold(apiKey, orders, techNames) {
   }));
 }
 
+// In-memory YTD job tracker (per location). YTD is too slow to run inside one
+// HTTP request, so the endpoint fires this and returns immediately; the rows
+// land when it finishes. Survives for the life of the container (fine for a
+// manual ~4-min job; a queue would be the bulletproof version later).
+const ytdJobs = {};
+async function runYtdJob(pool, locationId, apiKey) {
+  ytdJobs[locationId] = { running: true, startedAt: new Date().toISOString(), finishedAt: null, error: null, result: null };
+  try {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const period_start = `${year}-01-01`;
+    const period_end = now.toISOString().slice(0, 10);
+    const period_type = 'ytd';
+    const locRes = await pool.query('SELECT province FROM locations WHERE id = $1', [locationId]);
+    const province = (locRes.rows[0] && locRes.rows[0].province) || 'ab';
+    const workedHours = workingDaysInRange(province, period_start, period_end) * 8;
+    const techNames = await fetchTechNames(pool, locationId);
+    const acc = {};
+    const thisMonth = now.getUTCMonth();
+    for (let m = 0; m <= thisMonth; m++) {
+      const mStartIso = new Date(Date.UTC(year, m, 1)).toISOString();
+      const mEndDay = (m === thisMonth) ? now.getUTCDate() : new Date(Date.UTC(year, m + 1, 0)).getUTCDate();
+      const mEndIso = new Date(Date.UTC(year, m, mEndDay, 23, 59, 59, 999)).toISOString();
+      const orders = await fetchInvoicedOrdersBetween(apiKey, mStartIso, mEndIso);
+      const sold = await computeTechSold(apiKey, orders, techNames);
+      for (const t of sold) {
+        const key = t.tech_id || ('name:' + t.tech_name);
+        if (!acc[key]) acc[key] = { tech_id: t.tech_id || null, tech_name: t.tech_name, hours_sold: 0, hours_billed: 0, vehicle_count: 0, labour_revenue: 0 };
+        acc[key].hours_sold += Number(t.hours_sold) || 0;
+        acc[key].hours_billed += Number(t.hours_billed) || 0;
+        acc[key].vehicle_count += Number(t.vehicle_count) || 0;
+        acc[key].labour_revenue += Number(t.labour_revenue) || 0;
+      }
+    }
+    const merged = Object.values(acc).map(t => ({
+      tech_id: t.tech_id, tech_name: t.tech_name,
+      hours_sold: Math.round(t.hours_sold * 10) / 10,
+      hours_billed: Math.round(t.hours_billed * 10) / 10,
+      vehicle_count: t.vehicle_count,
+      labour_revenue: Math.round(t.labour_revenue * 100) / 100
+    }));
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('ALTER TABLE tech_efficiency ADD COLUMN IF NOT EXISTS period_type VARCHAR(8)');
+      await client.query('DELETE FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2 AND period_type = $3', [locationId, period_end, period_type]);
+      for (const t of merged) {
+        const efficiency = workedHours > 0 ? Math.round((t.hours_sold / workedHours) * 100) : null;
+        await client.query(
+          `INSERT INTO tech_efficiency
+             (location_id, snapshot_date, period_type, tech_id, tech_name, hours_available, hours_worked, hours_sold, hours_billed, vehicle_count, efficiency, labour_revenue, parts_gp)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [locationId, period_end, period_type, t.tech_id || null, t.tech_name, null, workedHours, t.hours_sold, t.hours_billed, t.vehicle_count, efficiency, t.labour_revenue, null]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+    ytdJobs[locationId].result = { count: merged.length, worked_hours: workedHours, period_start, period_end };
+  } catch (e) {
+    ytdJobs[locationId].error = String(e.message || e);
+  } finally {
+    ytdJobs[locationId].running = false;
+    ytdJobs[locationId].finishedAt = new Date().toISOString();
+  }
+}
+
 module.exports = (pool) => {
   const router = express.Router();
 
@@ -280,76 +346,21 @@ module.exports = (pool) => {
   // Shopmonkey fetch is big enough to hit the HTTP timeout, accumulating each
   // tech's totals, then writes one ytd row per tech. Worked = working days in
   // the full Jan1..today range x 8 (holiday + province aware).
+  // YTD: kick off the background job and return immediately.
   router.post('/:locationId/recompute-ytd', syncAuth, async (req, res) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
-    try {
-      const now = new Date();
-      const year = now.getUTCFullYear();
-      const period_start = `${year}-01-01`;
-      const period_end = now.toISOString().slice(0, 10);
-      const period_type = 'ytd';
-
-      const locRes = await pool.query('SELECT province FROM locations WHERE id = $1', [req.params.locationId]);
-      const province = (locRes.rows[0] && locRes.rows[0].province) || 'ab';
-      const workedHours = workingDaysInRange(province, period_start, period_end) * 8;
-
-      const techNames = await fetchTechNames(pool, req.params.locationId);
-      const acc = {};
-      const thisMonth = now.getUTCMonth();
-      let monthsDone = 0;
-      for (let m = 0; m <= thisMonth; m++) {
-        const mStartIso = new Date(Date.UTC(year, m, 1)).toISOString();
-        const mEndDay = (m === thisMonth) ? now.getUTCDate() : new Date(Date.UTC(year, m + 1, 0)).getUTCDate();
-        const mEndIso = new Date(Date.UTC(year, m, mEndDay, 23, 59, 59, 999)).toISOString();
-        const orders = await fetchInvoicedOrdersBetween(apiKey, mStartIso, mEndIso);
-        const sold = await computeTechSold(apiKey, orders, techNames);
-        for (const t of sold) {
-          const key = t.tech_id || ('name:' + t.tech_name);
-          if (!acc[key]) acc[key] = { tech_id: t.tech_id || null, tech_name: t.tech_name, hours_sold: 0, hours_billed: 0, vehicle_count: 0, labour_revenue: 0 };
-          acc[key].hours_sold += Number(t.hours_sold) || 0;
-          acc[key].hours_billed += Number(t.hours_billed) || 0;
-          acc[key].vehicle_count += Number(t.vehicle_count) || 0;
-          acc[key].labour_revenue += Number(t.labour_revenue) || 0;
-        }
-        monthsDone++;
-      }
-
-      const merged = Object.values(acc).map(t => ({
-        tech_id: t.tech_id, tech_name: t.tech_name,
-        hours_sold: Math.round(t.hours_sold * 10) / 10,
-        hours_billed: Math.round(t.hours_billed * 10) / 10,
-        vehicle_count: t.vehicle_count,
-        labour_revenue: Math.round(t.labour_revenue * 100) / 100
-      }));
-
-      const written = [];
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        await client.query('ALTER TABLE tech_efficiency ADD COLUMN IF NOT EXISTS period_type VARCHAR(8)');
-        await client.query('DELETE FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2 AND period_type = $3', [req.params.locationId, period_end, period_type]);
-        for (const t of merged) {
-          const efficiency = workedHours > 0 ? Math.round((t.hours_sold / workedHours) * 100) : null;
-          await client.query(
-            `INSERT INTO tech_efficiency
-               (location_id, snapshot_date, period_type, tech_id, tech_name, hours_available, hours_worked, hours_sold, hours_billed, vehicle_count, efficiency, labour_revenue, parts_gp)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-            [req.params.locationId, period_end, period_type, t.tech_id || null, t.tech_name, null, workedHours, t.hours_sold, t.hours_billed, t.vehicle_count, efficiency, t.labour_revenue, null]
-          );
-          written.push({ tech_name: t.tech_name, hours_sold: t.hours_sold, hours_worked: workedHours, efficiency });
-        }
-        await client.query('COMMIT');
-      } catch (e) {
-        await client.query('ROLLBACK');
-        throw e;
-      } finally {
-        client.release();
-      }
-      res.json({ ok: true, period_type, period_start, period_end, worked_hours: workedHours, months: monthsDone, count: written.length, written });
-    } catch (e) {
-      res.status(502).json({ error: String(e.message || e) });
+    const lid = req.params.locationId;
+    if (ytdJobs[lid] && ytdJobs[lid].running) {
+      return res.json({ ok: true, started: false, already_running: true, startedAt: ytdJobs[lid].startedAt });
     }
+    runYtdJob(pool, lid, apiKey); // fire-and-forget
+    res.json({ ok: true, started: true });
+  });
+
+  // YTD job status (poll this after kicking off recompute-ytd).
+  router.get('/:locationId/ytd-status', syncAuth, async (req, res) => {
+    res.json({ ok: true, job: ytdJobs[req.params.locationId] || null });
   });
 
   return router;
