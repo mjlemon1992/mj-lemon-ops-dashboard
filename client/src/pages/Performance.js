@@ -81,6 +81,11 @@ export default function Performance() {
   const totalVehicles = techs.reduce((s, t) => s + num(t.vehicle_count), 0);
   const distinctVehicles = techData && techData.distinct_vehicles_mtd != null ? techData.distinct_vehicles_mtd : null;
   const totalLabRev = techs.reduce((s, t) => s + num(t.labour_revenue), 0);
+  // Group efficiency = total sold hours / total worked hours, over techs that have both.
+  const effTechs = techs.filter(t => t.efficiency != null && t.hours_worked != null);
+  const _gWorked = effTechs.reduce((s, t) => s + num(t.hours_worked), 0);
+  const _gSold = effTechs.reduce((s, t) => s + num(t.hours_sold), 0);
+  const groupEff = _gWorked > 0 ? Math.round((_gSold / _gWorked) * 100) : null;
 
   const metricsVsTarget = [
     ['Car count', hasMetrics ? (String(carCount) + (target && target.car_count ? ` / ${target.car_count}` : '')) : '\u2014', (target && target.car_count) ? `${pacePct(carCount, num(target.car_count))}% of pace` : 'this month', (target && target.car_count) ? pacePct(carCount, num(target.car_count)) >= 90 : true],
@@ -189,7 +194,7 @@ export default function Performance() {
           <div style={{ fontSize: '11px', color: 'var(--text3)' }}>live roster from Shopmonkey</div>
         </div>
         <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px' }}>
-          Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks). Hours billed counts only revenue-generating lines, so the gap is labour discounted to $0. Worked hours, efficiency and profit/hour need clocked time (QBO Time) &mdash; connecting at close.
+          Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks). Hours billed counts only revenue-generating lines, so the gap is labour discounted to $0. Efficiency = hours sold \u00f7 hours worked; worked hours imported from Connecteam each pay period. Owner shown on a flat-hours basis (est).
         </div>
         {techs.length === 0 ? (
           <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)', fontSize: '12px' }}>
@@ -216,7 +221,9 @@ export default function Performance() {
                     <td>{t.hours_billed != null ? hrsNum(t.hours_billed) : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>
                     <td>{t.vehicle_count != null ? t.vehicle_count : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>
                     {showFinancials && <td>{t.labour_revenue != null ? money0(t.labour_revenue) : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>}
-                    <td style={{ color: 'var(--text3)' }}>awaiting payroll</td>
+                    <td>{t.efficiency != null
+                      ? <span style={{ color: t.efficiency >= effTarget ? 'var(--success)' : 'var(--warning)', fontWeight: '500' }}>{Math.round(t.efficiency)}%{t.hours_worked != null ? <span style={{ color: 'var(--text3)', fontWeight: '400' }}> ({hrsNum(t.hours_worked)}h)</span> : null}</span>
+                      : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -227,7 +234,7 @@ export default function Performance() {
                   <td className="strong">{hasHours ? hrsNum(totalBilled) : '\u2014'}</td>
                   <td className="strong">{distinctVehicles != null ? distinctVehicles : '\u2014'}</td>
                   {showFinancials && <td className="strong">{hasHours ? money0(totalLabRev) : '\u2014'}</td>}
-                  <td style={{ color: 'var(--text3)' }}>{'\u2014'}</td>
+                  <td className="strong">{groupEff != null ? `${groupEff}%` : '\u2014'}</td>
                 </tr>
               </tfoot>
             </table>

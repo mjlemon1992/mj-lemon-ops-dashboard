@@ -48,11 +48,22 @@ module.exports = (pool) => {
 
       let statsByTech = {};
       let snapshotDate = null;
-      const teLatest = await pool.query(
-        'SELECT MAX(snapshot_date) AS d FROM tech_efficiency WHERE location_id = $1',
+      // Prefer the latest snapshot that actually has worked-hours (the Connecteam
+      // period import), so its real efficiency wins over the daily null rows that
+      // refresh-tech writes. Fall back to the plain latest if none have hours yet.
+      const teWorked = await pool.query(
+        'SELECT MAX(snapshot_date) AS d FROM tech_efficiency WHERE location_id = $1 AND hours_worked IS NOT NULL',
         [req.params.locationId]
       );
-      snapshotDate = teLatest.rows[0] && teLatest.rows[0].d ? teLatest.rows[0].d : null;
+      if (teWorked.rows[0] && teWorked.rows[0].d) {
+        snapshotDate = teWorked.rows[0].d;
+      } else {
+        const teLatest = await pool.query(
+          'SELECT MAX(snapshot_date) AS d FROM tech_efficiency WHERE location_id = $1',
+          [req.params.locationId]
+        );
+        snapshotDate = teLatest.rows[0] && teLatest.rows[0].d ? teLatest.rows[0].d : null;
+      }
       if (snapshotDate) {
         const te = await pool.query(
           `SELECT tech_id, tech_name, hours_sold, hours_billed, vehicle_count, hours_worked, efficiency, labour_revenue
