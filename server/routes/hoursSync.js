@@ -2,22 +2,19 @@ const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 
 const centsToDollars = (c) => (Number(c) || 0) / 100;
-const norm = (s) => String(s || '').trim().toLowerCase();
+const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
-async function fetchTechNames(apiKey) {
+async function fetchTechNames(pool, locationId) {
   const map = {};
   try {
-    const r = await fetch('https://api.shopmonkey.cloud/v3/technician?limit=200', {
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
-    });
-    if (r.ok) {
-      const j = await r.json();
-      const arr = (j && j.data && j.data.data) ? j.data.data : (j.data || []);
-      for (const t of arr) {
-        const name = [t.firstName, t.lastName].filter(Boolean).join(' ').trim() || t.name;
-        if (t.id && name) map[t.id] = name;
-      }
-    }
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (tech_id) tech_id, tech_name
+         FROM tech_efficiency
+        WHERE location_id = $1 AND tech_id IS NOT NULL
+        ORDER BY tech_id, snapshot_date DESC`,
+      [locationId]
+    );
+    for (const r of rows) if (r.tech_id && r.tech_name) map[r.tech_id] = r.tech_name;
   } catch (e) { /* fall back to ids */ }
   return map;
 }
@@ -113,7 +110,7 @@ module.exports = (pool) => {
       if (!start || !end) return res.status(400).json({ error: 'start & end (YYYY-MM-DD) required' });
       const startIso = new Date(start + 'T00:00:00.000Z').toISOString();
       const endIso = new Date(end + 'T23:59:59.999Z').toISOString();
-      const techNames = await fetchTechNames(apiKey);
+      const techNames = await fetchTechNames(pool, req.params.locationId);
       const orders = await fetchInvoicedOrdersBetween(apiKey, startIso, endIso);
       const sold = await computeTechSold(apiKey, orders, techNames);
       const totalSold = Math.round(sold.reduce((s, t) => s + t.hours_sold, 0) * 100) / 100;
@@ -133,7 +130,7 @@ module.exports = (pool) => {
       const startIso = new Date(period_start + 'T00:00:00.000Z').toISOString();
       const endIso = new Date(period_end + 'T23:59:59.999Z').toISOString();
 
-      const techNames = await fetchTechNames(apiKey);
+      const techNames = await fetchTechNames(pool, req.params.locationId);
       const orders = await fetchInvoicedOrdersBetween(apiKey, startIso, endIso);
       const sold = await computeTechSold(apiKey, orders, techNames);
       const soldByName = {};
