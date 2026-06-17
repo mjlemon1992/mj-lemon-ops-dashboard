@@ -16,6 +16,7 @@ export default function Technicians() {
   const [weekly, setWeekly] = useState({});
   const [saving, setSaving] = useState(false);
   const [recomputeMsg, setRecomputeMsg] = useState(null);
+  const [period, setPeriod] = useState('mtd');
 
   useEffect(() => {
     api('/locations').then(locs => {
@@ -30,7 +31,7 @@ export default function Technicians() {
   useEffect(() => {
     if (!locId) return;
     setLoading(true); setError(null);
-    api(`/technicians/${locId}`).then(d => {
+    api(`/technicians/${locId}?period=${period}`).then(d => {
         setData(d);
         const w = {};
         (d.technicians || []).forEach(t => { if (t.hours_per_week != null) w[t.tech_id] = String(t.hours_per_week); });
@@ -55,27 +56,30 @@ export default function Technicians() {
   const groupEff = _gWorked > 0 ? Math.round((_gSold / _gWorked) * 100) : null;
   const effTarget = 80;
 
-  const saveAndRecompute = async () => {
-    if (saving) return;
-    setSaving(true); setRecomputeMsg(null); setError(null);
+  const loadPeriod = async (pk) => {
+    const d = await api(`/technicians/${locId}?period=${pk}`);
+    setData(d);
+  };
+
+  const switchPeriod = async (pk) => {
+    if (pk === period) return;
+    setPeriod(pk); setRecomputeMsg(null); setError(null);
+    try { await loadPeriod(pk); } catch (e) { setError(e.message || 'Load failed'); }
+  };
+
+  const refresh = async () => {
+    setSaving(true); setError(null);
     try {
-      for (const t of techs) {
-        const w = weekly[t.tech_id];
-        if (w === undefined || w === '') continue;
-        await api(`/technicians/${locId}/weekly-hours`, { method: 'POST', body: JSON.stringify({ tech_id: t.tech_id, tech_name: t.tech_name, hours_per_week: w }) });
+      if (period === 'ytd') {
+        await api(`/hours/${locId}/recompute-ytd`, { method: 'POST', body: JSON.stringify({}) });
+        setRecomputeMsg('YTD is recomputing in the background \u2014 it takes a few minutes. Switch away and back to YTD to see the updated numbers.');
+      } else {
+        const r = await api(`/hours/${locId}/recompute-from-weekly`, { method: 'POST', body: JSON.stringify({ period_type: 'mtd' }) });
+        setRecomputeMsg(`Updated ${r.count} techs \u00b7 ${r.worked_hours}h worked (${r.period_start} to ${r.period_end}).`);
+        await loadPeriod('mtd');
       }
-      const r = await api(`/hours/${locId}/recompute-from-weekly`, { method: 'POST', body: JSON.stringify({}) });
-      setRecomputeMsg(`Updated ${r.count} techs over ${r.weeks} weeks (${r.period_start} to ${r.period_end}).`);
-      const d = await api(`/technicians/${locId}`);
-      setData(d);
-      const w2 = {};
-      (d.technicians || []).forEach(t => { if (t.hours_per_week != null) w2[t.tech_id] = String(t.hours_per_week); });
-      setWeekly(w2);
     } catch (e) {
-      setError(e.message || 'Recompute failed');
-    } finally {
-      setSaving(false);
-    }
+      setError(e.message || 'Refresh failed');
   };
 
   const cols = showFinancials ? 7 : 6;
@@ -127,13 +131,24 @@ export default function Technicians() {
           )}
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
-              {recomputeMsg ? recomputeMsg : 'Set each tech\u2019s standard weekly hours, then recompute. Worked hours = weekly \u00d7 weeks this month.'}
+            <div style={{ display: 'flex', gap: '3px', background: 'var(--bg2)', borderRadius: '8px', padding: '3px' }}>
+              {[['mtd', 'This month'], ['ytd', 'YTD']].map(([pk, label]) => (
+                <button key={pk} onClick={() => switchPeriod(pk)}
+                  style={{ fontSize: '12px', fontWeight: '600', padding: '5px 14px', borderRadius: '6px', cursor: 'pointer', border: 'none',
+                    background: period === pk ? 'var(--accent)' : 'transparent', color: period === pk ? '#fff' : 'var(--text3)' }}>
+                  {label}
+                </button>
+              ))}
             </div>
-            <button onClick={saveAndRecompute} disabled={saving}
+            <div style={{ fontSize: '11px', color: 'var(--text3)', flex: 1 }}>
+              {recomputeMsg ? recomputeMsg : (period === 'ytd'
+                ? 'Year to date \u00b7 Jan 1 to today. Efficiency = hours sold \u00f7 working days elapsed this year \u00d7 8h.'
+                : 'This month \u00b7 efficiency = hours sold \u00f7 working days elapsed this month \u00d7 8h (stat holidays excluded).')}
+            </div>
+            <button onClick={refresh} disabled={saving}
               style={{ fontSize: '12px', fontWeight: '500', padding: '6px 14px', borderRadius: '6px', cursor: saving ? 'default' : 'pointer',
                 background: saving ? 'var(--surface2)' : 'var(--accent)', color: saving ? 'var(--text3)' : '#fff', border: 'none', whiteSpace: 'nowrap' }}>
-              {saving ? 'Recomputing\u2026' : 'Save & recompute'}
+              {saving ? 'Working\u2026' : 'Refresh'}
             </button>
           </div>
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -145,7 +160,6 @@ export default function Technicians() {
                   <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Hours billed</th>
                   <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Vehicles</th>
                   {showFinancials && <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Labour revenue</th>}
-                  <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Hrs/week</th>
                   <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Efficiency</th>
                 </tr>
               </thead>
@@ -159,12 +173,6 @@ export default function Technicians() {
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.hours_billed != null ? 'var(--text)' : 'var(--text3)' }}>{t.hours_billed != null ? hrsNum(t.hours_billed) : '\u2014'}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.vehicle_count != null ? 'var(--text)' : 'var(--text3)' }}>{t.vehicle_count != null ? t.vehicle_count : '\u2014'}</td>
                     {showFinancials && <td style={{ padding: '8px 12px', textAlign: 'right', color: t.labour_revenue != null ? 'var(--text)' : 'var(--text3)' }}>{t.labour_revenue != null ? money0(t.labour_revenue) : '\u2014'}</td>}
-                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>
-                      <input type="number" min="0" step="0.5" value={weekly[t.tech_id] ?? ''}
-                        onChange={e => setWeekly(prev => ({ ...prev, [t.tech_id]: e.target.value }))}
-                        placeholder={'\u2014'}
-                        style={{ width: '54px', textAlign: 'right', fontSize: '12px', padding: '3px 6px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text)' }} />
-                    </td>
                     <td style={{ padding: '8px 12px', textAlign: 'right' }}>{t.efficiency != null
                       ? <span style={{ color: t.efficiency >= effTarget ? 'var(--success)' : 'var(--warning)', fontWeight: '600' }}>{Math.round(t.efficiency)}%{t.hours_worked != null ? <span style={{ color: 'var(--text3)', fontWeight: '400', fontSize: '11px' }}> ({hrsNum(t.hours_worked)}h)</span> : null}</span>
                       : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>
