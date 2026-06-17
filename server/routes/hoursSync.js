@@ -5,6 +5,33 @@ const centsToDollars = (c) => (Number(c) || 0) / 100;
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+const HOLIDAYS = {
+  ab: { 2026: ['2026-01-01','2026-02-16','2026-04-03','2026-05-18','2026-07-01','2026-09-07','2026-10-12','2026-11-11','2026-12-25','2026-12-28'] },
+  bc: { 2026: ['2026-01-01','2026-02-16','2026-04-03','2026-05-18','2026-07-01','2026-08-03','2026-09-07','2026-09-30','2026-10-12','2026-11-11','2026-12-25','2026-12-28'] }
+};
+function holidaySetSrv(province, year) {
+  const prov = (province || 'ab').toLowerCase();
+  const list = (HOLIDAYS[prov] && HOLIDAYS[prov][year]) || (HOLIDAYS.ab[year] || []);
+  return new Set(list);
+}
+// Working days (Mon-Fri minus stat holidays) in [startStr..endStr] inclusive.
+// Spans months/years; province-aware. Worked hours = result x 8 (40/wk over 5 days).
+function workingDaysInRange(province, startStr, endStr) {
+  const start = new Date(startStr + 'T00:00:00Z');
+  const end = new Date(endStr + 'T00:00:00Z');
+  let n = 0; const hy = {};
+  for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
+    const d = new Date(t); const dow = d.getUTCDay();
+    if (dow === 0 || dow === 6) continue;
+    const y = d.getUTCFullYear();
+    if (!hy[y]) hy[y] = holidaySetSrv(province, y);
+    const iso = `${y}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+    if (hy[y].has(iso)) continue;
+    n++;
+  }
+  return n;
+}
+
 // Resilient Shopmonkey fetch: retries on 429/5xx with backoff (honouring
 // Retry-After), and ultimately throws rather than letting a caller silently
 // skip an order. This is what stops the recompute from quietly undercounting.
@@ -199,20 +226,22 @@ module.exports = (pool) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     try {
-      let { period_start, period_end } = req.body || {};
+      let { period_start, period_end, period_type } = req.body || {};
+      period_type = (period_type === 'ytd') ? 'ytd' : 'mtd';
+      const now = new Date();
       if (!period_start || !period_end) {
-        const now = new Date();
-        period_start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+        const y = now.getUTCFullYear();
+        const m0 = (period_type === 'ytd') ? 0 : now.getUTCMonth();
+        period_start = new Date(Date.UTC(y, m0, 1)).toISOString().slice(0, 10);
         period_end = now.toISOString().slice(0, 10);
       }
       const startIso = new Date(period_start + 'T00:00:00.000Z').toISOString();
       const endIso = new Date(period_end + 'T23:59:59.999Z').toISOString();
-      const days = Math.max(1, Math.round((new Date(endIso) - new Date(startIso)) / 86400000));
-      const weeks = days / 7;
 
-      const whRes = await pool.query('SELECT tech_id, hours_per_week FROM tech_weekly_hours WHERE location_id = $1', [req.params.locationId]);
-      const weeklyByTech = {};
-      for (const r of whRes.rows) if (r.hours_per_week != null) weeklyByTech[r.tech_id] = Number(r.hours_per_week);
+      // Worked hours = working days elapsed in [start..end] x 8 (holiday + province aware, uniform per tech).
+      const locRes = await pool.query('SELECT province FROM locations WHERE id = $1', [req.params.locationId]);
+      const province = (locRes.rows[0] && locRes.rows[0].province) || 'ab';
+      const workedHours = workingDaysInRange(province, period_start, period_end) * 8;
 
       const techNames = await fetchTechNames(pool, req.params.locationId);
       const orders = await fetchInvoicedOrdersBetween(apiKey, startIso, endIso);
@@ -222,18 +251,17 @@ module.exports = (pool) => {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await client.query('DELETE FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2', [req.params.locationId, period_end]);
+        await client.query('ALTER TABLE tech_efficiency ADD COLUMN IF NOT EXISTS period_type VARCHAR(8)');
+        await client.query('DELETE FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2 AND period_type = $3', [req.params.locationId, period_end, period_type]);
         for (const t of sold) {
-          const weekly = weeklyByTech[t.tech_id];
-          const worked = weekly != null ? Math.round(weekly * weeks * 100) / 100 : null;
-          const efficiency = worked && worked > 0 ? Math.round((t.hours_sold / worked) * 100) : null;
+          const efficiency = workedHours > 0 ? Math.round((t.hours_sold / workedHours) * 100) : null;
           await client.query(
             `INSERT INTO tech_efficiency
-               (location_id, snapshot_date, tech_id, tech_name, hours_available, hours_worked, hours_sold, hours_billed, vehicle_count, efficiency, labour_revenue, parts_gp)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-            [req.params.locationId, period_end, t.tech_id || null, t.tech_name, null, worked, t.hours_sold, t.hours_billed, t.vehicle_count, efficiency, t.labour_revenue, null]
+               (location_id, snapshot_date, period_type, tech_id, tech_name, hours_available, hours_worked, hours_sold, hours_billed, vehicle_count, efficiency, labour_revenue, parts_gp)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            [req.params.locationId, period_end, period_type, t.tech_id || null, t.tech_name, null, workedHours, t.hours_sold, t.hours_billed, t.vehicle_count, efficiency, t.labour_revenue, null]
           );
-          written.push({ tech_name: t.tech_name, hours_sold: t.hours_sold, hours_worked: worked, efficiency });
+          written.push({ tech_name: t.tech_name, hours_sold: t.hours_sold, hours_worked: workedHours, efficiency });
         }
         await client.query('COMMIT');
       } catch (e) {
@@ -242,7 +270,7 @@ module.exports = (pool) => {
       } finally {
         client.release();
       }
-      res.json({ ok: true, period_start, period_end, weeks: Math.round(weeks * 100) / 100, count: written.length, written });
+      res.json({ ok: true, period_type, period_start, period_end, worked_hours: workedHours, count: written.length, written });
     } catch (e) {
       res.status(502).json({ error: String(e.message || e) });
     }
