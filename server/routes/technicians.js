@@ -9,6 +9,39 @@ const { authenticateToken } = require('../middleware/auth');
 module.exports = (pool) => {
   const router = express.Router();
 
+  let _whInit = false;
+  const ensureWeeklyHoursTable = async () => {
+    if (_whInit) return;
+    await pool.query(`CREATE TABLE IF NOT EXISTS tech_weekly_hours (
+      location_id UUID NOT NULL,
+      tech_id VARCHAR(255) NOT NULL,
+      tech_name VARCHAR(255),
+      hours_per_week DECIMAL(6,2),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      PRIMARY KEY (location_id, tech_id)
+    )`);
+    _whInit = true;
+  };
+
+  router.post('/:locationId/weekly-hours', authenticateToken, async (req, res) => {
+    try {
+      await ensureWeeklyHoursTable();
+      const { tech_id, tech_name, hours_per_week } = req.body || {};
+      if (!tech_id) return res.status(400).json({ error: 'tech_id required' });
+      const hpw = hours_per_week === '' || hours_per_week == null ? null : Number(hours_per_week);
+      await pool.query(
+        `INSERT INTO tech_weekly_hours (location_id, tech_id, tech_name, hours_per_week, updated_at)
+         VALUES ($1,$2,$3,$4,NOW())
+         ON CONFLICT (location_id, tech_id)
+         DO UPDATE SET hours_per_week = $4, tech_name = COALESCE($3, tech_weekly_hours.tech_name), updated_at = NOW()`,
+        [req.params.locationId, tech_id, tech_name || null, hpw]
+      );
+      res.json({ ok: true, tech_id, hours_per_week: hpw });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/:locationId', authenticateToken, async (req, res) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     try {
@@ -77,6 +110,11 @@ module.exports = (pool) => {
 
       // Only show techs who logged labour this month (present in tech_efficiency).
       // Drops roster members who did no tech work (e.g. owners on the roster).
+      await ensureWeeklyHoursTable();
+      const whRes = await pool.query('SELECT tech_id, hours_per_week FROM tech_weekly_hours WHERE location_id = $1', [req.params.locationId]);
+      const whByTech = {};
+      for (const r of whRes.rows) whByTech[r.tech_id] = r.hours_per_week;
+
       const activeRoster = snapshotDate ? roster.filter(t => statsByTech[t.tech_id]) : roster;
       const technicians = activeRoster.map(t => {
         const h = statsByTech[t.tech_id];
@@ -88,7 +126,8 @@ module.exports = (pool) => {
           vehicle_count: h && h.vehicle_count != null ? Number(h.vehicle_count) : null,
           hours_worked: h && h.hours_worked != null ? Number(h.hours_worked) : null,
           efficiency: h && h.efficiency != null ? Number(h.efficiency) : null,
-          labour_revenue: h && h.labour_revenue != null ? Number(h.labour_revenue) : null
+          labour_revenue: h && h.labour_revenue != null ? Number(h.labour_revenue) : null,
+          hours_per_week: whByTech[t.tech_id] != null ? Number(whByTech[t.tech_id]) : null
         };
       });
 

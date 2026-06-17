@@ -155,9 +155,9 @@ module.exports = (pool) => {
         for (const m of matched) {
           await client.query(
             `INSERT INTO tech_efficiency
-               (location_id, snapshot_date, tech_id, tech_name, hours_available, hours_worked, hours_sold, efficiency, labour_revenue, parts_gp)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-            [req.params.locationId, period_end, m.tech_id || null, m.tech_name, null, m.hours_worked, m.hours_sold, m.efficiency, m.labour_revenue, null]
+               (location_id, snapshot_date, tech_id, tech_name, hours_available, hours_worked, hours_sold, hours_billed, vehicle_count, efficiency, labour_revenue, parts_gp)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            [req.params.locationId, period_end, m.tech_id || null, m.tech_name, null, m.hours_worked, m.hours_sold, m.hours_billed, m.vehicle_count, m.efficiency, m.labour_revenue, null]
           );
         }
         await client.query('COMMIT');
