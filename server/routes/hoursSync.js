@@ -3,6 +3,24 @@ const { authenticateToken } = require('../middleware/auth');
 
 const centsToDollars = (c) => (Number(c) || 0) / 100;
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Resilient Shopmonkey fetch: retries on 429/5xx with backoff (honouring
+// Retry-After), and ultimately throws rather than letting a caller silently
+// skip an order. This is what stops the recompute from quietly undercounting.
+async function smFetch(url, opts, tries = 6) {
+  for (let i = 0; i < tries; i++) {
+    const res = await fetch(url, opts);
+    if (res.status === 429 || res.status >= 500) {
+      const ra = Number(res.headers.get('retry-after'));
+      const wait = ra > 0 ? ra * 1000 : Math.min(8000, 400 * Math.pow(2, i));
+      await sleep(wait);
+      continue;
+    }
+    return res;
+  }
+  throw new Error(`Shopmonkey rate-limited after ${tries} retries: ${url}`);
+}
 
 async function fetchTechNames(pool, locationId) {
   const map = {};
@@ -28,7 +46,7 @@ async function fetchInvoicedOrdersBetween(apiKey, startIso, endIso, maxPages = 4
       limit: String(pageSize),
       skip: String(page * pageSize)
     });
-    const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${params}`, {
+    const res = await smFetch(`https://api.shopmonkey.cloud/v3/order?${params}`, {
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
     });
     if (!res.ok) throw new Error(`order list ${res.status}: ${await res.text()}`);
@@ -52,14 +70,14 @@ async function computeTechSold(apiKey, orders, techNames) {
   };
   for (const o of orders) {
     let lines = [];
-    try {
-      const sr = await fetch(`https://api.shopmonkey.cloud/v3/order/${o.id}/service?limit=100`, {
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
-      });
-      if (!sr.ok) continue;
-      const sj = await sr.json();
-      lines = (sj && sj.data && sj.data.data) ? sj.data.data : (sj.data || []);
-    } catch (e) { continue; }
+    const sr = await smFetch(`https://api.shopmonkey.cloud/v3/order/${o.id}/service?limit=100`, {
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+    });
+    if (sr.status === 404) { await sleep(60); continue; }
+    if (!sr.ok) throw new Error(`service fetch ${sr.status} for order ${o.id}`);
+    const sj = await sr.json();
+    lines = (sj && sj.data && sj.data.data) ? sj.data.data : (sj.data || []);
+    await sleep(60);
     for (const ln of (lines || [])) {
       const labs = (ln.labors || []).filter(l => l.technicianId);
       if (!labs.length) continue;
