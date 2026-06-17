@@ -189,7 +189,7 @@ module.exports = (pool) => {
       }
       const startIso = new Date(period_start + 'T00:00:00.000Z').toISOString();
       const endIso = new Date(period_end + 'T23:59:59.999Z').toISOString();
-      const days = Math.max(1, Math.round((new Date(endIso) - new Date(startIso)) / 86400000) + 1);
+      const days = Math.max(1, Math.round((new Date(endIso) - new Date(startIso)) / 86400000));
       const weeks = days / 7;
 
       const whRes = await pool.query('SELECT tech_id, hours_per_week FROM tech_weekly_hours WHERE location_id = $1', [req.params.locationId]);
