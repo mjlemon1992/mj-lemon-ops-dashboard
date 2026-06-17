@@ -196,12 +196,18 @@ module.exports = (pool) => {
       const start = req.query.start || `${end.slice(0, 4)}-01-01`;
       const report = await qboGet(realmId, `/reports/ProfitAndLoss?start_date=${start}&end_date=${end}`);
       const lines = flattenPnl(report);
+      const _income = pick(lines, 'Total Income', 'Income');
+      const _cogs = pick(lines, 'Total Cost of Goods Sold', 'Total COGS');
+      const _grossDirect = pick(lines, 'Gross Profit');
       const headline = {
-        total_income: pick(lines, 'Total Income', 'Income'),
-        total_cogs: pick(lines, 'Total Cost of Goods Sold', 'Total COGS'),
-        gross_profit: pick(lines, 'Gross Profit'),
+        total_income: _income,
+        total_cogs: _cogs,
+        // Canadian QBO has no explicit Gross Profit row; derive income - COGS.
+        gross_profit: _grossDirect != null ? _grossDirect
+          : (_income != null && _cogs != null ? Math.round((_income - _cogs) * 100) / 100 : null),
         total_expenses: pick(lines, 'Total Expenses', 'Expenses'),
-        net_income: pick(lines, 'Net Income', 'Net Operating Income')
+        // Canadian QBO labels net income "PROFIT".
+        net_income: pick(lines, 'Net Income', 'Net Operating Income', 'PROFIT')
       };
       await pool.query(
         `INSERT INTO qbo_pnl_cache
