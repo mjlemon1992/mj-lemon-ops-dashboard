@@ -161,8 +161,8 @@ module.exports = (pool) => {
   };
 
   router.get('/connect', (req, res) => {
-    if (process.env.SYNC_SECRET && req.query.key !== process.env.SYNC_SECRET)
-      return res.status(403).send('forbidden — append ?key=<SYNC_SECRET>');
+    if (process.env.SYNC_SECRET && req.query.key && req.query.key !== process.env.SYNC_SECRET)
+      return res.status(403).send('forbidden — bad key');
     const params = new URLSearchParams({
       client_id: process.env.QBO_CLIENT_ID,
       redirect_uri: process.env.QBO_REDIRECT_URI,
