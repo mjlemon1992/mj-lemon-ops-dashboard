@@ -94,8 +94,10 @@ export default function Home() {
   const gExpenses = pnlList.reduce((s, p) => s + num(p.total_expenses), 0);
   const gNet = pnlList.reduce((s, p) => s + num(p.net_income), 0);
   const pnlPeriod = pnlList[0] || null;
-  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '';
+  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '';
   const pnlMargin = gIncome > 0 ? (gNet / gIncome) * 100 : 0;
+  const grossMargin = gIncome > 0 ? (gGross / gIncome) * 100 : 0;
+  const expenseRatio = gIncome > 0 ? (gExpenses / gIncome) * 100 : 0;
 
   const allAlerts = Object.entries(metrics).flatMap(([locId, m]) => {
     if (!m?.alerts) return [];
@@ -178,12 +180,12 @@ export default function Home() {
             <div className="metric-card">
               <div className="metric-label">Gross profit</div>
               <div className="metric-value">{money0(gGross)}</div>
-              <div className="metric-sub">income \u2212 COGS</div>
+              <div className="metric-sub">{gIncome > 0 ? `${grossMargin.toFixed(1)}% gross margin` : "income less COGS"}</div>
             </div>
             <div className="metric-card">
               <div className="metric-label">Expenses</div>
               <div className="metric-value">{money0(gExpenses)}</div>
-              <div className="metric-sub">operating</div>
+              <div className="metric-sub">{gIncome > 0 ? `${expenseRatio.toFixed(1)}% of income` : "operating"}</div>
             </div>
             <div className="metric-card">
               <div className="metric-label">Net profit</div>
