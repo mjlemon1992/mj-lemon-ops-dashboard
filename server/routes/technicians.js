@@ -82,6 +82,9 @@ module.exports = (pool) => {
       let statsByTech = {};
       let snapshotDate = null;
       const period = (req.query && req.query.period === 'ytd') ? 'ytd' : 'mtd';
+      // Ensure the period_type column exists before we query it — the read path
+      // must not depend on a recompute having run first on this container.
+      try { await pool.query('ALTER TABLE tech_efficiency ADD COLUMN IF NOT EXISTS period_type VARCHAR(8)'); } catch (e) {}
       // Latest snapshot for the requested period (mtd|ytd), never future-dated
       // (a future snapshot must never outrank today's). Falls back to any
       // worked-hours snapshot if this period hasn't been computed yet.
