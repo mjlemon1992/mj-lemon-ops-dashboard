@@ -13,6 +13,9 @@ export default function Technicians() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const showFinancials = user?.role !== 'manager';
+  const [weekly, setWeekly] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [recomputeMsg, setRecomputeMsg] = useState(null);
 
   useEffect(() => {
     api('/locations').then(locs => {
@@ -27,7 +30,13 @@ export default function Technicians() {
   useEffect(() => {
     if (!locId) return;
     setLoading(true); setError(null);
-    api(`/technicians/${locId}`).then(d => { setData(d); setLoading(false); })
+    api(`/technicians/${locId}`).then(d => {
+        setData(d);
+        const w = {};
+        (d.technicians || []).forEach(t => { if (t.hours_per_week != null) w[t.tech_id] = String(t.hours_per_week); });
+        setWeekly(w);
+        setLoading(false);
+      })
       .catch(err => { setError(err.message || 'Could not load technicians'); setLoading(false); });
   }, [locId]); // eslint-disable-line
 
@@ -40,7 +49,36 @@ export default function Technicians() {
   const totalVehicles = techs.reduce((s, t) => s + num(t.vehicle_count), 0);
   const distinctVehicles = data?.distinct_vehicles_mtd != null ? data.distinct_vehicles_mtd : null;
 
-  const cols = showFinancials ? 6 : 5;
+  const effTechs = techs.filter(t => t.efficiency != null && t.hours_worked != null);
+  const _gWorked = effTechs.reduce((s, t) => s + num(t.hours_worked), 0);
+  const _gSold = effTechs.reduce((s, t) => s + num(t.hours_sold), 0);
+  const groupEff = _gWorked > 0 ? Math.round((_gSold / _gWorked) * 100) : null;
+  const effTarget = 80;
+
+  const saveAndRecompute = async () => {
+    if (saving) return;
+    setSaving(true); setRecomputeMsg(null); setError(null);
+    try {
+      for (const t of techs) {
+        const w = weekly[t.tech_id];
+        if (w === undefined || w === '') continue;
+        await api(`/technicians/${locId}/weekly-hours`, { method: 'POST', body: JSON.stringify({ tech_id: t.tech_id, tech_name: t.tech_name, hours_per_week: w }) });
+      }
+      const r = await api(`/hours/${locId}/recompute-from-weekly`, { method: 'POST', body: JSON.stringify({}) });
+      setRecomputeMsg(`Updated ${r.count} techs over ${r.weeks} weeks (${r.period_start} to ${r.period_end}).`);
+      const d = await api(`/technicians/${locId}`);
+      setData(d);
+      const w2 = {};
+      (d.technicians || []).forEach(t => { if (t.hours_per_week != null) w2[t.tech_id] = String(t.hours_per_week); });
+      setWeekly(w2);
+    } catch (e) {
+      setError(e.message || 'Recompute failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cols = showFinancials ? 7 : 6;
 
   return (
     <div>
@@ -88,6 +126,16 @@ export default function Technicians() {
             </div>
           )}
 
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
+            <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
+              {recomputeMsg ? recomputeMsg : 'Set each tech\u2019s standard weekly hours, then recompute. Worked hours = weekly \u00d7 weeks this month.'}
+            </div>
+            <button onClick={saveAndRecompute} disabled={saving}
+              style={{ fontSize: '12px', fontWeight: '500', padding: '6px 14px', borderRadius: '6px', cursor: saving ? 'default' : 'pointer',
+                background: saving ? 'var(--surface2)' : 'var(--accent)', color: saving ? 'var(--text3)' : '#fff', border: 'none', whiteSpace: 'nowrap' }}>
+              {saving ? 'Recomputing\u2026' : 'Save & recompute'}
+            </button>
+          </div>
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
@@ -97,6 +145,7 @@ export default function Technicians() {
                   <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Hours billed</th>
                   <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Vehicles</th>
                   {showFinancials && <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Labour revenue</th>}
+                  <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Hrs/week</th>
                   <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Efficiency</th>
                 </tr>
               </thead>
@@ -110,7 +159,15 @@ export default function Technicians() {
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.hours_billed != null ? 'var(--text)' : 'var(--text3)' }}>{t.hours_billed != null ? hrsNum(t.hours_billed) : '\u2014'}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.vehicle_count != null ? 'var(--text)' : 'var(--text3)' }}>{t.vehicle_count != null ? t.vehicle_count : '\u2014'}</td>
                     {showFinancials && <td style={{ padding: '8px 12px', textAlign: 'right', color: t.labour_revenue != null ? 'var(--text)' : 'var(--text3)' }}>{t.labour_revenue != null ? money0(t.labour_revenue) : '\u2014'}</td>}
-                    <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text3)' }}>awaiting payroll</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                      <input type="number" min="0" step="0.5" value={weekly[t.tech_id] ?? ''}
+                        onChange={e => setWeekly(prev => ({ ...prev, [t.tech_id]: e.target.value }))}
+                        placeholder={'\u2014'}
+                        style={{ width: '54px', textAlign: 'right', fontSize: '12px', padding: '3px 6px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text)' }} />
+                    </td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>{t.efficiency != null
+                      ? <span style={{ color: t.efficiency >= effTarget ? 'var(--success)' : 'var(--warning)', fontWeight: '600' }}>{Math.round(t.efficiency)}%{t.hours_worked != null ? <span style={{ color: 'var(--text3)', fontWeight: '400', fontSize: '11px' }}> ({hrsNum(t.hours_worked)}h)</span> : null}</span>
+                      : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -123,6 +180,7 @@ export default function Technicians() {
                     <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{distinctVehicles != null ? distinctVehicles : '\u2014'}</td>
                     {showFinancials && <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{money0(totalRev)}</td>}
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text3)' }}>&mdash;</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }} className="strong">{groupEff != null ? `${groupEff}%` : '\u2014'}</td>
                   </tr>
                 </tfoot>
               )}

@@ -174,5 +174,61 @@ module.exports = (pool) => {
     }
   });
 
+  // Recompute efficiency from stored weekly hours (model A).
+  // worked = weekly_hours x weeks_in_period; sold/billed/vehicles computed over
+  // the same window; joined to weekly hours by tech_id. Defaults to current month.
+  router.post('/:locationId/recompute-from-weekly', syncAuth, async (req, res) => {
+    const apiKey = process.env.SHOPMONKEY_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
+    try {
+      let { period_start, period_end } = req.body || {};
+      if (!period_start || !period_end) {
+        const now = new Date();
+        period_start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+        period_end = now.toISOString().slice(0, 10);
+      }
+      const startIso = new Date(period_start + 'T00:00:00.000Z').toISOString();
+      const endIso = new Date(period_end + 'T23:59:59.999Z').toISOString();
+      const days = Math.max(1, Math.round((new Date(endIso) - new Date(startIso)) / 86400000) + 1);
+      const weeks = days / 7;
+
+      const whRes = await pool.query('SELECT tech_id, hours_per_week FROM tech_weekly_hours WHERE location_id = $1', [req.params.locationId]);
+      const weeklyByTech = {};
+      for (const r of whRes.rows) if (r.hours_per_week != null) weeklyByTech[r.tech_id] = Number(r.hours_per_week);
+
+      const techNames = await fetchTechNames(pool, req.params.locationId);
+      const orders = await fetchInvoicedOrdersBetween(apiKey, startIso, endIso);
+      const sold = await computeTechSold(apiKey, orders, techNames);
+
+      const written = [];
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2', [req.params.locationId, period_end]);
+        for (const t of sold) {
+          const weekly = weeklyByTech[t.tech_id];
+          const worked = weekly != null ? Math.round(weekly * weeks * 100) / 100 : null;
+          const efficiency = worked && worked > 0 ? Math.round((t.hours_sold / worked) * 100) : null;
+          await client.query(
+            `INSERT INTO tech_efficiency
+               (location_id, snapshot_date, tech_id, tech_name, hours_available, hours_worked, hours_sold, hours_billed, vehicle_count, efficiency, labour_revenue, parts_gp)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            [req.params.locationId, period_end, t.tech_id || null, t.tech_name, null, worked, t.hours_sold, t.hours_billed, t.vehicle_count, efficiency, t.labour_revenue, null]
+          );
+          written.push({ tech_name: t.tech_name, hours_sold: t.hours_sold, hours_worked: worked, efficiency });
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+      res.json({ ok: true, period_start, period_end, weeks: Math.round(weeks * 100) / 100, count: written.length, written });
+    } catch (e) {
+      res.status(502).json({ error: String(e.message || e) });
+    }
+  });
+
   return router;
 };
