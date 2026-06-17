@@ -80,6 +80,9 @@ export default function Technicians() {
       }
     } catch (e) {
       setError(e.message || 'Refresh failed');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const cols = showFinancials ? 7 : 6;
