@@ -23,7 +23,6 @@ const metricsRoutes = require('./routes/metrics');
 const techEfficiencyRoutes = require('./routes/techEfficiency');
 const techniciansRoutes = require('./routes/technicians');
 const shopmonkeySyncRoutes = require('./routes/shopmonkeySync');
-const qboSyncRoutes = require('./routes/qboSync');
 const hoursSyncRoutes = require('./routes/hoursSync');
 
 app.use('/api/auth', authRoutes(pool));
@@ -34,7 +33,6 @@ app.use('/api/metrics', metricsRoutes(pool));
 app.use('/api/tech-efficiency', techEfficiencyRoutes(pool));
 app.use('/api/technicians', techniciansRoutes(pool));
 app.use('/api/sync', shopmonkeySyncRoutes(pool));
-app.use('/api/qbo', qboSyncRoutes(pool));
 app.use('/api/hours', hoursSyncRoutes(pool));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

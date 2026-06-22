@@ -8,7 +8,6 @@ const REPORTS = [
   { icon: '✓', title: 'End of month', sub: 'Full month vs target, vs prior month', freq: 'Last day of month', available: false },
   { icon: '👤', title: 'Technician efficiency', sub: 'Available vs worked vs sold per tech', freq: 'Live from Shopmonkey', available: true, route: '/reports/tech-efficiency' },
   { icon: '◈', title: 'Parts margin report', sub: 'All jobs below threshold for selected period', freq: 'On demand', available: false },
-  { icon: '↑', title: 'Profit per hour', sub: 'GP per hour vs target by week/month', freq: 'Weekly', available: false },
 ];
 
 export default function Reports() {
@@ -16,7 +15,7 @@ export default function Reports() {
   return (
     <div>
       <div style={{ background: 'rgba(77,184,255,0.08)', border: '0.5px solid rgba(77,184,255,0.2)', borderRadius: 'var(--radius)', padding: '12px 16px', marginBottom: '16px', fontSize: '12px', color: 'var(--info)' }}>
-        Reports will be available after connecting Shopmonkey and QBO on closing day (July 31). The Make.com automations will populate this section automatically.
+        Operational reports run live from Shopmonkey. Click an available report to open it.
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
         {REPORTS.map(r => (

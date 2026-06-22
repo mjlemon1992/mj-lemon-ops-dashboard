@@ -15,7 +15,6 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSync, setLastSync] = useState(null);
-  const [pnl, setPnl] = useState({});
 
   const currentMonth = new Date().getMonth() + 1;
   const currentYear = new Date().getFullYear();
@@ -30,7 +29,6 @@ export default function Home() {
             const monthTarget = t.find(r => r.month === currentMonth);
             setTargets(prev => ({ ...prev, [loc.id]: monthTarget }));
           }).catch(() => {}),
-          api(`/qbo/${loc.id}/pnl`).then(p => setPnl(prev => ({ ...prev, [loc.id]: p }))).catch(() => {}),
           api(`/technicians/${loc.id}?period=mtd`).then(d => setTeff(prev => ({ ...prev, [loc.id]: d }))).catch(() => {})
         ])
       ));
@@ -103,17 +101,6 @@ export default function Home() {
   const gRoTarget = _locTargets.length ? (_locTargets.reduce((s,t)=>s+(parseFloat(t.avg_ro_value)||0),0) / _locTargets.length) : 0;
   const money0 = n => '$' + Math.round(n).toLocaleString('en-CA');
 
-  const pnlList = Object.values(pnl).filter(Boolean);
-  const hasPnl = pnlList.length > 0;
-  const gIncome = pnlList.reduce((s, p) => s + num(p.total_income), 0);
-  const gGross = pnlList.reduce((s, p) => s + num(p.gross_profit), 0);
-  const gExpenses = pnlList.reduce((s, p) => s + num(p.total_expenses), 0);
-  const gNet = pnlList.reduce((s, p) => s + num(p.net_income), 0);
-  const pnlPeriod = pnlList[0] || null;
-  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '';
-  const pnlMargin = gIncome > 0 ? (gNet / gIncome) * 100 : 0;
-  const grossMargin = gIncome > 0 ? (gGross / gIncome) * 100 : 0;
-  const expenseRatio = gIncome > 0 ? (gExpenses / gIncome) * 100 : 0;
 
   const allAlerts = Object.entries(metrics).flatMap(([locId, m]) => {
     if (!m?.alerts) return [];
@@ -179,38 +166,6 @@ export default function Home() {
         </div>
       )}
 
-      {(user?.role === 'owner' || user?.role === 'partner') && hasPnl && (
-        <div style={{ marginBottom: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>Financials</div>
-            <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
-              {pnlPeriod ? `${fmtDate(pnlPeriod.period_start)} \u2013 ${fmtDate(pnlPeriod.period_end)} \u00b7 ` : ''}from QuickBooks <span style={{ color: 'var(--warning)' }}>(sandbox)</span>
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-            <div className="metric-card">
-              <div className="metric-label">Income</div>
-              <div className="metric-value">{money0(gIncome)}</div>
-              <div className="metric-sub">total revenue</div>
-            </div>
-            <div className="metric-card">
-              <div className="metric-label">Gross profit</div>
-              <div className="metric-value">{money0(gGross)}</div>
-              <div className="metric-sub">{gIncome > 0 ? `${grossMargin.toFixed(1)}% gross margin` : "income less COGS"}</div>
-            </div>
-            <div className="metric-card">
-              <div className="metric-label">Expenses</div>
-              <div className="metric-value">{money0(gExpenses)}</div>
-              <div className="metric-sub">{gIncome > 0 ? `${expenseRatio.toFixed(1)}% of income` : "operating"}</div>
-            </div>
-            <div className="metric-card">
-              <div className="metric-label">Net profit</div>
-              <div className="metric-value" style={{ color: gNet >= 0 ? 'var(--success)' : 'var(--danger)' }}>{money0(gNet)}</div>
-              <div className="metric-sub">{gIncome > 0 ? `${pnlMargin.toFixed(1)}% margin` : 'bottom line'}</div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
         <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>Locations</div>
