@@ -75,7 +75,7 @@ export default function Performance() {
 
   const _hidden = new Set(((techData && techData.hidden) || []).map(h => h.tech_id || h.tech_name));
   const techs = ((techData && techData.technicians) || []).filter(t => !_hidden.has(t.tech_id || t.tech_name));
-  const techCount = techData?.count ?? (loc ? loc.num_technicians : 0);
+  const techCount = techs.length || (loc ? loc.num_technicians : 0);
   const hasHours = !!(techData && techData.has_hours);
   const totalSold = techs.reduce((s, t) => s + num(t.hours_sold), 0);
   const totalBilled = techs.reduce((s, t) => s + num(t.hours_billed), 0);
