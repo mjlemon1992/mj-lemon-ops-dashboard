@@ -72,19 +72,16 @@ async function getActuals(pool, now) {
 
 async function computeEfficiency(pool, now) {
   try {
-    const loc = await pool.query('SELECT province FROM locations WHERE id = $1 LIMIT 1', [LOCATION_ID]);
-    const province = (loc.rows[0] && loc.rows[0].province) || 'ab';
-    const snap = await pool.query(
-      `SELECT COALESCE(SUM(hours_sold),0) AS sold
+    const r = await pool.query(
+      `SELECT COALESCE(SUM(hours_sold),0) AS sold,
+              COALESCE(SUM(hours_worked),0) AS worked
          FROM tech_efficiency
         WHERE location_id = $1
+          AND hours_worked IS NOT NULL AND hours_worked > 0
           AND snapshot_date = (SELECT MAX(snapshot_date) FROM tech_efficiency WHERE location_id = $1)`,
       [LOCATION_ID]);
-    const sold = Number(snap.rows[0] && snap.rows[0].sold) || 0;
-    if (sold <= 0) return null;
-    const start = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
-    const end = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    const worked = workingDaysInRange(province, start, end) * 8;
+    const sold = Number(r.rows[0] && r.rows[0].sold) || 0;
+    const worked = Number(r.rows[0] && r.rows[0].worked) || 0;
     return worked > 0 ? Math.round((sold / worked) * 100) : null;
   } catch { return null; }
 }
