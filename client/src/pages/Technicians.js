@@ -17,6 +17,7 @@ export default function Technicians() {
   const [saving, setSaving] = useState(false);
   const [recomputeMsg, setRecomputeMsg] = useState(null);
   const [period, setPeriod] = useState('mtd');
+  const [hidden, setHidden] = useState(new Set());
 
   useEffect(() => {
     api('/locations').then(locs => {
@@ -41,8 +42,10 @@ export default function Technicians() {
       .catch(err => { setError(err.message || 'Could not load technicians'); setLoading(false); });
   }, [locId]); // eslint-disable-line
 
-  const techs = (data && data.technicians) || [];
-  const count = data?.count ?? 0;
+  const allTechs = (data && data.technicians) || [];
+  const techs = allTechs.filter(t => !hidden.has(t.tech_id || t.tech_name));
+  const hiddenTechList = allTechs.filter(t => hidden.has(t.tech_id || t.tech_name));
+  const count = techs.length;
   const hasHours = !!(data && data.has_hours);
   const totalSold = techs.reduce((s, t) => s + num(t.hours_sold), 0);
   const totalBilled = techs.reduce((s, t) => s + num(t.hours_billed), 0);
@@ -55,6 +58,20 @@ export default function Technicians() {
   const _gSold = effTechs.reduce((s, t) => s + num(t.hours_sold), 0);
   const groupEff = _gWorked > 0 ? Math.round((_gSold / _gWorked) * 100) : null;
   const effTarget = 80;
+
+  useEffect(() => {
+    if (data && Array.isArray(data.hidden)) {
+      setHidden(new Set(data.hidden.map(h => h.tech_id || h.tech_name)));
+    }
+  }, [data]);
+
+  const toggleHide = async (t, willHide) => {
+    const key = t.tech_id || t.tech_name;
+    setHidden(prev => { const n = new Set(prev); if (willHide) n.add(key); else n.delete(key); return n; });
+    try {
+      await api(`/technicians/${locId}/hidden-techs`, { method: 'POST', body: JSON.stringify({ tech_id: t.tech_id, tech_name: t.tech_name, hidden: willHide }) });
+    } catch (e) {}
+  };
 
   const loadPeriod = async (pk) => {
     const d = await api(`/technicians/${locId}?period=${pk}`);
@@ -170,7 +187,7 @@ export default function Technicians() {
                 {techs.length === 0 ? (
                   <tr><td colSpan={cols} style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)' }}>No technicians returned from Shopmonkey.</td></tr>
                 ) : techs.map(t => (
-                  <tr key={t.tech_id || t.tech_name} style={{ borderTop: '0.5px solid var(--border)' }}>
+                  <tr key={t.tech_id || t.tech_name} onClick={() => toggleHide(t, true)} title="Click to hide from board" style={{ borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
                     <td style={{ padding: '8px 12px', color: 'var(--text)' }} className="strong">{t.tech_name}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.hours_sold != null ? 'var(--text)' : 'var(--text3)' }}>{t.hours_sold != null ? hrsNum(t.hours_sold) : '\u2014'}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.hours_billed != null ? 'var(--text)' : 'var(--text3)' }}>{t.hours_billed != null ? hrsNum(t.hours_billed) : '\u2014'}</td>
@@ -197,6 +214,18 @@ export default function Technicians() {
               )}
             </table>
           </div>
+          {hiddenTechList.length > 0 && (
+            <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text3)', display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: '600' }}>Hidden:</span>
+              {hiddenTechList.map(t => (
+                <button key={t.tech_id || t.tech_name} onClick={() => toggleHide(t, false)}
+                  style={{ fontSize: '11px', padding: '2px 10px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text)', cursor: 'pointer' }}>
+                  {t.tech_name} +
+                </button>
+              ))}
+              <span>&middot; click a name to restore it</span>
+            </div>
+          )}
 
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
             Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks, goodwill). Labour revenue is pre-tax, after discounts. Efficiency = hours sold \u00f7 worked hours, measured month-to-date; worked = each tech\u2019s weekly hours \u00d7 weeks elapsed this month. Multi-tech jobs attribute each labour line to the tech who performed it, matching Shopmonkey&rsquo;s per-technician report.
