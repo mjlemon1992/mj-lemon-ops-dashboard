@@ -9,6 +9,7 @@ import Technicians from './pages/Technicians';
 import Alerts from './pages/Alerts';
 import Reports from './pages/Reports';
 import ReportTechEfficiency from './pages/ReportTechEfficiency';
+import ReportSummary from './pages/ReportSummary';
 import Comebacks from './pages/Comebacks';
 import Locations from './pages/Locations';
 import Targets from './pages/Targets';
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="alerts" element={<Alerts />} />
             <Route path="reports" element={<ProtectedRoute ownerOrPartner><Reports /></ProtectedRoute>} />
             <Route path="reports/tech-efficiency" element={<ProtectedRoute ownerOrPartner><ReportTechEfficiency /></ProtectedRoute>} />
+            <Route path="reports/summary/:kind" element={<ProtectedRoute ownerOrPartner><ReportSummary /></ProtectedRoute>} />
             <Route path="comebacks" element={<Comebacks />} />
   <Route path="wip" element={<Wip />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />

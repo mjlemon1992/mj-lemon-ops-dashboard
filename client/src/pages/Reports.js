@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 
 const REPORTS = [
   { icon: '☀', title: 'End of day summary', sub: 'Jobs closed, revenue, vehicles on site, flags', freq: 'Daily at 6pm', available: false },
-  { icon: '📅', title: 'Weekly summary', sub: 'Revenue, car count, margins vs target', freq: 'Fridays at 5pm', available: false },
-  { icon: '📊', title: 'Mid month summary', sub: 'MTD pace vs monthly target', freq: '15th of each month', available: false },
-  { icon: '✓', title: 'End of month', sub: 'Full month vs target, vs prior month', freq: 'Last day of month', available: false },
+  { icon: '📅', title: 'Weekly summary', sub: 'Revenue, car count, margins vs target', freq: 'Live from Shopmonkey', available: true, route: '/reports/summary/weekly' },
+  { icon: '📊', title: 'Mid month summary', sub: 'MTD pace vs monthly target', freq: 'Live from Shopmonkey', available: true, route: '/reports/summary/mid-month' },
+  { icon: '✓', title: 'End of month', sub: 'Full month vs target, vs prior month', freq: 'Live from Shopmonkey', available: true, route: '/reports/summary/end-of-month' },
   { icon: '👤', title: 'Technician efficiency', sub: 'Available vs worked vs sold per tech', freq: 'Live from Shopmonkey', available: true, route: '/reports/tech-efficiency' },
   { icon: '◈', title: 'Parts margin report', sub: 'All jobs below threshold for selected period', freq: 'On demand', available: false },
 ];
