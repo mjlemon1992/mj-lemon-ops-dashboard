@@ -73,7 +73,8 @@ export default function Performance() {
   const pacePct = (actual, tgt) => wdPacePct(actual, tgt, loc?.province);
   const targetPct = (actual, tgt) => { if (!tgt || tgt <= 0 || !actual) return null; return Math.round((actual / tgt) * 100); };
 
-  const techs = (techData && techData.technicians) || [];
+  const _hidden = new Set(((techData && techData.hidden) || []).map(h => h.tech_id || h.tech_name));
+  const techs = ((techData && techData.technicians) || []).filter(t => !_hidden.has(t.tech_id || t.tech_name));
   const techCount = techData?.count ?? (loc ? loc.num_technicians : 0);
   const hasHours = !!(techData && techData.has_hours);
   const totalSold = techs.reduce((s, t) => s + num(t.hours_sold), 0);
@@ -93,7 +94,7 @@ export default function Performance() {
     ['Labour margin', labourMargin > 0 ? `${labourMargin.toFixed(1)}%` : '\u2014', target && target.labour_margin ? `vs ${num(target.labour_margin)}%` : 'vs 70%', labourMargin >= num((target && target.labour_margin) || 70)],
     ['Avg RO value', avgRO > 0 ? money0(avgRO) : '\u2014', (target && target.avg_ro_value) ? `${targetPct(avgRO, num(target.avg_ro_value))}% of target` : 'per car', target && target.avg_ro_value ? avgRO >= num(target.avg_ro_value) : true],
     ['Labour hours billed', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '\u2014', labourHoursComped > 0 ? `${hrsNum(labourHoursWorked)} worked, ${hrsNum(labourHoursComped)} comped` : 'this month', target && target.labour_hours ? labourHoursSold >= num(target.labour_hours) : true],
-    ['Efficiency', efficiency != null && efficiency > 0 ? `${Math.round(efficiency)}%` : '\u2014', efficiency != null && efficiency > 0 ? `vs ${effTarget}%` : 'pending QBO Time', efficiency != null ? efficiency >= effTarget : true],
+    ['Efficiency', groupEff != null && groupEff > 0 ? `${groupEff}%` : '\u2014', groupEff != null && groupEff > 0 ? `vs ${effTarget}%` : 'no hours yet', groupEff != null ? groupEff >= effTarget : true],
   ];
 
   const profitRows = [
@@ -134,8 +135,8 @@ export default function Performance() {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '4px' }}>Group efficiency</div>
-          <div style={{ fontSize: '30px', fontWeight: '500', color: 'var(--text)' }}>{efficiency != null && efficiency > 0 ? `${Math.round(efficiency)}%` : '\u2014'}</div>
-          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{efficiency != null && efficiency > 0 ? (efficiency >= effTarget ? `above ${effTarget}% target \u2713` : `below ${effTarget}% target`) : 'pending QBO Time'}</div>
+          <div style={{ fontSize: '30px', fontWeight: '500', color: 'var(--text)' }}>{groupEff != null && groupEff > 0 ? `${groupEff}%` : '\u2014'}</div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{groupEff != null && groupEff > 0 ? (groupEff >= effTarget ? `above ${effTarget}% target \u2713` : `below ${effTarget}% target`) : 'no hours yet'}</div>
         </div>
       </div>
 
