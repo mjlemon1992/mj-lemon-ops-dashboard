@@ -5,3 +5,4 @@ client/build/
 .env.local
 .DS_Store
 *.log
+diag.js
