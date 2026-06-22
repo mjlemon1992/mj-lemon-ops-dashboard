@@ -46,7 +46,7 @@ async function getActuals(pool, now) {
   const r = await pool.query(
     `SELECT revenue_mtd, car_count_mtd, parts_margin, labour_margin, efficiency_avg, pph
        FROM metrics_cache WHERE location_id = $1
-      ORDER BY created_at DESC LIMIT 1`, [LOCATION_ID]);
+      ORDER BY created_at DESC NULLS LAST LIMIT 1`, [LOCATION_ID]);
   const m = r.rows[0] || {};
   return {
     revenue:       numOrNull(m.revenue_mtd),
