@@ -42,6 +42,53 @@ module.exports = (pool) => {
     }
   });
 
+  let _htInit = false;
+  const ensureHiddenTechsTable = async () => {
+    if (_htInit) return;
+    await pool.query(`CREATE TABLE IF NOT EXISTS hidden_techs (
+      location_id UUID NOT NULL,
+      tech_id VARCHAR(255) NOT NULL,
+      tech_name VARCHAR(255),
+      hidden_at TIMESTAMP DEFAULT NOW(),
+      PRIMARY KEY (location_id, tech_id)
+    )`);
+    _htInit = true;
+  };
+
+  // List hidden techs for a location
+  router.get('/:locationId/hidden-techs', authenticateToken, async (req, res) => {
+    try {
+      await ensureHiddenTechsTable();
+      const r = await pool.query('SELECT tech_id, tech_name FROM hidden_techs WHERE location_id = $1', [req.params.locationId]);
+      res.json({ ok: true, hidden: r.rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Toggle a tech hidden/shown. body: { tech_id, tech_name, hidden: true|false }
+  router.post('/:locationId/hidden-techs', authenticateToken, async (req, res) => {
+    try {
+      await ensureHiddenTechsTable();
+      const { tech_id, tech_name, hidden } = req.body || {};
+      if (!tech_id) return res.status(400).json({ error: 'tech_id required' });
+      if (hidden) {
+        await pool.query(
+          `INSERT INTO hidden_techs (location_id, tech_id, tech_name, hidden_at)
+           VALUES ($1,$2,$3,NOW())
+           ON CONFLICT (location_id, tech_id)
+           DO UPDATE SET tech_name = COALESCE($3, hidden_techs.tech_name), hidden_at = NOW()`,
+          [req.params.locationId, tech_id, tech_name || null]
+        );
+      } else {
+        await pool.query('DELETE FROM hidden_techs WHERE location_id = $1 AND tech_id = $2', [req.params.locationId, tech_id]);
+      }
+      res.json({ ok: true, tech_id, hidden: !!hidden });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/:locationId', authenticateToken, async (req, res) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     try {
@@ -140,10 +187,18 @@ module.exports = (pool) => {
         derivedCount = loc.num_technicians;
       }
 
+      let hiddenTechs = [];
+      try {
+        await ensureHiddenTechsTable();
+        const hr = await pool.query('SELECT tech_id, tech_name FROM hidden_techs WHERE location_id = $1', [req.params.locationId]);
+        hiddenTechs = hr.rows;
+      } catch (e) {}
+
       res.json({
         technicians,
         count: technicians.length,
         derived_count: derivedCount,
+        hidden: hiddenTechs,
         distinct_vehicles_mtd: loc.distinct_vehicles_mtd != null ? loc.distinct_vehicles_mtd : null,
         hours_snapshot_date: snapshotDate,
         has_hours: !!snapshotDate,
