@@ -92,15 +92,10 @@ module.exports = (pool) => {
         'SELECT MAX(snapshot_date) AS d FROM tech_efficiency WHERE location_id = $1 AND period_type = $2 AND snapshot_date <= CURRENT_DATE',
         [req.params.locationId, period]
       );
-      if (teWorked.rows[0] && teWorked.rows[0].d) {
-        snapshotDate = teWorked.rows[0].d;
-      } else {
-        const teLatest = await pool.query(
-          'SELECT MAX(snapshot_date) AS d FROM tech_efficiency WHERE location_id = $1 AND hours_worked IS NOT NULL AND snapshot_date <= CURRENT_DATE',
-          [req.params.locationId]
-        );
-        snapshotDate = teLatest.rows[0] && teLatest.rows[0].d ? teLatest.rows[0].d : null;
-      }
+      // Period-aware only: never fall back across periods (an mtd request must
+      // never show ytd rows). If this period has no snapshot, show nothing
+      // rather than the wrong period's data.
+      snapshotDate = teWorked.rows[0] && teWorked.rows[0].d ? teWorked.rows[0].d : null;
       if (snapshotDate) {
         const te = await pool.query(
           `SELECT tech_id, tech_name, hours_sold, hours_billed, vehicle_count, hours_worked, efficiency, labour_revenue

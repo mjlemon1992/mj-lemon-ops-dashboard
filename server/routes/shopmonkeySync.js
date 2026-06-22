@@ -385,7 +385,8 @@ module.exports = (pool) => {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await client.query('DELETE FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2', [req.params.locationId, date]);
+        await client.query('ALTER TABLE tech_efficiency ADD COLUMN IF NOT EXISTS period_type VARCHAR(8)');
+        await client.query('DELETE FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2 AND period_type IS NULL', [req.params.locationId, date]);
         await client.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS distinct_vehicles_mtd INTEGER');
         await client.query('UPDATE locations SET distinct_vehicles_mtd = $1, updated_at = NOW() WHERE id = $2', [monthVehicles.size, req.params.locationId]);
         for (const t of techs) {
