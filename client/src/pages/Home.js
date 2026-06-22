@@ -10,6 +10,7 @@ export default function Home() {
   const navigate = useNavigate();
   const [locations, setLocations] = useState([]);
   const [metrics, setMetrics] = useState({});
+  const [teff, setTeff] = useState({});
   const [targets, setTargets] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -29,7 +30,8 @@ export default function Home() {
             const monthTarget = t.find(r => r.month === currentMonth);
             setTargets(prev => ({ ...prev, [loc.id]: monthTarget }));
           }).catch(() => {}),
-          api(`/qbo/${loc.id}/pnl`).then(p => setPnl(prev => ({ ...prev, [loc.id]: p }))).catch(() => {})
+          api(`/qbo/${loc.id}/pnl`).then(p => setPnl(prev => ({ ...prev, [loc.id]: p }))).catch(() => {}),
+          api(`/technicians/${loc.id}?period=mtd`).then(d => setTeff(prev => ({ ...prev, [loc.id]: d }))).catch(() => {})
         ])
       ));
     });
@@ -60,7 +62,21 @@ export default function Home() {
   const groupRevenue = metricList.reduce((s, m) => s + num(m.revenue_mtd), 0);
   const groupCarCount = metricList.reduce((s, m) => s + num(m.car_count_mtd), 0);
   const groupPPH = metricList.length ? Math.round(metricList.reduce((s, m) => s + num(m.pph), 0) / metricList.length) : 0;
-  const groupEff = metricList.length ? Math.round(metricList.reduce((s, m) => s + num(m.efficiency_avg), 0) / metricList.length) : 0;
+  const _effList = Object.values(teff).filter(Boolean);
+  const _locEff = (lid) => {
+    const d = teff[lid];
+    if (!d || !d.technicians) return null;
+    const w = d.technicians.reduce((a, t) => a + num(t.hours_worked), 0);
+    const so = d.technicians.reduce((a, t) => a + num(t.hours_sold), 0);
+    return w > 0 ? Math.round((so / w) * 100) : null;
+  };
+  const groupEff = _effList.length
+    ? Math.round(_effList.reduce((s, d) => {
+        const w = (d.technicians || []).reduce((a, t) => a + num(t.hours_worked), 0);
+        const so = (d.technicians || []).reduce((a, t) => a + num(t.hours_sold), 0);
+        return s + (w > 0 ? (so / w) * 100 : 0);
+      }, 0) / _effList.length)
+    : 0;
   // Revenue-weighted parts margin across locations (falls back to simple avg)
   const marginVals = metricList.map(m => num(m.parts_margin)).filter(v => v > 0);
   const groupMargin = marginVals.length ? (marginVals.reduce((a, b) => a + b, 0) / marginVals.length) : 0;
@@ -148,12 +164,12 @@ export default function Home() {
           <div className="metric-card">
             <div className="metric-label">Profit per hour</div>
             <div className="metric-value">{groupPPH > 0 ? `$${groupPPH}` : '—'}</div>
-            <div className="metric-sub">{groupPPH > 0 ? 'hours sold basis' : 'pending QBO Time'}</div>
+            <div className="metric-sub">{groupPPH > 0 ? 'hours sold basis' : 'awaiting sync'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Avg efficiency</div>
             <div className="metric-value">{groupEff > 0 ? `${groupEff}%` : '—'}</div>
-            <div className="metric-sub">{groupEff > 0 ? 'hours sold / available' : 'pending QBO Time'}</div>
+            <div className="metric-sub">{groupEff > 0 ? 'hours sold / worked' : 'no hours yet'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Avg RO value</div>
@@ -224,7 +240,7 @@ export default function Home() {
                 {[
                   { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: (m && t && t.revenue) ? `${pacePct(num(m.revenue_mtd), num(t.revenue), loc.province)}% of pace` : (t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target'), ok: (m && t && t.revenue) ? pacePct(num(m.revenue_mtd), num(t.revenue), loc.province) >= 90 : true },
                   { label: 'Profit / hr', val: m && num(m.pph) > 0 ? `$${Math.round(num(m.pph))}` : '—', sub: (m && num(m.pph) > 0 && loc.pph_target) ? `${targetPct(num(m.pph), num(loc.pph_target))}% of target` : `vs $${loc.pph_target} target`, ok: num(m?.pph) >= loc.pph_target },
-                  { label: 'Efficiency', val: m && num(m.efficiency_avg) > 0 ? `${Math.round(num(m.efficiency_avg))}%` : '—', sub: `vs ${loc.efficiency_target}% target`, ok: num(m?.efficiency_avg) >= loc.efficiency_target },
+                  { label: 'Efficiency', val: _locEff(loc.id) != null ? `${_locEff(loc.id)}%` : '—', sub: `vs ${loc.efficiency_target}% target`, ok: (_locEff(loc.id) || 0) >= loc.efficiency_target },
                   { label: 'Avg RO', val: m && num(m.avg_ro_value) > 0 ? money0(num(m.avg_ro_value)) : '—', sub: (m && num(m.avg_ro_value) > 0 && t && t.avg_ro_value) ? `${targetPct(num(m.avg_ro_value), num(t.avg_ro_value))}% of target` : 'per car', ok: (m && t && t.avg_ro_value) ? num(m.avg_ro_value) >= num(t.avg_ro_value) : true },
                 ].map(item => (
                   <div key={item.label}>
