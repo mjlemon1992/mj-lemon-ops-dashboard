@@ -1,16 +1,18 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const REPORTS = [
   { icon: '☀', title: 'End of day summary', sub: 'Jobs closed, revenue, vehicles on site, flags', freq: 'Daily at 6pm', available: false },
   { icon: '📅', title: 'Weekly summary', sub: 'Revenue, car count, margins vs target', freq: 'Fridays at 5pm', available: false },
   { icon: '📊', title: 'Mid month summary', sub: 'MTD pace vs monthly target', freq: '15th of each month', available: false },
   { icon: '✓', title: 'End of month', sub: 'Full month vs target, vs prior month', freq: 'Last day of month', available: false },
-  { icon: '👤', title: 'Technician efficiency', sub: 'Available vs worked vs sold per tech', freq: 'Weekly', available: false },
+  { icon: '👤', title: 'Technician efficiency', sub: 'Available vs worked vs sold per tech', freq: 'Live from Shopmonkey', available: true, route: '/reports/tech-efficiency' },
   { icon: '◈', title: 'Parts margin report', sub: 'All jobs below threshold for selected period', freq: 'On demand', available: false },
   { icon: '↑', title: 'Profit per hour', sub: 'GP per hour vs target by week/month', freq: 'Weekly', available: false },
 ];
 
 export default function Reports() {
+  const navigate = useNavigate();
   return (
     <div>
       <div style={{ background: 'rgba(77,184,255,0.08)', border: '0.5px solid rgba(77,184,255,0.2)', borderRadius: 'var(--radius)', padding: '12px 16px', marginBottom: '16px', fontSize: '12px', color: 'var(--info)' }}>
@@ -18,7 +20,7 @@ export default function Reports() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
         {REPORTS.map(r => (
-          <div key={r.title} className="card" style={{ opacity: r.available ? 1 : 0.6, cursor: r.available ? 'pointer' : 'default' }}>
+          <div key={r.title} onClick={() => r.route && navigate(r.route)} className="card" style={{ opacity: r.available ? 1 : 0.6, cursor: r.available ? 'pointer' : 'default' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
               <div style={{ fontSize: '20px', color: 'var(--text2)', flexShrink: 0, marginTop: '1px' }}>{r.icon}</div>
               <div>
