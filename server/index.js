@@ -34,6 +34,7 @@ app.use('/api/tech-efficiency', techEfficiencyRoutes(pool));
 app.use('/api/technicians', techniciansRoutes(pool));
 app.use('/api/sync', shopmonkeySyncRoutes(pool));
 app.use('/api/hours', hoursSyncRoutes(pool));
+app.use('/report', require('./report'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
