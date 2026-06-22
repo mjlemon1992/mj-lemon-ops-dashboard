@@ -99,8 +99,8 @@ module.exports = (pool) => {
       if (snapshotDate) {
         const te = await pool.query(
           `SELECT tech_id, tech_name, hours_sold, hours_billed, vehicle_count, hours_worked, efficiency, labour_revenue
-           FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2`,
-          [req.params.locationId, snapshotDate]
+           FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2 AND period_type = $3`,
+          [req.params.locationId, snapshotDate, period]
         );
         for (const row of te.rows) {
           if (row.tech_id) statsByTech[row.tech_id] = row;
