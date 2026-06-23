@@ -55,6 +55,27 @@ module.exports = (pool) => {
       res.status(500).json({ error: 'report_failed' });
     }
   });
+  router.get('/weekly.pdf', auth, async (req, res) => {
+    try {
+      const now = new Date();
+      const frac = monthFraction(now);
+      const [actuals, targets, locationName] = await Promise.all([
+        getActuals(pool, now), getTargets(pool, now), getLocationName(pool),
+      ]);
+      const rows = METRICS.map(m => row(m, actuals[m.key], targets[m.key], frac));
+      const pdf = await buildPdf(rows, now, frac, locationName);
+      if (req.query.b64 === '1') {
+        res.json({ filename: `Finance-Snapshot-${now.toLocaleDateString('en-GB',{month:'long',year:'numeric'}).replace(' ','-')}.pdf`, base64: pdf.toString('base64') });
+      } else {
+        res.set('Content-Type', 'application/pdf');
+        res.send(pdf);
+      }
+    } catch (e) {
+      console.error('[report] pdf failed:', e);
+      res.status(500).json({ error: 'pdf_failed' });
+    }
+  });
+
   return router;
 };
 
