@@ -2,6 +2,8 @@
 // Mount: app.use('/report', require('./report')(pool));  (ABOVE the SPA catch-all)
 
 const express = require('express');
+const nodemailer = require('nodemailer');
+const PDFDocument = require('pdfkit');
 
 const LOCATION_ID = process.env.LOCATION_ID || '8174d72a-967b-48de-b37c-997b2d071693';
 
@@ -31,7 +33,23 @@ module.exports = (pool) => {
       const rows = METRICS.map(m => row(m, actuals[m.key], targets[m.key], frac));
       const text = buildMessage(rows, now, frac, locationName);
       const html = buildHtml(rows, now, frac, locationName);
-      res.json(req.query.debug ? { text, html, rows, actuals, targets, frac, locationName } : { text, html });
+      let emailed = false;
+      if (req.query.email === '1') {
+        try {
+          const monthLabel = now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+          const pdf = await buildPdf(rows, now, frac, locationName);
+          await sendEmail({
+            to: process.env.REPORT_EMAIL_TO || 'jamie@hwy97mistertransmission.com',
+            subject: `Finance Snapshot — ${locationName || 'Mister Transmission'} — ${monthLabel}`,
+            text: `Your weekly finance snapshot for ${locationName || 'Mister Transmission'} is attached as a PDF.\n\n— MJ Lemon Ops Dashboard`,
+            attachments: [{ filename: `Finance-Snapshot-${monthLabel.replace(' ', '-')}.pdf`, content: pdf }],
+          });
+          emailed = true;
+        } catch (mailErr) {
+          console.error('[report] email failed:', mailErr.message);
+        }
+      }
+      res.json(req.query.debug ? { text, html, emailed, rows, actuals, targets, frac, locationName } : { text, html, emailed });
     } catch (e) {
       console.error('[report] failed:', e);
       res.status(500).json({ error: 'report_failed' });
@@ -203,6 +221,60 @@ function workingDaysInRange(province, startStr, endStr) {
     n++;
   }
   return n;
+}
+
+function mailer() {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(process.env.SMTP_PORT || 465),
+    secure: true,
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  });
+}
+
+async function sendEmail({ to, subject, html, text, attachments }) {
+  const t = mailer();
+  if (!t) throw new Error('SMTP not configured');
+  return t.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to, subject, text, html, attachments });
+}
+
+function buildPdf(rows, now, frac, locationName) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'LETTER', margin: 50 });
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const dot = { '\u{1F7E2}':'#22c55e','\u{1F7E1}':'#eab308','\u{1F534}':'#ef4444','\u26AA':'#9ca3af' };
+    const month = now.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+    const asOf  = now.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short'});
+    const left = 50;
+    const right = doc.page.width - 50;
+
+    doc.fillColor('#111111').font('Helvetica-Bold').fontSize(20)
+       .text(`Finance Snapshot${locationName ? ' \u2014 ' + locationName : ''}`, left, 60);
+    doc.fillColor('#777777').font('Helvetica').fontSize(11)
+       .text(`Month to Date  \u00b7  ${month}  \u00b7  as of ${asOf} (${Math.round(frac*100)}% through month)`, left, doc.y + 5);
+
+    let rowY = doc.y + 26;
+    const rowH = 32;
+    rows.forEach(r => {
+      const color = dot[r.emoji] || '#9ca3af';
+      doc.circle(left + 6, rowY + 7, 5).fill(color);
+      doc.fillColor('#111111').font('Helvetica-Bold').fontSize(12).text(r.label, left + 22, rowY, { width: 150 });
+      doc.font('Helvetica-Bold').fontSize(13).fillColor('#111111').text(r.value, left + 180, rowY - 1, { width: 95 });
+      const rt = r.available ? `${r.targetText}, ${signed(r.vsTarget)}` : 'no data';
+      doc.font('Helvetica').fontSize(10).fillColor('#777777').text(rt, left + 285, rowY + 1, { width: right - (left + 285) });
+      doc.moveTo(left, rowY + rowH - 7).lineTo(right, rowY + rowH - 7).strokeColor('#eeeeee').lineWidth(1).stroke();
+      rowY += rowH;
+    });
+
+    doc.fillColor('#999999').font('Helvetica').fontSize(9)
+       .text('MJ Lemon Ops Dashboard \u00b7 automated weekly snapshot', left, rowY + 14);
+    doc.end();
+  });
 }
 
 function auth(req, res, next) {
