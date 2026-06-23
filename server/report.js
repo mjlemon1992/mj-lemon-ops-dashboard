@@ -49,7 +49,10 @@ module.exports = (pool) => {
           console.error('[report] email failed:', mailErr.message);
         }
       }
-      res.json(req.query.debug ? { text, html, emailed, rows, actuals, targets, frac, locationName } : { text, html, emailed });
+      const pdfBufOut = await buildPdf(rows, now, frac, locationName);
+      const pdfBase64 = pdfBufOut.toString('base64');
+      const pdfFilename = `Finance-Snapshot-${now.toLocaleDateString('en-GB',{month:'long',year:'numeric'}).replace(' ','-')}.pdf`;
+      res.json(req.query.debug ? { text, html, emailed, pdfFilename, pdfBase64, rows, actuals, targets, frac, locationName } : { text, html, emailed, pdfFilename, pdfBase64 });
     } catch (e) {
       console.error('[report] failed:', e);
       res.status(500).json({ error: 'report_failed' });
