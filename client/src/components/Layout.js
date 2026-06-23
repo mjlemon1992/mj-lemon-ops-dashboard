@@ -30,8 +30,12 @@ export default function Layout() {
       {/* Sidebar */}
       <div style={{ width: 220, flexShrink: 0, background: 'var(--bg2)', borderRight: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '18px 16px 14px', borderBottom: '0.5px solid var(--border)' }}>
-          <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>MJ Lemon Ops</div>
-          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>Multi-location dashboard</div>
+          <div style={{ fontSize: '10px', fontWeight: '600', letterSpacing: '0.16em', color: 'var(--text3)', textTransform: 'uppercase' }}>MJ Lemon</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginTop: '3px' }}>
+            <span style={{ fontSize: '24px', fontWeight: '800', color: 'var(--accent)', letterSpacing: '-1px', lineHeight: 1 }}>OPS</span>
+            <span style={{ width: '1px', height: '18px', background: 'var(--border)', display: 'inline-block' }} />
+            <span style={{ fontSize: '10px', color: 'var(--text3)', lineHeight: 1.2 }}>Multi-location<br/>dashboard</span>
+          </div>
         </div>
 
         <div style={{ margin: '12px', padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)', fontSize: '12px' }}>
