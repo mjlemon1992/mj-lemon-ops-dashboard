@@ -121,25 +121,37 @@ function buildHtml(rows, now, frac, locationName) {
   const loc = locationName ? ` &mdash; ${esc(locationName)}` : '';
   const month = now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
   const asOf  = now.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' });
-  const dot = { '\u{1F7E2}': '#22c55e', '\u{1F7E1}': '#eab308', '\u{1F534}': '#ef4444', '\u26AA': '#9ca3af' };
-  const lines = rows.map(r => {
+  const dot = { '🟢': '#22c55e', '🟡': '#eab308', '🔴': '#ef4444', '⚪': '#9ca3af' };
+  const metricRows = rows.map(r => {
     const color = dot[r.emoji] || '#9ca3af';
     const right = r.available ? `${esc(r.targetText)}, ${signed(r.vsTarget)}` : 'no data';
-    return `<tr>
-      <td style="padding:6px 10px;font-size:18px;line-height:1;vertical-align:middle;">
-        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${color};"></span>
-      </td>
-      <td style="padding:6px 10px;font-weight:600;color:#111;">${esc(r.label)}</td>
-      <td style="padding:6px 10px;font-weight:700;color:#111;text-align:right;white-space:nowrap;">${esc(r.value)}</td>
-      <td style="padding:6px 10px;color:#666;white-space:nowrap;">${esc(right)}</td>
-    </tr>`;
+    return `
+        <tr>
+          <td width="6" bgcolor="${color}" style="width:6px;background-color:${color};font-size:0;line-height:0;">&nbsp;</td>
+          <td style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;color:#111111;">${esc(r.label)}</td>
+          <td align="right" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;color:#111111;white-space:nowrap;">${esc(r.value)}</td>
+          <td align="right" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#777777;white-space:nowrap;">${esc(right)}</td>
+        </tr>
+        <tr><td colspan="4" style="border-bottom:1px solid #eeeeee;font-size:0;line-height:0;">&nbsp;</td></tr>`;
   }).join('');
-  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:640px;">
-    <h2 style="margin:0 0 2px;color:#111;font-size:20px;">&#128202; Finance Snapshot${loc}</h2>
-    <div style="color:#666;font-size:13px;margin-bottom:14px;">Month to Date &middot; ${esc(month)} &middot; as of ${esc(asOf)} (${Math.round(frac * 100)}% through month)</div>
-    <table style="border-collapse:collapse;width:100%;border:1px solid #eee;border-radius:8px;overflow:hidden;">${lines}</table>
-    <div style="color:#999;font-size:11px;margin-top:12px;">MJ Lemon Ops Dashboard &middot; automated weekly snapshot</div>
-  </div>`;
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#f4f4f5;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;">
+    <tr><td align="center" style="padding:24px 12px;">
+      <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background-color:#ffffff;border:1px solid #e5e5e5;border-radius:8px;">
+        <tr><td style="padding:20px 22px 4px;font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:bold;color:#111111;">&#128202; Finance Snapshot${loc}</td></tr>
+        <tr><td style="padding:0 22px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#777777;">Month to Date &middot; ${esc(month)} &middot; as of ${esc(asOf)} (${Math.round(frac * 100)}% through month)</td></tr>
+        <tr><td style="padding:0 14px 18px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${metricRows}</table>
+        </td></tr>
+        <tr><td style="padding:0 22px 20px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#999999;">MJ Lemon Ops Dashboard &middot; automated weekly snapshot</td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
 }
 
 function esc(s) {
