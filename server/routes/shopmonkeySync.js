@@ -143,9 +143,9 @@ async function fetchOpenOrders(apiKey, locationId) {
 // Builds the alert list stored in metrics_cache.alerts and rendered by the
 // Alerts page / Home strip / sidebar badge. Two kinds:
 //   stale  — open (uninvoiced, un-archived) order whose days-on-site >= the
-//            location's stale_threshold_days. "Days on site" uses createdDate
-//            (RO opened at drop-off) as the best proxy until a real check-in
-//            timestamp feeds in; archived/invoiced jobs are excluded by the
+//            location's stale_threshold_days. "Days on site" is measured from
+//            the work order's createdDate (when the RO was opened) — this is the
+//            intended definition. Archived/invoiced jobs are excluded by the
 //            fetch, so completed cars never show up as stale.
 //   margin — order invoiced this month whose parts margin (from the per-order
 //            profitability already on the object) is below parts_margin_target.
