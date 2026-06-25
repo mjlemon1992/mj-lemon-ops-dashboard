@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { pacePct as wdPacePct } from '../utils/pace';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { parseAlerts } from '../utils/alerts';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -102,12 +103,12 @@ export default function Home() {
   const money0 = n => '$' + Math.round(n).toLocaleString('en-CA');
 
 
-  const allAlerts = Object.entries(metrics).flatMap(([locId, m]) => {
-    if (!m?.alerts) return [];
-    try { return JSON.parse(m.alerts) || []; } catch { return []; }
-  });
-
-  const alertCount = allAlerts.length || 5;
+  const allAlerts = Object.values(metrics).flatMap(parseAlerts);
+  const alertCount = allAlerts.length;
+  const staleCount = allAlerts.filter(a => a.type === 'stale').length;
+  const marginCount = allAlerts.filter(a => a.type === 'margin').length;
+  const staleDays = (activeLocations[0] && activeLocations[0].stale_threshold_days) || 5;
+  const marginTarget = Math.round((activeLocations[0] && activeLocations[0].parts_margin_target) || 55);
 
   return (
     <div>
@@ -122,9 +123,15 @@ export default function Home() {
       {alertCount > 0 && (
         <div className="alert-strip">
           <span style={{ fontSize: '14px', color: 'var(--warning)' }}>⚠</span>
-          <span style={{ fontSize: '12px', color: 'var(--warning)' }}>3 stale vehicles (5+ days)</span>
-          <span style={{ fontSize: '12px', color: 'var(--warning)' }}>·</span>
-          <span style={{ fontSize: '12px', color: 'var(--warning)' }}>2 jobs below 55% parts margin</span>
+          {staleCount > 0 && (
+            <span style={{ fontSize: '12px', color: 'var(--warning)' }}>{staleCount} stale vehicle{staleCount > 1 ? 's' : ''} ({staleDays}+ days)</span>
+          )}
+          {staleCount > 0 && marginCount > 0 && (
+            <span style={{ fontSize: '12px', color: 'var(--warning)' }}>·</span>
+          )}
+          {marginCount > 0 && (
+            <span style={{ fontSize: '12px', color: 'var(--warning)' }}>{marginCount} job{marginCount > 1 ? 's' : ''} below {marginTarget}% parts margin</span>
+          )}
           <span style={{ fontSize: '12px', color: 'var(--warning)', cursor: 'pointer', marginLeft: 'auto', textDecoration: 'underline' }} onClick={() => navigate('/alerts')}>View all</span>
         </div>
       )}
