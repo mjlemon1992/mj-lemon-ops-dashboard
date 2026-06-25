@@ -122,6 +122,91 @@ async function fetchTechNames(apiKey) {
   return techNames;
 }
 
+// ---- Live alerts: stale vehicles + per-RO margin flags ---------------------
+// Open orders = not invoiced, not archived (i.e. cars still in the shop).
+async function fetchOpenOrders(apiKey, locationId) {
+  const pageSize = 100;
+  let all = [];
+  for (let page = 0; page < 12; page++) {
+    const params = new URLSearchParams({ locationId, where: JSON.stringify({ invoicedDate: null, archived: false }), limit: String(pageSize), skip: String(page * pageSize) });
+    const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${params}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+    if (!res.ok) { const txt = await res.text(); throw new Error(`Shopmonkey API error ${res.status}: ${txt.slice(0, 200)}`); }
+    const data = await res.json();
+    const batch = (data && data.data && data.data.data) ? data.data.data : (data.data || []);
+    if (!batch.length) break;
+    all = all.concat(batch);
+    if (batch.length < pageSize) break;
+  }
+  return all.filter(o => !o.deleted);
+}
+
+// Builds the alert list stored in metrics_cache.alerts and rendered by the
+// Alerts page / Home strip / sidebar badge. Two kinds:
+//   stale  — open (uninvoiced, un-archived) order whose days-on-site >= the
+//            location's stale_threshold_days. "Days on site" uses createdDate
+//            (RO opened at drop-off) as the best proxy until a real check-in
+//            timestamp feeds in; archived/invoiced jobs are excluded by the
+//            fetch, so completed cars never show up as stale.
+//   margin — order invoiced this month whose parts margin (from the per-order
+//            profitability already on the object) is below parts_margin_target.
+// Each alert carries structured fields; the client formats the display text,
+// so the RO number is always the one Shopmonkey reports for that exact order.
+async function buildAlerts(apiKey, loc, mtdOrders) {
+  const DAY = 86400000;
+  const now = Date.now();
+  const staleThreshold = parseInt(loc.stale_threshold_days, 10) || 5;
+  const marginTarget = parseFloat(loc.parts_margin_target) || 55;
+  const locName = loc.name || 'Location';
+  const alerts = [];
+
+  let open = [];
+  try { open = await fetchOpenOrders(apiKey, loc.shopmonkey_location_id || ''); }
+  catch (e) { console.error('fetchOpenOrders failed:', e.message); open = []; }
+  for (const o of open) {
+    if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) continue;
+    const start = parseShopmonkeyDate(o.createdDate) || parseShopmonkeyDate(o.authorizedDate);
+    if (!start) continue;
+    const days = Math.floor((now - start.getTime()) / DAY);
+    if (days < staleThreshold) continue;
+    alerts.push({
+      type: 'stale',
+      ro: o.number != null ? String(o.number) : (o.id || ''),
+      vehicle: o.generatedVehicleName || 'Vehicle',
+      customer: o.generatedCustomerName || 'Customer',
+      checked_in: start.toISOString().slice(0, 10),
+      days_on_site: days,
+      location: locName
+    });
+  }
+
+  for (const o of mtdOrders) {
+    const prof = o.profitability && o.profitability.parts ? o.profitability.parts : null;
+    const retail = prof && typeof prof.retailCents === 'number' ? prof.retailCents : (o.partsCents || 0);
+    const wholesale = prof && typeof prof.wholesaleCents === 'number' ? prof.wholesaleCents : 0;
+    if (retail <= 0 || wholesale <= 0) continue; // no cost data -> can't judge margin
+    if (retail < 5000) continue;                 // ignore trivial parts lines (<$50)
+    const margin = ((retail - wholesale) / retail) * 100;
+    if (margin >= marginTarget) continue;
+    alerts.push({
+      type: 'margin',
+      ro: o.number != null ? String(o.number) : (o.id || ''),
+      vehicle: o.generatedVehicleName || 'Vehicle',
+      customer: o.generatedCustomerName || null,
+      parts_margin: Math.round(margin * 10) / 10,
+      parts_margin_target: marginTarget,
+      location: locName
+    });
+  }
+
+  alerts.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'stale' ? -1 : 1;
+    if (a.type === 'stale') return b.days_on_site - a.days_on_site;
+    return a.parts_margin - b.parts_margin;
+  });
+  return alerts;
+}
+// ---- end live alerts -------------------------------------------------------
+
 module.exports = (pool) => {
   // syncAuth: machine-to-machine auth for scheduled refreshes (e.g. Make).
   // Accepts a valid X-Sync-Key header matching SYNC_SECRET as an alternative
@@ -239,6 +324,12 @@ module.exports = (pool) => {
       const pph = (labourProfit + partsProfit) / hoursForPph;
       const avgRoValue = carCount > 0 ? revenue / carCount : 0;
 
+      // Live alerts (stale vehicles + per-RO margin flags). Best-effort: a failure
+      // here must not break the metrics refresh, so it falls back to an empty list.
+      let alerts = [];
+      try { alerts = await buildAlerts(apiKey, loc, mtdOrders); }
+      catch (e) { console.error('buildAlerts failed:', e.message); }
+
       const payload = {
         revenue_mtd: Math.round(revenue * 100) / 100,
         car_count_mtd: carCount,
@@ -252,7 +343,7 @@ module.exports = (pool) => {
         efficiency_avg: null,
         pph: Math.round(pph * 100) / 100,
         total_profit: Math.round(totalProfit * 100) / 100,
-        alerts: []
+        alerts
       };
 
       await pool.query('ALTER TABLE metrics_cache ADD COLUMN IF NOT EXISTS labour_hours_worked NUMERIC');

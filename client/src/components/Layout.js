@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { parseAlerts } from '../utils/alerts';
 
 const NAV = [
   { path: '/', label: 'Home', icon: '⌂', section: 'Overview' },
@@ -16,10 +17,28 @@ const NAV = [
 ];
 
 export default function Layout() {
-  const { user, logout } = useAuth();
+  const { user, logout, api } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [alertCount] = useState(5);
+  const [alertCount, setAlertCount] = useState(0);
+
+  // Live count for the sidebar badge + header pill. Owners/partners see the
+  // group total; a manager sees only their own location's alerts.
+  useEffect(() => {
+    if (!user) return undefined;
+    let cancelled = false;
+    const path = (user.role === 'manager' && user.location_id)
+      ? `/metrics/${user.location_id}/summary`
+      : '/metrics/group/summary';
+    api(path)
+      .then(res => {
+        const rows = Array.isArray(res) ? res : [res];
+        return rows.reduce((n, m) => n + parseAlerts(m).length, 0);
+      })
+      .then(n => { if (!cancelled) setAlertCount(n); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user, api]);
 
   const visibleNav = NAV.filter(n => !n.roles || n.roles.includes(user?.role));
 
