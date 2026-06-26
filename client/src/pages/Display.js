@@ -144,6 +144,26 @@ export default function Display() {
         })}
       </div>
 
+      {/* All-locations revenue standings (revenue only) */}
+      {data.leaderboard && data.leaderboard.length >= 2 && (
+        <div style={{ marginTop: '28px' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
+            Group standings · revenue to date
+          </div>
+          <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', overflow: 'hidden' }}>
+            {data.leaderboard.map(loc => (
+              <div key={loc.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 24px', borderBottom: '0.5px solid var(--border)', background: loc.is_current ? 'var(--bg3)' : 'transparent' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 800, color: loc.rank === 1 ? '#1a1a1a' : 'var(--text2)', background: loc.rank === 1 ? 'var(--accent)' : 'var(--bg3)' }}>{loc.rank}</div>
+                <div style={{ flex: 1, fontSize: '22px', fontWeight: loc.is_current ? 700 : 500, color: 'var(--text)' }}>
+                  {loc.name}{loc.is_current ? ' (this shop)' : ''}
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text)' }}>{money(loc.revenue)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ marginTop: 'auto', paddingTop: '20px', fontSize: '12px', color: 'var(--text3)', textAlign: 'center' }}>
         Efficiency = hours sold ÷ available hours ({data.location.weekly_hours || 40}h/wk base, minus {data.location.province?.toUpperCase()} stat holidays) · target {effTarget}%
       </div>
