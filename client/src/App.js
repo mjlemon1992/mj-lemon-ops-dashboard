@@ -13,6 +13,7 @@ import ReportTechEfficiency from './pages/ReportTechEfficiency';
 import ReportSummary from './pages/ReportSummary';
 import Comebacks from './pages/Comebacks';
 import Finance from './pages/Finance';
+import Marketing from './pages/Marketing';
 import Locations from './pages/Locations';
 import Targets from './pages/Targets';
 import Users from './pages/Users';
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="reports/tech-efficiency" element={<ProtectedRoute ownerOrPartner><ReportTechEfficiency /></ProtectedRoute>} />
             <Route path="reports/summary/:kind" element={<ProtectedRoute ownerOrPartner><ReportSummary /></ProtectedRoute>} />
             <Route path="finance" element={<ProtectedRoute ownerOrPartner><Finance /></ProtectedRoute>} />
+            <Route path="marketing" element={<ProtectedRoute ownerOrPartner><Marketing /></ProtectedRoute>} />
             <Route path="comebacks" element={<Comebacks />} />
   <Route path="wip" element={<Wip />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />
