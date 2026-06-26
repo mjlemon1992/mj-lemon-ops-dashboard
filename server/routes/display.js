@@ -99,6 +99,26 @@ module.exports = (pool) => {
       const totalSold = techs.reduce((s, t) => s + (t.hours_sold || 0), 0);
       const totalBilled = techs.reduce((s, t) => s + (t.hours_billed || 0), 0);
 
+      // All-locations revenue standings (revenue only — no targets/efficiency for
+      // the others), ranked highest revenue-to-date first. Lets each shop's board
+      // show where it sits against the rest of the group.
+      let leaderboard = [];
+      try {
+        const lbRes = await pool.query(
+          `SELECT l.id, l.name, mc.revenue_mtd
+             FROM locations l
+             LEFT JOIN LATERAL (
+               SELECT revenue_mtd FROM metrics_cache
+               WHERE location_id = l.id ORDER BY created_at DESC LIMIT 1
+             ) mc ON true
+            WHERE l.active = true`
+        );
+        leaderboard = lbRes.rows
+          .map(r => ({ id: r.id, name: r.name, revenue: num(r.revenue_mtd) || 0, is_current: r.id === loc.id }))
+          .sort((a, b) => b.revenue - a.revenue)
+          .map((r, i) => ({ ...r, rank: i + 1 }));
+      } catch (e) { leaderboard = []; }
+
       res.set('Cache-Control', 'no-store');
       res.json({
         location: { id: loc.id, name: loc.name, city: loc.city, province, weekly_hours: locWeekly },
@@ -109,6 +129,7 @@ module.exports = (pool) => {
         pct_to_target: pctToTarget,
         parts_margin: num(m.parts_margin),
         techs,
+        leaderboard,
         totals: {
           hours_sold: Math.round(totalSold * 10) / 10,
           hours_billed: Math.round(totalBilled * 10) / 10
