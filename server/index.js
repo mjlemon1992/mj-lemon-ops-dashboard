@@ -24,6 +24,8 @@ const techEfficiencyRoutes = require('./routes/techEfficiency');
 const techniciansRoutes = require('./routes/technicians');
 const shopmonkeySyncRoutes = require('./routes/shopmonkeySync');
 const hoursSyncRoutes = require('./routes/hoursSync');
+const displayRoutes = require('./routes/display');
+const { startScheduler } = require('./scheduler');
 
 app.use('/api/auth', authRoutes(pool));
 app.use('/api/locations', locationsRoutes(pool));
@@ -34,6 +36,7 @@ app.use('/api/tech-efficiency', techEfficiencyRoutes(pool));
 app.use('/api/technicians', techniciansRoutes(pool));
 app.use('/api/sync', shopmonkeySyncRoutes(pool));
 app.use('/api/hours', hoursSyncRoutes(pool));
+app.use('/api/display', displayRoutes(pool));
 app.use('/report', require('./report')(pool));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -49,6 +52,9 @@ pool.connect()
   .then(() => console.log('Database connected'))
   .catch(err => console.log('Database connection error:', err.message));
 
-app.listen(PORT, () => console.log(`MJ Lemon Ops Dashboard running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`MJ Lemon Ops Dashboard running on port ${PORT}`);
+  startScheduler(pool);
+});
 
 module.exports = { pool };

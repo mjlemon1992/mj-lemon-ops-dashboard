@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, active: true };
+const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, active: true };
 
 export default function Locations() {
   const { api } = useAuth();
@@ -69,6 +69,22 @@ export default function Locations() {
             <div className="form-row">{field('stale_threshold_days','Stale vehicle threshold (days)','number',{min:1})} {field('pph_target','PPH target ($/hr)','number',{min:1})}</div>
             <div className="form-row">{field('parts_margin_target','Parts margin target (%)','number',{min:0,max:100})} {field('efficiency_target','Efficiency target (%)','number',{min:0,max:100})}</div>
           </div>
+          <div className="form-section">
+            <div className="form-section-title">Shop-floor display</div>
+            <div className="form-row">
+              {field('display_pin','Display PIN (techs enter this on the TV)','text',{maxLength:12})}
+              {field('weekly_hours','On-clock hours / tech per week','number',{min:1,max:80})}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>
+              Efficiency = hours sold ÷ available hours (weekly hours minus this province's stat holidays).
+            </div>
+            {editing !== 'new' && (
+              <div style={{ fontSize: '12px', color: 'var(--text2)', marginTop: '10px' }}>
+                Display URL: <span style={{ color: 'var(--accent)' }}>{window.location.origin}/display/{editing}</span>
+                <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>Open this on the shop TV and enter the PIN. It auto-refreshes every 2 hours.</div>
+              </div>
+            )}
+          </div>
           {error && <div style={{ fontSize: '12px', color: 'var(--danger)', marginBottom: '12px' }}>{error}</div>}
           <div className="btn-row">
             <button onClick={() => setEditing(null)}>Cancel</button>
@@ -113,6 +129,8 @@ export default function Locations() {
               ['Parts margin target', `${loc.parts_margin_target}%`],
               ['Efficiency target', `${loc.efficiency_target}%`],
               ['PPH target', `$${loc.pph_target}/hr`],
+              ['Display PIN', loc.display_pin ? 'Set ✓' : 'Not set'],
+              ['On-clock hrs/tech', `${loc.weekly_hours || 40}h/wk`],
             ].map(([l, v]) => (
               <div key={l}>
                 <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '2px' }}>{l}</div>

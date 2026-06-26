@@ -142,6 +142,11 @@ export default function Home() {
             <div className="metric-label">Group revenue MTD</div>
             <div className="metric-value">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
             <div className="metric-sub" style={{ color: pctColor(pacePct(groupRevenue, gRevTarget)) }}>{groupRevenue > 0 ? (pacePct(groupRevenue, gRevTarget) != null ? `${pacePct(groupRevenue, gRevTarget)}% of pace` : 'live from Shopmonkey') : 'awaiting sync'}</div>
+            {gRevTarget > 0 && (
+              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '3px' }}>
+                Target {money0(gRevTarget)} · <span style={{ color: groupRevenue >= gRevTarget ? 'var(--success)' : 'var(--text2)' }}>{groupRevenue >= gRevTarget ? `${money0(groupRevenue - gRevTarget)} over` : `${money0(gRevTarget - groupRevenue)} to go`}</span>
+              </div>
+            )}
           </div>
           <div className="metric-card">
             <div className="metric-label">Group car count</div>
@@ -200,7 +205,7 @@ export default function Home() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
                 {[
-                  { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: (m && t && t.revenue) ? `${pacePct(num(m.revenue_mtd), num(t.revenue), loc.province)}% of pace` : (t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target'), ok: (m && t && t.revenue) ? pacePct(num(m.revenue_mtd), num(t.revenue), loc.province) >= 90 : true },
+                  { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: (m && t && t.revenue) ? `${pacePct(num(m.revenue_mtd), num(t.revenue), loc.province)}% of pace` : (t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target'), ok: (m && t && t.revenue) ? pacePct(num(m.revenue_mtd), num(t.revenue), loc.province) >= 90 : true, sub2: (m && t && t.revenue) ? `Target ${money0(num(t.revenue))} · ${num(m.revenue_mtd) >= num(t.revenue) ? `${money0(num(m.revenue_mtd) - num(t.revenue))} over` : `${money0(num(t.revenue) - num(m.revenue_mtd))} to go`}` : null },
                   { label: 'Profit / hr', val: m && num(m.pph) > 0 ? `$${Math.round(num(m.pph))}` : '—', sub: (m && num(m.pph) > 0 && loc.pph_target) ? `${targetPct(num(m.pph), num(loc.pph_target))}% of target` : `vs $${loc.pph_target} target`, ok: num(m?.pph) >= loc.pph_target },
                   { label: 'Efficiency', val: _locEff(loc.id) != null ? `${_locEff(loc.id)}%` : '—', sub: `vs ${loc.efficiency_target}% target`, ok: (_locEff(loc.id) || 0) >= loc.efficiency_target },
                   { label: 'Avg RO', val: m && num(m.avg_ro_value) > 0 ? money0(num(m.avg_ro_value)) : '—', sub: (m && num(m.avg_ro_value) > 0 && t && t.avg_ro_value) ? `${targetPct(num(m.avg_ro_value), num(t.avg_ro_value))}% of target` : 'per car', ok: (m && t && t.avg_ro_value) ? num(m.avg_ro_value) >= num(t.avg_ro_value) : true },
@@ -209,6 +214,7 @@ export default function Home() {
                     <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '3px' }}>{item.label}</div>
                     <div style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text)' }}>{item.val}</div>
                     <div style={{ fontSize: '10px', color: item.ok ? 'var(--success)' : 'var(--warning)', marginTop: '2px' }}>{item.sub}</div>
+                    {item.sub2 && <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '1px' }}>{item.sub2}</div>}
                   </div>
                 ))}
               </div>

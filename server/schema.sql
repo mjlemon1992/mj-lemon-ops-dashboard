@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS locations (
   parts_margin_target DECIMAL(5,2) DEFAULT 55.00,
   efficiency_target DECIMAL(5,2) DEFAULT 80.00,
   pph_target DECIMAL(10,2) DEFAULT 254.00,
+  display_pin VARCHAR(12),
+  weekly_hours DECIMAL(6,2) DEFAULT 40,
   active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
