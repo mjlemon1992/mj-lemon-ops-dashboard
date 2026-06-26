@@ -25,6 +25,7 @@ const techniciansRoutes = require('./routes/technicians');
 const shopmonkeySyncRoutes = require('./routes/shopmonkeySync');
 const hoursSyncRoutes = require('./routes/hoursSync');
 const displayRoutes = require('./routes/display');
+const financeRoutes = require('./routes/finance');
 const { startScheduler } = require('./scheduler');
 
 app.use('/api/auth', authRoutes(pool));
@@ -37,6 +38,7 @@ app.use('/api/technicians', techniciansRoutes(pool));
 app.use('/api/sync', shopmonkeySyncRoutes(pool));
 app.use('/api/hours', hoursSyncRoutes(pool));
 app.use('/api/display', displayRoutes(pool));
+app.use('/api/finance', financeRoutes(pool));
 app.use('/report', require('./report')(pool));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
