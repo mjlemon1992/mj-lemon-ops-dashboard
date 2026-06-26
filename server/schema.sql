@@ -120,3 +120,43 @@ CREATE TABLE IF NOT EXISTS committed_wip_cache (
     payload JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+-- Marketing: call-tracking ingestion (monthly Marchex/Telmetrics PDF -> Claude -> here).
+-- One row per (channel, tracking number) per period; channel totals are summed in queries.
+-- Idempotent on the UNIQUE key so re-ingesting a month overwrites cleanly.
+CREATE TABLE IF NOT EXISTS call_summary (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id UUID REFERENCES locations(id) ON DELETE CASCADE,
+  location_name VARCHAR(255),
+  provider VARCHAR(50) NOT NULL DEFAULT 'marchex',
+  format VARCHAR(50) NOT NULL DEFAULT 'telmetrics',
+  period_start DATE NOT NULL,
+  period_end DATE,
+  channel VARCHAR(30) NOT NULL,
+  tracking_number VARCHAR(40) NOT NULL,
+  total_calls INTEGER DEFAULT 0,
+  answered_calls INTEGER DEFAULT 0,
+  missed_calls INTEGER DEFAULT 0,
+  unique_callers INTEGER DEFAULT 0,
+  avg_duration_seconds INTEGER DEFAULT 0,
+  ingested_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (location_id, provider, period_start, channel, tracking_number)
+);
+
+-- Optional per-call detail (only when the PDF includes Call Detail pages); drives qualified counts.
+CREATE TABLE IF NOT EXISTS call_detail (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id UUID REFERENCES locations(id) ON DELETE CASCADE,
+  provider VARCHAR(50) NOT NULL DEFAULT 'marchex',
+  period_start DATE NOT NULL,
+  call_date DATE, call_time VARCHAR(12),
+  channel VARCHAR(30), tracking_number VARCHAR(40),
+  caller_number VARCHAR(40), caller_city VARCHAR(120), caller_province VARCHAR(40),
+  class VARCHAR(20), answer_status VARCHAR(20), rings INTEGER,
+  duration_seconds INTEGER, qualified BOOLEAN DEFAULT false,
+  ingested_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (location_id, provider, tracking_number, call_date, call_time, caller_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_summary_loc_period ON call_summary(location_id, period_start DESC);
+CREATE INDEX IF NOT EXISTS idx_call_detail_loc_period ON call_detail(location_id, period_start DESC);

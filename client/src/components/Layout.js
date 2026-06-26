@@ -10,6 +10,7 @@ const NAV = [
   { path: '/alerts', label: 'Alerts', icon: '◉', section: null },
   { path: '/reports', label: 'Reports', icon: '▤', section: 'Reports', roles: ['owner', 'partner'] },
   { path: '/finance', label: 'Finance', icon: '$', section: null, roles: ['owner', 'partner'] },
+  { path: '/marketing', label: 'Marketing', icon: '◆', section: null, roles: ['owner', 'partner'] },
   { path: '/comebacks', label: 'Comebacks', icon: '↩', section: null, roles: ['owner', 'partner', 'manager'] },
   { path: '/wip', label: 'Committed WIP', icon: '📋', section: null, roles: ['owner', 'partner', 'manager'] },
   { path: '/locations', label: 'Locations', icon: '◎', section: 'Settings', roles: ['owner'] },
