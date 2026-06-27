@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Display from './pages/Display';
 import Layout from './components/Layout';
 import Home from './pages/Home';
+import Scorecard from './pages/Scorecard';
 import Performance from './pages/Performance';
 import Technicians from './pages/Technicians';
 import Alerts from './pages/Alerts';
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/display/:locationId" element={<Display />} />
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route index element={<Home />} />
+            <Route path="scorecard" element={<ProtectedRoute ownerOrPartner><Scorecard /></ProtectedRoute>} />
             <Route path="performance" element={<Performance />} />
             <Route path="technicians" element={<Technicians />} />
             <Route path="alerts" element={<Alerts />} />
