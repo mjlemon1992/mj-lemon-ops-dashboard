@@ -166,3 +166,10 @@ CREATE TABLE IF NOT EXISTS marketing_post (
   actioned_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_marketing_post_loc_status ON marketing_post(location_id, status, created_at DESC);
+
+-- Marketing: "This week's shots" cache — AI shoot list derived from open Shopmonkey ROs.
+CREATE TABLE IF NOT EXISTS marketing_shots_cache (
+  location_id UUID PRIMARY KEY REFERENCES locations(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
