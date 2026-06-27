@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import DriveLibrary from './DriveLibrary';
 
 const ORANGE = '#F05423';
 
@@ -116,7 +117,7 @@ async function renderPoster({ type, headline, subline, locName }) {
 
 // Capture a bay photo -> AI captions -> review/approve. Posting to FB/IG/GBP is
 // deferred until Meta/GBP access clears, so "Approve" marks ready-to-post for now.
-export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey }) {
+export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey, previewLimit, onViewAll }) {
   const { api, token } = useAuth();
   const [configured, setConfigured] = useState(true);
   const [posts, setPosts] = useState([]);
@@ -135,9 +136,12 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
   const [ideas, setIdeas] = useState([]);
   const [ideasLoading, setIdeasLoading] = useState(false);
   const [lightbox, setLightbox] = useState(null);
+  const [driveOn, setDriveOn] = useState(false);
+  const [libOpen, setLibOpen] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => { api('/marketing/posts/status').then(s => setConfigured(!!s.configured)).catch(() => {}); }, [api]);
+  useEffect(() => { api('/marketing/drive/status').then(s => setDriveOn(!!s.configured)).catch(() => {}); }, [api]);
 
   const refresh = useCallback(() => {
     if (!locId) return;
@@ -307,6 +311,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
     setDrafts(s => ({ ...s, [id]: { ig: current.ig, fb: current.fb, gbp: current.gbp, ...s[id], [key]: val } }));
 
   const CAPS = [['ig', 'Instagram'], ['fb', 'Facebook'], ['gbp', 'Google']];
+  const shownDrafts = previewLimit ? posts.slice(0, previewLimit) : posts;
 
   return (
     <div style={{ marginBottom: '22px', borderRadius: 'var(--radius-lg)', outline: dragOver ? '2px dashed var(--accent)' : 'none', outlineOffset: '6px' }}
@@ -325,6 +330,9 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
           onClick={() => fileRef.current && fileRef.current.click()}>
           {uploading ? 'Generating…' : '📷 Capture / add photo'}
         </button>
+        {driveOn && (
+          <button disabled={!locId} onClick={() => setLibOpen(true)}>🖼 Photo library</button>
+        )}
       </div>
       <div style={{ fontSize: '11px', color: dragOver ? 'var(--accent)' : 'var(--text3)', marginBottom: '12px' }}>
         {dragOver ? 'Drop the photo to add it' : 'Tip: drag a photo straight from Photos or Finder anywhere onto this panel.'}
@@ -378,7 +386,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        {posts.map(p => {
+        {shownDrafts.map(p => {
           const cur = drafts[p.id] || p.captions;
           const dirty = !!drafts[p.id];
           return (
@@ -417,6 +425,12 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
         })}
       </div>
 
+      {previewLimit && posts.length > shownDrafts.length && (
+        <button onClick={onViewAll} style={{ marginTop: '12px', width: '100%', fontSize: '13px' }}>
+          View all {posts.length} awaiting approval →
+        </button>
+      )}
+
       {approved.length > 0 && (
         <div style={{ marginTop: '20px' }}>
           <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>
@@ -453,6 +467,10 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', cursor: 'zoom-out' }}>
           <img src={lightbox} alt="" style={{ maxWidth: '92vw', maxHeight: '92vh', borderRadius: 8, boxShadow: '0 10px 50px rgba(0,0,0,0.6)' }} />
         </div>
+      )}
+
+      {libOpen && (
+        <DriveLibrary locId={locId} onClose={() => setLibOpen(false)} onImported={refresh} />
       )}
     </div>
   );

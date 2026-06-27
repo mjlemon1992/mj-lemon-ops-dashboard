@@ -15,6 +15,7 @@ import ReportSummary from './pages/ReportSummary';
 import Comebacks from './pages/Comebacks';
 import Finance from './pages/Finance';
 import Marketing from './pages/Marketing';
+import ApprovalsPage from './pages/ApprovalsPage';
 import Locations from './pages/Locations';
 import Targets from './pages/Targets';
 import Users from './pages/Users';
@@ -47,6 +48,7 @@ export default function App() {
             <Route path="reports/summary/:kind" element={<ProtectedRoute ownerOrPartner><ReportSummary /></ProtectedRoute>} />
             <Route path="finance" element={<ProtectedRoute ownerOrPartner><Finance /></ProtectedRoute>} />
             <Route path="marketing" element={<ProtectedRoute ownerOrPartner><Marketing /></ProtectedRoute>} />
+            <Route path="marketing/approvals" element={<ProtectedRoute ownerOrPartner><ApprovalsPage /></ProtectedRoute>} />
             <Route path="comebacks" element={<Comebacks />} />
   <Route path="wip" element={<Wip />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />
