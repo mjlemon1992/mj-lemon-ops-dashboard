@@ -124,14 +124,24 @@ module.exports = (pool) => {
 
         const name = await locName(req.params.locationId);
         const note = (req.query.note || '').toString().slice(0, 500);
-        const caps = await generate(req.body.toString('base64'), mime, note);
 
+        // Create the draft FIRST so a card always appears — you can always write or
+        // edit the captions yourself. Caption generation is best-effort afterward.
         const { rows } = await pool.query(
-          `INSERT INTO marketing_post (location_id, location_name, status, note, image_data, image_mime, caption_ig, caption_fb, caption_gbp)
-           VALUES ($1,$2,'draft',$3,$4,$5,$6,$7,$8) RETURNING id, created_at`,
-          [req.params.locationId, name, note || null, req.body, mime, caps.ig, caps.fb, caps.gbp]
+          `INSERT INTO marketing_post (location_id, location_name, status, note, image_data, image_mime)
+           VALUES ($1,$2,'draft',$3,$4,$5) RETURNING id`,
+          [req.params.locationId, name, note || null, req.body, mime]
         );
-        res.json({ ok: true, id: rows[0].id });
+        const id = rows[0].id;
+
+        let captionError = null;
+        try {
+          const caps = await generate(req.body.toString('base64'), mime, note);
+          await pool.query('UPDATE marketing_post SET caption_ig=$1, caption_fb=$2, caption_gbp=$3 WHERE id=$4',
+            [caps.ig, caps.fb, caps.gbp, id]);
+        } catch (e) { captionError = String(e.message || e); }
+
+        res.json({ ok: true, id, captionError });
       } catch (e) { fail(res, e); }
     }
   );
@@ -183,6 +193,21 @@ module.exports = (pool) => {
       );
       if (!rows.length) return res.status(404).json({ error: 'Post not found' });
       res.json({ ok: true, id: rows[0].id });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Re-run caption generation on the stored image (e.g. you didn't like the draft).
+  router.post('/post/:postId/regenerate', ...gate, async (req, res) => {
+    try {
+      await ensureTables();
+      const { rows } = await pool.query('SELECT image_data, image_mime, note FROM marketing_post WHERE id=$1', [req.params.postId]);
+      if (!rows.length) return res.status(404).json({ error: 'Post not found' });
+      const r = rows[0];
+      if (!r.image_data) return res.status(400).json({ error: 'No stored image to regenerate from' });
+      const caps = await generate(r.image_data.toString('base64'), r.image_mime, r.note || '');
+      await pool.query('UPDATE marketing_post SET caption_ig=$1, caption_fb=$2, caption_gbp=$3 WHERE id=$4',
+        [caps.ig, caps.fb, caps.gbp, req.params.postId]);
+      res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
 
