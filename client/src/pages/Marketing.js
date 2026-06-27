@@ -2,7 +2,13 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 const fmt = n => (n == null ? '—' : Number(n).toLocaleString('en-CA'));
-const monthLabel = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-CA', { month: 'long', year: 'numeric' }) : '—';
+const monthLabel = (d) => {
+  if (!d) return '—';
+  // period_start may arrive as a bare date ("2026-05-01") or a full ISO timestamp
+  // from Postgres ("2026-05-01T06:00:00.000Z") — normalize to the date part.
+  const dt = new Date(String(d).slice(0, 10) + 'T00:00:00');
+  return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' });
+};
 const pct = (a, b) => (b ? Math.round(((a - b) / b) * 100) : null);
 const delta = (x) => x == null ? null : (x >= 0 ? `+${x}%` : `${x}%`);
 
@@ -70,6 +76,7 @@ export default function Marketing() {
   const t = summary?.totals;
   const prev = summary?.prev?.totals;
   const chan = (k) => summary?.channels?.find(c => c.channel === k)?.total_calls || 0;
+  const ppcCh = summary?.channels?.find(c => c.channel === 'PPC');
   const orgShare = t && t.total ? Math.round((t.organic / t.total) * 100) : 0;
 
   return (
@@ -133,9 +140,14 @@ export default function Marketing() {
               <div className="metric-sub">{prev ? `${delta(pct(t.paid, prev.paid)) || '—'} MoM` : 'PPC + call extension'}</div>
             </div>
             <div className="metric-card">
-              <div className="metric-label">Qualified (≥{status.qualifiedMinSeconds || 60}s)</div>
-              <div className="metric-value">{t.qualified == null ? '—' : fmt(t.qualified)}</div>
-              <div className="metric-sub">{t.qualified == null ? 'no call detail in PDF' : 'answered & long enough'}</div>
+              <div className="metric-label">PPC qualified (≥{status.qualifiedMinSeconds || 60}s)</div>
+              <div className="metric-value">
+                {ppcCh?.qualified_calls == null ? '—' : fmt(ppcCh.qualified_calls)}
+                {ppcCh?.qualified_calls != null && ppcCh.total_calls
+                  ? <span style={{ fontSize: '13px', color: 'var(--text3)', fontWeight: 400 }}> of {fmt(ppcCh.total_calls)}</span>
+                  : null}
+              </div>
+              <div className="metric-sub">{ppcCh?.qualified_calls == null ? 'no call detail in PDF' : 'real paid-search leads'}</div>
             </div>
           </div>
 
