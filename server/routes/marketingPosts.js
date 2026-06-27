@@ -111,7 +111,7 @@ module.exports = (pool) => {
   // Intake: raw image body (Content-Type: image/*), ?note=...
   router.post('/:locationId/intake',
     ...gate,
-    express.raw({ type: ['image/*', 'application/octet-stream'], limit: '15mb' }),
+    express.raw({ type: ['image/*', 'application/octet-stream'], limit: '30mb' }),
     async (req, res) => {
       try {
         await ensureTables();
