@@ -87,6 +87,19 @@ export default function ApprovalQueue({ locId }) {
     finally { setBusy(s => { const n = { ...s }; delete n[id]; return n; }); }
   };
 
+  // Manual-post helpers (until Kelowna's Meta/GBP access is live).
+  const copy = (text) => {
+    if (!text) return;
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => setNotice('Caption copied.')).catch(() => {});
+    else setNotice('Copy not available in this browser.');
+  };
+  const download = (p) => {
+    if (!p.image) return;
+    const a = document.createElement('a');
+    a.href = p.image; a.download = `marketing-${(p.location_name || 'post').toLowerCase().replace(/\s+/g, '-')}-${p.id.slice(0, 8)}.jpg`;
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+
   const act = async (id, what) => {
     try {
       await api(`/marketing/posts/post/${id}/${what}`, { method: 'POST' });
@@ -160,9 +173,12 @@ export default function ApprovalQueue({ locId }) {
                   {p.note && <div style={{ fontSize: '12px', color: 'var(--text3)' }}>note: {p.note}</div>}
                   {CAPS.map(([k, label]) => (
                     <div key={k}>
-                      <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>{label}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 3 }}>
+                        <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</div>
+                        <button onClick={() => copy(cur[k])} style={{ marginLeft: 'auto', fontSize: '10px', padding: '1px 8px', border: 0, background: 'none', color: 'var(--info)' }}>Copy</button>
+                      </div>
                       <textarea value={cur[k] || ''} onChange={e => editField(p.id, k, e.target.value, p.captions)}
-                        rows={k === 'gbp' ? 2 : 2}
+                        rows={2}
                         style={{ width: '100%', resize: 'vertical', fontSize: '12.5px', lineHeight: 1.45 }} />
                     </div>
                   ))}
@@ -172,6 +188,7 @@ export default function ApprovalQueue({ locId }) {
                 <button className="primary" onClick={() => act(p.id, 'approve')}>Approve</button>
                 {dirty && <button onClick={() => saveEdits(p.id)}>Save edits</button>}
                 <button onClick={() => regen(p.id)} disabled={!!busy[p.id]}>{busy[p.id] ? 'Regenerating…' : '✨ Regenerate'}</button>
+                <button onClick={() => download(p)}>⬇ Image</button>
                 <span style={{ marginLeft: 'auto' }} />
                 <span className="badge neutral">{p.location_name}</span>
                 <button onClick={() => act(p.id, 'skip')} style={{ color: 'var(--text3)', border: 0, background: 'none' }}>Skip</button>
@@ -191,16 +208,20 @@ export default function ApprovalQueue({ locId }) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {approved.map(p => (
-              <div className="card" key={p.id} style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '10px 12px' }}>
+              <div className="card" key={p.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '10px 12px', flexWrap: 'wrap' }}>
                 {p.image
                   ? <img src={p.image} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
                   : <div style={{ width: 44, height: 44, borderRadius: 6, background: 'var(--bg3)', flexShrink: 0 }} />}
-                <div style={{ flex: 1, minWidth: 0, fontSize: '12px', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ flex: '1 1 160px', minWidth: 0, fontSize: '12px', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {p.captions?.ig || p.note || '(no caption)'}
                 </div>
                 <span className="badge success">approved</span>
-                <button onClick={() => act(p.id, 'unapprove')} style={{ fontSize: '12px' }}>↩ Back to drafts</button>
-                <button onClick={() => act(p.id, 'skip')} style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '12px' }}>Remove</button>
+                <button onClick={() => download(p)} style={{ fontSize: '12px' }}>⬇ Image</button>
+                <button onClick={() => copy(p.captions?.ig)} style={{ fontSize: '12px' }} title="Copy Instagram caption">IG</button>
+                <button onClick={() => copy(p.captions?.fb)} style={{ fontSize: '12px' }} title="Copy Facebook caption">FB</button>
+                <button onClick={() => copy(p.captions?.gbp)} style={{ fontSize: '12px' }} title="Copy Google caption">GBP</button>
+                <button onClick={() => act(p.id, 'unapprove')} title="Back to drafts" style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '13px' }}>↩</button>
+                <button onClick={() => act(p.id, 'skip')} title="Remove" style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '13px' }}>✕</button>
               </div>
             ))}
           </div>
