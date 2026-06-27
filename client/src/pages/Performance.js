@@ -195,7 +195,7 @@ export default function Performance() {
           <div style={{ fontSize: '11px', color: 'var(--text3)' }}>live roster from Shopmonkey</div>
         </div>
         <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px' }}>
-          Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks). Hours billed counts only revenue-generating lines, so the gap is labour discounted to $0. Efficiency = hours sold \u00f7 hours worked; worked hours imported from Connecteam each pay period. Owner shown on a flat-hours basis (est).
+          Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks). Hours billed counts only revenue-generating lines, so the gap is labour discounted to $0. Efficiency = hours sold ÷ hours worked; worked hours imported from Connecteam each pay period. Owner shown on a flat-hours basis (est).
         </div>
         {techs.length === 0 ? (
           <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)', fontSize: '12px' }}>

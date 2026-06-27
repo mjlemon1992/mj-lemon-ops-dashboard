@@ -228,7 +228,7 @@ export default function Technicians() {
           )}
 
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
-            Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks, goodwill). Labour revenue is pre-tax, after discounts. Efficiency = hours sold \u00f7 worked hours, measured month-to-date; worked = each tech\u2019s weekly hours \u00d7 weeks elapsed this month. Multi-tech jobs attribute each labour line to the tech who performed it, matching Shopmonkey&rsquo;s per-technician report.
+            Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks, goodwill). Labour revenue is pre-tax, after discounts. Efficiency = hours sold ÷ worked hours, measured month-to-date; worked = each tech’s weekly hours × weeks elapsed this month. Multi-tech jobs attribute each labour line to the tech who performed it, matching Shopmonkey&rsquo;s per-technician report.
           </div>
         </>
       )}
