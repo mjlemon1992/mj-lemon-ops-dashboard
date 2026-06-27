@@ -289,6 +289,12 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       refresh();
     } catch (e) { setErr(String(e.message || e)); }
   };
+  // Hard delete — for when the wrong image got imported.
+  const del = async (id) => {
+    if (!window.confirm('Delete this post and its image? This can’t be undone.')) return;
+    try { await api(`/marketing/posts/post/${id}`, { method: 'DELETE' }); refresh(); }
+    catch (e) { setErr(String(e.message || e)); }
+  };
   const saveEdits = async (id) => {
     const d = drafts[id]; if (!d) return;
     try {
@@ -404,6 +410,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
                 <span style={{ marginLeft: 'auto' }} />
                 <span className="badge neutral">{p.location_name}</span>
                 <button onClick={() => act(p.id, 'skip')} style={{ color: 'var(--text3)', border: 0, background: 'none' }}>Skip</button>
+                <button onClick={() => del(p.id)} title="Delete (wrong image)" style={{ color: 'var(--danger)', border: 0, background: 'none' }}>🗑</button>
               </div>
             </div>
           );
@@ -433,7 +440,8 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
                 <button onClick={() => copy(p.captions?.fb)} style={{ fontSize: '12px' }} title="Copy Facebook caption">FB</button>
                 <button onClick={() => copy(p.captions?.gbp)} style={{ fontSize: '12px' }} title="Copy Google caption">GBP</button>
                 <button onClick={() => act(p.id, 'unapprove')} title="Back to drafts" style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '13px' }}>↩</button>
-                <button onClick={() => act(p.id, 'skip')} title="Remove" style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '13px' }}>✕</button>
+                <button onClick={() => act(p.id, 'skip')} title="Archive" style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '13px' }}>✕</button>
+                <button onClick={() => del(p.id)} title="Delete" style={{ color: 'var(--danger)', border: 0, background: 'none', fontSize: '13px' }}>🗑</button>
               </div>
             ))}
           </div>

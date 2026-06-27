@@ -182,6 +182,16 @@ module.exports = (pool) => {
   router.post('/post/:postId/skip', ...gate, setStatus('skipped'));
   router.post('/post/:postId/unapprove', ...gate, setStatus('draft'));
 
+  // Hard delete (e.g. imported the wrong image). Removes the row + its image entirely.
+  router.delete('/post/:postId', ...gate, async (req, res) => {
+    try {
+      await ensureTables();
+      const { rows } = await pool.query('DELETE FROM marketing_post WHERE id=$1 RETURNING id', [req.params.postId]);
+      if (!rows.length) return res.status(404).json({ error: 'Post not found' });
+      res.json({ ok: true, id: rows[0].id });
+    } catch (e) { fail(res, e); }
+  });
+
   // Edit captions before approving.
   router.patch('/post/:postId', ...gate, async (req, res) => {
     try {
