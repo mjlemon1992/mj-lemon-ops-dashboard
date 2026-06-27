@@ -13,6 +13,22 @@ const monthLabel = (d) => {
 const pct = (a, b) => (b ? Math.round(((a - b) / b) * 100) : null);
 const delta = (x) => x == null ? null : (x >= 0 ? `+${x}%` : `${x}%`);
 
+// Attention-cluster tile. Clickable when it has real data; dimmed "soon" otherwise.
+function Gauge({ label, value, sub, tone, onClick, soon }) {
+  const clickable = onClick && !soon;
+  return (
+    <div onClick={clickable ? onClick : undefined}
+      style={{
+        background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)',
+        padding: '14px 15px', opacity: soon ? 0.5 : 1, cursor: clickable ? 'pointer' : 'default',
+      }}>
+      <div style={{ fontSize: '10px', letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text3)', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: '28px', fontWeight: 600, lineHeight: 1, marginTop: '8px', color: tone || 'var(--text)' }}>{value}</div>
+      <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '6px' }}>{soon ? 'soon' : sub}</div>
+    </div>
+  );
+}
+
 export default function Marketing() {
   const { api, token } = useAuth();
   const [locations, setLocations] = useState([]);
@@ -24,7 +40,9 @@ export default function Marketing() {
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState(null);
+  const [approvalsCount, setApprovalsCount] = useState(0);
   const fileRef = useRef(null);
+  const queueRef = useRef(null);
 
   useEffect(() => { api('/marketing/calls/status').then(setStatus).catch(() => {}); }, [api]);
 
@@ -93,8 +111,21 @@ export default function Marketing() {
         )}
       </div>
 
+      {/* Attention cluster — glance, then act */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '22px' }}>
+        <Gauge label="Approvals waiting" value={approvalsCount}
+          tone={approvalsCount > 0 ? 'var(--accent)' : 'var(--text)'}
+          sub={approvalsCount > 0 ? 'ready to review' : 'all clear'}
+          onClick={() => queueRef.current && queueRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })} />
+        <Gauge label="Reviews to reply" value="—" soon />
+        <Gauge label="Shots to grab" value="—" soon />
+        <Gauge label="Scheduled" value="—" soon />
+      </div>
+
       {/* Capture → caption → approve (the daily driver) */}
-      <ApprovalQueue locId={locId} />
+      <div ref={queueRef}>
+        <ApprovalQueue locId={locId} onCount={setApprovalsCount} />
+      </div>
 
       <div style={{ borderTop: '0.5px solid var(--border)', margin: '4px 0 18px' }} />
 
@@ -134,32 +165,27 @@ export default function Marketing() {
             <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Marchex · monthly · lagging trend</div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '16px' }}>
-            <div className="metric-card">
-              <div className="metric-label">Total calls</div>
-              <div className="metric-value">{fmt(t.total)}</div>
-              <div className="metric-sub">{prev ? `${delta(pct(t.total, prev.total)) || '—'} MoM` : 'first month'}</div>
+          <div className="card" style={{ marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '34px', fontWeight: 600, lineHeight: 1, letterSpacing: '-.02em' }}>{fmt(t.total)}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>total calls</div>
+              <div style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text3)' }}>{prev ? `${delta(pct(t.total, prev.total)) || '—'} MoM` : 'first month'}</div>
             </div>
-            <div className="metric-card">
-              <div className="metric-label">Organic</div>
-              <div className="metric-value">{fmt(t.organic)}</div>
-              <div className="metric-sub good">{orgShare}% of total{prev ? ` · ${delta(pct(t.organic, prev.organic)) || '—'}` : ''}</div>
+            {/* organic vs paid split bar */}
+            <div style={{ height: '9px', borderRadius: '6px', overflow: 'hidden', display: 'flex', margin: '14px 0 10px', border: '0.5px solid var(--border)' }}>
+              <div style={{ width: `${orgShare}%`, background: 'var(--info)' }} />
+              <div style={{ width: `${100 - orgShare}%`, background: 'var(--accent)' }} />
             </div>
-            <div className="metric-card">
-              <div className="metric-label">Paid (PPC + Call Ext)</div>
-              <div className="metric-value">{fmt(t.paid)}</div>
-              <div className="metric-sub">{prev ? `${delta(pct(t.paid, prev.paid)) || '—'} MoM` : 'PPC + call extension'}</div>
+            <div style={{ display: 'flex', gap: '20px', fontSize: '12px', color: 'var(--text2)', flexWrap: 'wrap' }}>
+              <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'var(--info)', marginRight: 6 }} />Organic <b style={{ color: 'var(--text)' }}>{fmt(t.organic)}</b> ({orgShare}%)</span>
+              <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'var(--accent)', marginRight: 6 }} />Paid <b style={{ color: 'var(--text)' }}>{fmt(t.paid)}</b></span>
             </div>
-            <div className="metric-card">
-              <div className="metric-label">PPC qualified (≥{status.qualifiedMinSeconds || 60}s)</div>
-              <div className="metric-value">
-                {ppcCh?.qualified_calls == null ? '—' : fmt(ppcCh.qualified_calls)}
-                {ppcCh?.qualified_calls != null && ppcCh.total_calls
-                  ? <span style={{ fontSize: '13px', color: 'var(--text3)', fontWeight: 400 }}> of {fmt(ppcCh.total_calls)}</span>
-                  : null}
+            {ppcCh?.qualified_calls != null && (
+              <div style={{ marginTop: '12px', paddingTop: '11px', borderTop: '0.5px solid var(--border)', fontSize: '12px', color: 'var(--text2)', display: 'flex', justifyContent: 'space-between' }}>
+                <span>PPC qualified (≥{status.qualifiedMinSeconds || 60}s) — real paid-search leads</span>
+                <span><b style={{ color: 'var(--text)' }}>{fmt(ppcCh.qualified_calls)}</b> of {fmt(ppcCh.total_calls)}</span>
               </div>
-              <div className="metric-sub">{ppcCh?.qualified_calls == null ? 'no call detail in PDF' : 'real paid-search leads'}</div>
-            </div>
+            )}
           </div>
 
           <div className="card" style={{ marginBottom: '16px' }}>

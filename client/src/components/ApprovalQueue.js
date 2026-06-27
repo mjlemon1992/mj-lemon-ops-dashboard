@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 
 // Capture a bay photo -> AI captions -> review/approve. Posting to FB/IG/GBP is
 // deferred until Meta/GBP access clears, so "Approve" marks ready-to-post for now.
-export default function ApprovalQueue({ locId }) {
+export default function ApprovalQueue({ locId, onCount }) {
   const { api, token } = useAuth();
   const [configured, setConfigured] = useState(true);
   const [posts, setPosts] = useState([]);
@@ -26,8 +26,8 @@ export default function ApprovalQueue({ locId }) {
     Promise.all([
       api(`/marketing/posts/${locId}/queue?status=draft`).catch(() => []),
       api(`/marketing/posts/${locId}/queue?status=approved`).catch(() => []),
-    ]).then(([d, a]) => { setPosts(d || []); setApproved(a || []); setLoading(false); });
-  }, [locId, api]);
+    ]).then(([d, a]) => { setPosts(d || []); setApproved(a || []); setLoading(false); if (onCount) onCount((d || []).length); });
+  }, [locId, api, onCount]);
   useEffect(() => { refresh(); }, [refresh]);
 
   // Downscale to a sane JPEG before upload: keeps the request small (a full-res
