@@ -159,10 +159,11 @@ module.exports = (pool) => {
   router.get('/:locationId/thumb/:fileId', ...gate, async (req, res) => {
     try {
       if (!SA_OK) return res.status(503).end();
+      const size = Math.min(1600, Math.max(100, parseInt(req.query.size, 10) || 400));
       const meta = await getMeta(req.params.fileId);
       if (meta.thumbnailLink) {
         const tok = await accessToken();
-        const url = meta.thumbnailLink.replace(/=s\d+$/, '=s400').replace(/=w\d+(-h\d+)?$/, '=w400');
+        const url = meta.thumbnailLink.replace(/=s\d+$/, `=s${size}`).replace(/=w\d+(-h\d+)?$/, `=w${size}`);
         const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}` } });
         if (r.ok) {
           res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
