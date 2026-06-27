@@ -20,70 +20,87 @@ const wrapLines = (ctx, text, maxW) => {
   return out;
 };
 
-// Render a branded 1080x1080 poster from generated copy -> JPEG Blob.
-// Three distinct layouts (seasonal = bold dark, educational = clean light,
-// testimonial = review card) all on the Mister Transmission palette.
-async function renderPoster({ type, headline, subline, cta, locName }) {
-  const S = 1080, M = 92;
-  const INK = '#15171A', WHITE = '#FFFFFF', MUTE = '#6B7178';
-  const FONT = '"Helvetica Neue", Helvetica, Arial, sans-serif';
+// ── Poster rendering via SVG (richer than flat canvas), rasterized to JPEG ──
+const FF = 'Helvetica Neue, Helvetica, Arial, sans-serif';
+const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const _measure = (() => { try { return document.createElement('canvas').getContext('2d'); } catch { return null; } })();
+const wrapFor = (text, font, maxW) => { if (_measure) _measure.font = font; return _measure ? wrapLines(_measure, text, maxW) : [String(text || '')]; };
+const tspans = (lines, x, lineH) => lines.map((ln, i) => `<tspan x="${x}" dy="${i ? lineH : 0}">${esc(ln)}</tspan>`).join('');
+
+let _logo = null;
+async function getLogo() {
+  if (_logo) return _logo;
+  try {
+    const blob = await (await fetch('/mt-logo.png')).blob();
+    const data = await new Promise((r, j) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = j; fr.readAsDataURL(blob); });
+    let aspect = 0.58; try { const im = await loadImg(data); aspect = im.height / im.width; } catch {}
+    _logo = { data, aspect };
+  } catch { _logo = { data: null, aspect: 0.58 }; }
+  return _logo;
+}
+
+async function svgToBlob(svg, S) {
+  const img = await loadImg('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
   const c = document.createElement('canvas'); c.width = S; c.height = S;
   const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, S, S);
+  ctx.drawImage(img, 0, 0, S, S);
+  return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+}
 
-  const roundRect = (x, y, w, h, r) => {
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
-    else { ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-  };
-  const para = (txt, font, color, x, y, maxW, lh) => {
-    ctx.font = font; ctx.fillStyle = color;
-    for (const ln of wrapLines(ctx, txt, maxW)) { ctx.fillText(ln, x, y); y += lh; }
-    return y;
-  };
-  let logo = null; try { logo = await loadImg('/mt-logo.png'); } catch {}
-  const drawLogo = (x, y, w) => { if (!logo) return 0; const h = w * logo.height / logo.width; ctx.drawImage(logo, x, y, w, h); return h; };
-  const ctaPill = (bg, fg) => {
-    const h = 96, y = S - 156;
-    ctx.fillStyle = bg; roundRect(M, y, S - 2 * M, h, 16); ctx.fill();
-    ctx.fillStyle = fg; ctx.font = `700 38px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(cta || 'Book your transmission check', S / 2, y + h / 2);
-    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  };
-  const footer = (color) => { ctx.fillStyle = color; ctx.font = `500 26px ${FONT}`; ctx.fillText(locName || 'Parkland Transmission · Red Deer, AB', M, S - 36); };
+async function renderPoster({ type, headline, subline, cta, locName }) {
+  const S = 1080, M = 92;
+  const { data: logo, aspect } = await getLogo();
+  const img = (x, y, w, op) => logo ? `<image xlink:href="${logo}" x="${x}" y="${y}" width="${w}" height="${w * aspect}"${op != null ? ` opacity="${op}"` : ''}/>` : '';
+  const ctaText = esc(cta || 'Book your transmission check');
+  const foot = esc(locName || 'Parkland Transmission · Red Deer, AB');
+  const ctaPill = (y) => `<rect x="${M}" y="${y}" width="${S - 2 * M}" height="104" rx="18" fill="url(#or)"/><text x="${S / 2}" y="${y + 65}" text-anchor="middle" font-family="${FF}" font-weight="700" font-size="38" fill="#fff">${ctaText}</text>`;
+  const head = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${S} ${S}"><defs>
+    <linearGradient id="dk" x1="0" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#23262B"/><stop offset="1" stop-color="#0A0B0D"/></linearGradient>
+    <linearGradient id="or" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8703B"/><stop offset="1" stop-color="#E14313"/></linearGradient></defs>`;
+  let body;
 
   if (type === 'educational') {
-    ctx.fillStyle = WHITE; ctx.fillRect(0, 0, S, S);
-    ctx.fillStyle = ORANGE; ctx.fillRect(0, 0, S, 156);
-    ctx.fillStyle = WHITE; ctx.font = `800 42px ${FONT}`; ctx.textBaseline = 'middle';
-    ctx.fillText('DID YOU KNOW?', M, 80); ctx.textBaseline = 'alphabetic';
-    let y = 320;
-    y = para(headline, `800 72px ${FONT}`, INK, M, y, S - 2 * M, 84) + 20;
-    para(subline, `400 36px ${FONT}`, '#454B52', M, y, S - 2 * M, 50);
-    drawLogo(M, S - 320, 270);
-    ctaPill(ORANGE, WHITE); footer(MUTE);
+    const hl = wrapFor(headline, '800 72px ' + FF, S - 2 * M);
+    const sl = wrapFor(subline, '400 36px ' + FF, S - 2 * M);
+    body = `<rect width="${S}" height="${S}" fill="#F6F5F3"/>
+      <rect width="${S}" height="170" fill="url(#or)"/>
+      <circle cx="${S - 130}" cy="85" r="58" fill="#fff" opacity="0.14"/>
+      <text x="${M}" y="106" font-family="${FF}" font-weight="800" font-size="44" letter-spacing="1" fill="#fff">DID YOU KNOW?</text>
+      <text x="${M}" y="326" font-family="${FF}" font-weight="800" font-size="72" fill="#16181B">${tspans(hl, M, 84)}</text>
+      <text x="${M}" y="${346 + hl.length * 84}" font-family="${FF}" font-weight="400" font-size="36" fill="#474D54">${tspans(sl, M, 50)}</text>
+      ${img(M, S - 332, 264)}
+      ${ctaPill(S - 156)}
+      <text x="${S - M}" y="${S - 38}" text-anchor="end" font-family="${FF}" font-weight="500" font-size="26" fill="#6B7178">${foot}</text>`;
   } else if (type === 'testimonial') {
-    ctx.fillStyle = WHITE; ctx.fillRect(0, 0, S, S);
-    ctx.fillStyle = ORANGE; ctx.fillRect(0, 0, S, 14);
-    const lh = drawLogo(M, M, 290);
-    let y = M + lh + 78;
-    ctx.fillStyle = ORANGE; ctx.font = `700 52px ${FONT}`; ctx.fillText('★★★★★', M, y); y += 40;
-    ctx.fillStyle = 'rgba(240,84,35,0.16)'; ctx.font = `800 150px Georgia, serif`; ctx.fillText('“', M - 10, y + 96);
-    y += 70;
-    y = para(headline, `800 58px ${FONT}`, INK, M, y, S - 2 * M, 72) + 24;
-    para(subline, `500 32px ${FONT}`, MUTE, M, y, S - 2 * M, 44);
-    ctaPill(ORANGE, WHITE); footer(MUTE);
-  } else { // seasonal — bold dark
-    ctx.fillStyle = INK; ctx.fillRect(0, 0, S, S);
-    ctx.fillStyle = ORANGE; ctx.beginPath(); ctx.moveTo(S, 0); ctx.lineTo(S, 240); ctx.lineTo(S - 240, 0); ctx.closePath(); ctx.fill();
-    const lh = drawLogo(M, M, 300);
-    let y = M + lh + 86;
-    ctx.fillStyle = ORANGE; ctx.font = `800 30px ${FONT}`; ctx.fillText('SEASONAL', M, y);
-    ctx.fillStyle = ORANGE; ctx.fillRect(M, y + 16, 84, 5); y += 70;
-    y = para(headline, `800 78px ${FONT}`, WHITE, M, y, S - 2 * M, 90) + 22;
-    para(subline, `400 36px ${FONT}`, '#B9BEC4', M, y, S - 2 * M, 50);
-    ctaPill(ORANGE, WHITE); footer('#8A9099');
+    const hl = wrapFor(headline, '800 56px ' + FF, S - 2 * M);
+    const sl = wrapFor(subline, '500 32px ' + FF, S - 2 * M);
+    const qy = M + 290 * aspect + 70;
+    body = `<rect width="${S}" height="${S}" fill="#F6F5F3"/>
+      <rect width="${S}" height="14" fill="url(#or)"/>
+      ${img(M, M, 290)}
+      <text x="${M - 12}" y="${qy + 250}" font-family="Georgia, serif" font-weight="800" font-size="340" fill="#F05423" opacity="0.10">&#8220;</text>
+      <text x="${M}" y="${qy + 14}" font-family="${FF}" font-weight="700" font-size="50" letter-spacing="8" fill="#F05423">&#9733;&#9733;&#9733;&#9733;&#9733;</text>
+      <text x="${M}" y="${qy + 100}" font-family="${FF}" font-weight="800" font-size="56" fill="#16181B">${tspans(hl, M, 70)}</text>
+      <text x="${M}" y="${qy + 100 + hl.length * 70 + 28}" font-family="${FF}" font-weight="500" font-size="32" fill="#6B7178">${tspans(sl, M, 44)}</text>
+      ${ctaPill(S - 156)}
+      <text x="${S - M}" y="${S - 38}" text-anchor="end" font-family="${FF}" font-weight="500" font-size="26" fill="#6B7178">${foot}</text>`;
+  } else { // seasonal — bold dark, watermark + diagonal accent
+    const hl = wrapFor(headline, '800 80px ' + FF, S - 2 * M);
+    const sl = wrapFor(subline, '400 36px ' + FF, S - 2 * M);
+    const hy = M + 300 * aspect + 168;
+    body = `<rect width="${S}" height="${S}" fill="url(#dk)"/>
+      ${img(515, 560, 760, 0.05)}
+      <polygon points="${S},0 ${S},250 ${S - 250},0" fill="url(#or)"/>
+      ${img(M, M, 300)}
+      <rect x="${M}" y="${M + 300 * aspect + 64}" width="196" height="50" rx="9" fill="url(#or)"/>
+      <text x="${M + 24}" y="${M + 300 * aspect + 98}" font-family="${FF}" font-weight="800" font-size="24" letter-spacing="3" fill="#fff">SEASONAL</text>
+      <text x="${M}" y="${hy}" font-family="${FF}" font-weight="800" font-size="80" fill="#fff">${tspans(hl, M, 90)}</text>
+      <text x="${M}" y="${hy + hl.length * 90 + 16}" font-family="${FF}" font-weight="400" font-size="36" fill="#B9BEC4">${tspans(sl, M, 50)}</text>
+      ${ctaPill(S - 156)}
+      <text x="${S - M}" y="${S - 38}" text-anchor="end" font-family="${FF}" font-weight="500" font-size="26" fill="#8A9099">${foot}</text>`;
   }
-  return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+  return await svgToBlob(head + body + '</svg>', S);
 }
 
 // Capture a bay photo -> AI captions -> review/approve. Posting to FB/IG/GBP is
