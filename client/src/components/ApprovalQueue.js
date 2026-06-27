@@ -11,6 +11,9 @@ export default function ApprovalQueue({ locId }) {
   const [uploading, setUploading] = useState(false);
   const [note, setNote] = useState('');
   const [err, setErr] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [busy, setBusy] = useState({});          // per-post regenerate-in-flight
   const [drafts, setDrafts] = useState({});      // per-post local caption edits
   const fileRef = useRef(null);
 
@@ -44,7 +47,10 @@ export default function ApprovalQueue({ locId }) {
 
   const onPick = async (file) => {
     if (!file) return;
-    setUploading(true); setErr(null);
+    if (!/^image\//.test(file.type) && !/\.(jpe?g|png|webp|gif|heic)$/i.test(file.name || '')) {
+      setErr('That doesn’t look like an image file.'); return;
+    }
+    setUploading(true); setErr(null); setNotice(null);
     try {
       const img = await prepImage(file);
       const res = await fetch(`/api/marketing/posts/${locId}/intake?note=${encodeURIComponent(note)}`, {
@@ -55,6 +61,7 @@ export default function ApprovalQueue({ locId }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Upload failed');
       setNote('');
+      if (data.captionError) setNotice('Photo saved — but auto-captions failed. Write them in below, or hit Regenerate.');
       refresh();
     } catch (e) {
       setErr(String(e.message || e));
@@ -62,6 +69,19 @@ export default function ApprovalQueue({ locId }) {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
     }
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault(); setDragOver(false);
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) onPick(f);
+  };
+
+  const regen = async (id) => {
+    setBusy(s => ({ ...s, [id]: true })); setErr(null);
+    try { await api(`/marketing/posts/post/${id}/regenerate`, { method: 'POST' }); refresh(); }
+    catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(s => { const n = { ...s }; delete n[id]; return n; }); }
   };
 
   const act = async (id, what) => {
@@ -82,13 +102,16 @@ export default function ApprovalQueue({ locId }) {
   const CAPS = [['ig', 'Instagram'], ['fb', 'Facebook'], ['gbp', 'Google']];
 
   return (
-    <div style={{ marginBottom: '22px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', gap: '12px', flexWrap: 'wrap' }}>
+    <div style={{ marginBottom: '22px', borderRadius: 'var(--radius-lg)', outline: dragOver ? '2px dashed var(--accent)' : 'none', outlineOffset: '6px' }}
+      onDragOver={e => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
+      onDragLeave={e => { if (e.currentTarget === e.target) setDragOver(false); }}
+      onDrop={onDrop}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', gap: '12px', flexWrap: 'wrap' }}>
         <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>Approve &amp; post</div>
         <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{posts.length} in queue · posting goes live once Meta/GBP access clears</span>
         <div style={{ flex: 1 }} />
         <input value={note} onChange={e => setNote(e.target.value)} placeholder="optional note — e.g. 10R80 valve body, bay 3"
-          style={{ width: '260px', maxWidth: '50vw' }} />
+          style={{ width: '240px', maxWidth: '50vw' }} />
         <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
           onChange={e => onPick(e.target.files[0])} />
         <button className="primary" disabled={!configured || uploading || !locId}
@@ -96,6 +119,10 @@ export default function ApprovalQueue({ locId }) {
           {uploading ? 'Generating…' : '📷 Capture / add photo'}
         </button>
       </div>
+      <div style={{ fontSize: '11px', color: dragOver ? 'var(--accent)' : 'var(--text3)', marginBottom: '12px' }}>
+        {dragOver ? 'Drop the photo to add it' : 'Tip: drag a photo straight from Photos or Finder anywhere onto this panel.'}
+      </div>
+      {notice && <div className="alert-strip" style={{ background: 'rgba(255,184,0,0.08)', borderColor: 'rgba(255,184,0,0.35)' }}><span style={{ color: 'var(--warning)' }}>{notice}</span></div>}
 
       {!configured && (
         <div className="alert-strip" style={{ background: 'rgba(77,184,255,0.06)', borderColor: 'rgba(77,184,255,0.3)' }}>
@@ -138,6 +165,7 @@ export default function ApprovalQueue({ locId }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '11px 14px', borderTop: '0.5px solid var(--border)', background: 'var(--bg3)' }}>
                 <button className="primary" onClick={() => act(p.id, 'approve')}>Approve</button>
                 {dirty && <button onClick={() => saveEdits(p.id)}>Save edits</button>}
+                <button onClick={() => regen(p.id)} disabled={!!busy[p.id]}>{busy[p.id] ? 'Regenerating…' : '✨ Regenerate'}</button>
                 <span style={{ marginLeft: 'auto' }} />
                 <span className="badge neutral">{p.location_name}</span>
                 <button onClick={() => act(p.id, 'skip')} style={{ color: 'var(--text3)', border: 0, background: 'none' }}>Skip</button>
