@@ -7,6 +7,7 @@ const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth
 // Connector: https://parkland-qbo-production.up.railway.app  (see qbo-connector/)
 const BASE = process.env.QBO_CONNECTOR_URL;   // e.g. https://parkland-qbo-production.up.railway.app
 const TOKEN = process.env.QBO_API_TOKEN;      // minted in qbo-connector: npm run issue-key ops-dashboard <slugs>
+const DEFAULT_SLUG = process.env.QBO_DEFAULT_SLUG || null; // single-location fallback (e.g. "red-deer") — avoids a DB write
 
 module.exports = (pool) => {
   const router = express.Router();
@@ -23,13 +24,14 @@ module.exports = (pool) => {
   const slugify = (s) => (s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
   // Resolve a dashboard location UUID to a connector slug. Prefer the explicit
-  // qbo_slug column; fall back to a slugified name (e.g. "Red Deer" -> "red-deer").
+  // qbo_slug column; else QBO_DEFAULT_SLUG env (single-location convenience);
+  // else a slugified name (e.g. "Red Deer" -> "red-deer").
   const slugFor = async (locationId) => {
     await ensureColumns();
     const { rows } = await pool.query('SELECT name, qbo_slug FROM locations WHERE id = $1', [locationId]);
     if (!rows.length) throw new Error('Location not found');
-    const slug = rows[0].qbo_slug || slugify(rows[0].name);
-    if (!slug) throw new Error('Cannot resolve a QBO slug for this location (set locations.qbo_slug)');
+    const slug = rows[0].qbo_slug || DEFAULT_SLUG || slugify(rows[0].name);
+    if (!slug) throw new Error('Cannot resolve a QBO slug for this location (set locations.qbo_slug or QBO_DEFAULT_SLUG)');
     return slug;
   };
 
