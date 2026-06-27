@@ -7,7 +7,7 @@
   --text: #e0e0e0;
   --text2: #888888;
   --text3: #555555;
-  --accent: #e8a020;
+  --accent: #F05423;
   --success: #4dff91;
   --warning: #ffb800;
   --danger: #ff4d4d;
@@ -137,3 +137,9 @@ td.strong { font-weight: 500; color: var(--text); }
 
 .eff-bar { display: inline-block; width: 60px; height: 4px; background: var(--border2); border-radius: 2px; vertical-align: middle; margin-left: 6px; overflow: hidden; }
 .eff-fill { height: 100%; border-radius: 2px; }
+
+/* Marketing command layout: two columns (queue + side rail), 2x2 gauge quadrant. */
+.mkt-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; align-items: start; }
+.mkt-gauges { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+.mkt-rail { display: flex; flex-direction: column; gap: 13px; }
+@media (max-width: 920px) { .mkt-grid { grid-template-columns: 1fr; } }

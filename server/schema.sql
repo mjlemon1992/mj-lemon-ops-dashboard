@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS locations (
   province VARCHAR(50),
   shopmonkey_location_id VARCHAR(255),
   qbo_company_id VARCHAR(255),
+  google_place_id VARCHAR(255),
   slack_channel VARCHAR(100),
   num_technicians INTEGER DEFAULT 5,
   labour_rate DECIMAL(10,2) DEFAULT 170.00,
@@ -172,4 +173,22 @@ CREATE TABLE IF NOT EXISTS marketing_shots_cache (
   location_id UUID PRIMARY KEY REFERENCES locations(id) ON DELETE CASCADE,
   payload JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Marketing: live Google review scorecard (read-only). Current rating/count/recent reviews
+-- cached from Google Places; a monthly {total,rating} snapshot drives the "+N this month" delta.
+CREATE TABLE IF NOT EXISTS marketing_reviews_cache (
+  location_id UUID PRIMARY KEY REFERENCES locations(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS marketing_reviews_snapshot (
+  location_id UUID NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+  year INTEGER NOT NULL,
+  month INTEGER NOT NULL,
+  total INTEGER,
+  rating DECIMAL(2,1),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (location_id, year, month)
 );
