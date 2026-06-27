@@ -163,23 +163,37 @@ export default function ApprovalQueue({ locId, locName, onCount, seed }) {
   // phone photo can reset the connection -> "Failed to fetch"), speeds the vision
   // call, and normalizes format. Falls back to the original if it can't decode
   // (e.g. HEIC in Chrome) so the server can return a clear unsupported-type error.
+  const isHeic = (f) => /heic|heif/i.test(f.type) || /\.(heic|heif)$/i.test(f.name || '');
+  const downscale = async (input) => {
+    const bmp = await createImageBitmap(input);
+    const max = 1600;
+    const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+    return blob && blob.size ? blob : input;
+  };
   const prepImage = async (file) => {
     try {
-      const bmp = await createImageBitmap(file);
-      const max = 1600;
-      const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
-      const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
-      const c = document.createElement('canvas'); c.width = w; c.height = h;
-      c.getContext('2d').drawImage(bmp, 0, 0, w, h);
-      if (bmp.close) bmp.close();
-      const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
-      return blob && blob.size ? blob : file;
-    } catch { return file; }
+      return await downscale(file);                 // Safari decodes HEIC here too
+    } catch {
+      // Likely HEIC on a non-Safari browser: lazy-load the codec, convert, retry.
+      if (isHeic(file)) {
+        try {
+          const heic2any = (await import('heic2any')).default;
+          const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+          return await downscale(Array.isArray(out) ? out[0] : out);
+        } catch { return file; }
+      }
+      return file;
+    }
   };
 
   const onPick = async (file) => {
     if (!file) return;
-    if (!/^image\//.test(file.type) && !/\.(jpe?g|png|webp|gif|heic)$/i.test(file.name || '')) {
+    if (!/^image\//.test(file.type) && !/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name || '')) {
       setErr('That doesn’t look like an image file.'); return;
     }
     setUploading(true); setErr(null); setNotice(null);
@@ -296,7 +310,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed }) {
         <div style={{ flex: 1 }} />
         <input value={note} onChange={e => setNote(e.target.value)} placeholder="optional note — e.g. 10R80 valve body, bay 3"
           style={{ width: '240px', maxWidth: '50vw' }} />
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+        <input ref={fileRef} type="file" accept="image/*,.heic,.heif" style={{ display: 'none' }}
           onChange={e => onPick(e.target.files[0])} />
         <button className="primary" disabled={!configured || uploading || !locId}
           onClick={() => fileRef.current && fileRef.current.click()}>
