@@ -101,7 +101,7 @@ button.danger {
 }
 
 .metric-label { font-size: 11px; color: var(--text3); margin-bottom: 6px; }
-.metric-value { font-size: 22px; font-weight: 500; color: var(--text); }
+.metric-value { font-family: 'Archivo', sans-serif; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; color: var(--text); }
 .metric-sub { font-size: 11px; margin-top: 4px; color: var(--text3); }
 .metric-sub.good { color: var(--success); }
 .metric-sub.warn { color: var(--warning); }

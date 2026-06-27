@@ -94,6 +94,7 @@ export default function Home() {
     return Math.round((actual / target) * 100);
   };
   const pctColor = p => p == null ? 'var(--text3)' : (p >= 100 ? 'var(--success)' : (p >= 90 ? 'var(--warning)' : 'var(--danger)'));
+  const toneClass = p => p == null ? '' : (p >= 100 ? 'good' : (p >= 90 ? 'warn' : 'bad'));
   // Group targets = sum of per-location targets (revenue, car_count) / first loc for rates.
   const _locTargets = Object.values(targets).filter(Boolean);
   const _sumT = key => _locTargets.reduce((s, t) => s + (parseFloat(t && t[key]) || 0), 0);
@@ -141,7 +142,7 @@ export default function Home() {
           <div className="metric-card">
             <div className="metric-label">Group revenue MTD</div>
             <div className="metric-value">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
-            <div className="metric-sub" style={{ color: pctColor(pacePct(groupRevenue, gRevTarget)) }}>{groupRevenue > 0 ? (pacePct(groupRevenue, gRevTarget) != null ? `${pacePct(groupRevenue, gRevTarget)}% of pace` : 'live from Shopmonkey') : 'awaiting sync'}</div>
+            <div className={`metric-sub ${toneClass(pacePct(groupRevenue, gRevTarget))}`} style={{ color: pctColor(pacePct(groupRevenue, gRevTarget)) }}>{groupRevenue > 0 ? (pacePct(groupRevenue, gRevTarget) != null ? `${pacePct(groupRevenue, gRevTarget)}% of pace` : 'live from Shopmonkey') : 'awaiting sync'}</div>
             {gRevTarget > 0 && (
               <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '3px' }}>
                 Target {money0(gRevTarget)} · <span style={{ color: groupRevenue >= gRevTarget ? 'var(--success)' : 'var(--text2)' }}>{groupRevenue >= gRevTarget ? `${money0(groupRevenue - gRevTarget)} over` : `${money0(gRevTarget - groupRevenue)} to go`}</span>
@@ -151,7 +152,7 @@ export default function Home() {
           <div className="metric-card">
             <div className="metric-label">Group car count</div>
             <div className="metric-value">{groupCarCount > 0 ? groupCarCount : '—'}</div>
-            <div className="metric-sub" style={{ color: pctColor(pacePct(groupCarCount, gCarTarget)) }}>{groupCarCount > 0 ? (pacePct(groupCarCount, gCarTarget) != null ? `${pacePct(groupCarCount, gCarTarget)}% of pace` : 'invoiced this month') : 'awaiting sync'}</div>
+            <div className={`metric-sub ${toneClass(pacePct(groupCarCount, gCarTarget))}`} style={{ color: pctColor(pacePct(groupCarCount, gCarTarget)) }}>{groupCarCount > 0 ? (pacePct(groupCarCount, gCarTarget) != null ? `${pacePct(groupCarCount, gCarTarget)}% of pace` : 'invoiced this month') : 'awaiting sync'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Parts margin</div>
@@ -173,7 +174,7 @@ export default function Home() {
           <div className="metric-card">
             <div className="metric-label">Avg RO value</div>
             <div className="metric-value">{groupAvgRO > 0 ? money0(groupAvgRO) : '—'}</div>
-            <div className="metric-sub" style={{ color: pctColor(targetPct(groupAvgRO, gRoTarget)) }}>{groupAvgRO > 0 ? (targetPct(groupAvgRO, gRoTarget) != null ? `${targetPct(groupAvgRO, gRoTarget)}% of target` : 'revenue / car count') : 'awaiting sync'}</div>
+            <div className={`metric-sub ${toneClass(targetPct(groupAvgRO, gRoTarget))}`} style={{ color: pctColor(targetPct(groupAvgRO, gRoTarget)) }}>{groupAvgRO > 0 ? (targetPct(groupAvgRO, gRoTarget) != null ? `${targetPct(groupAvgRO, gRoTarget)}% of target` : 'revenue / car count') : 'awaiting sync'}</div>
           </div>
         </div>
       )}
