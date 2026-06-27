@@ -51,12 +51,16 @@ export default function Layout() {
     <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
       {/* Sidebar */}
       <div style={{ width: 220, flexShrink: 0, background: 'var(--bg2)', borderRight: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '18px 16px 14px', borderBottom: '0.5px solid var(--border)' }}>
-          <div style={{ fontSize: '10px', fontWeight: '600', letterSpacing: '0.16em', color: 'var(--text3)', textTransform: 'uppercase' }}>MJ Lemon</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginTop: '3px' }}>
-            <span style={{ fontSize: '24px', fontWeight: '800', color: 'var(--accent)', letterSpacing: '-1px', lineHeight: 1 }}>OPS</span>
-            <span style={{ width: '1px', height: '18px', background: 'var(--border)', display: 'inline-block' }} />
-            <span style={{ fontSize: '10px', color: 'var(--text3)', lineHeight: 1.2 }}>Multi-location<br/>dashboard</span>
+        <div style={{ padding: '18px 16px 14px', borderBottom: '0.5px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: 'rgba(240,84,35,0.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F05423" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="3.2" />
+              <path d="M12 4v2.5M12 17.5V20M4 12h2.5M17.5 12H20M6.5 6.5l1.8 1.8M15.7 15.7l1.8 1.8M17.5 6.5l-1.8 1.8M8.3 15.7l-1.8 1.8" />
+            </svg>
+          </div>
+          <div>
+            <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: '18px', fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.3px', lineHeight: 1 }}>OPS</div>
+            <div style={{ fontSize: '9.5px', fontWeight: '600', letterSpacing: '0.12em', color: 'var(--text3)', textTransform: 'uppercase', marginTop: '3px' }}>MJ Lemon</div>
           </div>
         </div>
 
