@@ -27,6 +27,7 @@ const hoursSyncRoutes = require('./routes/hoursSync');
 const displayRoutes = require('./routes/display');
 const financeRoutes = require('./routes/finance');
 const marketingCallsRoutes = require('./routes/marketingCalls');
+const marketingPostsRoutes = require('./routes/marketingPosts');
 const { startScheduler } = require('./scheduler');
 
 app.use('/api/auth', authRoutes(pool));
@@ -41,6 +42,7 @@ app.use('/api/hours', hoursSyncRoutes(pool));
 app.use('/api/display', displayRoutes(pool));
 app.use('/api/finance', financeRoutes(pool));
 app.use('/api/marketing/calls', marketingCallsRoutes(pool));
+app.use('/api/marketing/posts', marketingPostsRoutes(pool));
 app.use('/report', require('./report')(pool));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
