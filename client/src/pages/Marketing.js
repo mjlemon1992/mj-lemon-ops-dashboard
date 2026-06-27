@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import ApprovalQueue from '../components/ApprovalQueue';
+import ShotsList from '../components/ShotsList';
 
 const fmt = n => (n == null ? '—' : Number(n).toLocaleString('en-CA'));
 const monthLabel = (d) => {
@@ -41,8 +42,10 @@ export default function Marketing() {
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState(null);
   const [counts, setCounts] = useState({ drafts: 0, approved: 0 });
+  const [shotsCount, setShotsCount] = useState(0);
   const fileRef = useRef(null);
   const queueRef = useRef(null);
+  const shotsRef = useRef(null);
 
   useEffect(() => { api('/marketing/calls/status').then(setStatus).catch(() => {}); }, [api]);
 
@@ -121,7 +124,10 @@ export default function Marketing() {
         <Gauge label="Ready to post" value={counts.approved}
           tone={counts.approved > 0 ? 'var(--success)' : 'var(--text)'}
           sub={counts.approved > 0 ? 'approved & waiting' : 'none yet'} onClick={toQueue} />
-        <Gauge label="Shots to grab" value="—" soon />
+        <Gauge label="Shots to grab" value={shotsCount}
+          tone={shotsCount > 0 ? 'var(--accent)' : 'var(--text)'}
+          sub={shotsCount > 0 ? 'ideas from the bench' : 'none yet'}
+          onClick={() => shotsRef.current && shotsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })} />
         <Gauge label="Scheduled" value="—" soon />
       </div>
 
@@ -130,7 +136,14 @@ export default function Marketing() {
         <ApprovalQueue locId={locId} locName={locName} onCount={setCounts} />
       </div>
 
-      <div style={{ borderTop: '0.5px solid var(--border)', margin: '4px 0 18px' }} />
+      <div style={{ borderTop: '0.5px solid var(--border)', margin: '18px 0' }} />
+
+      {/* This week's shots — RO-grounded ideation */}
+      <div ref={shotsRef} style={{ marginBottom: '6px' }}>
+        <ShotsList locId={locId} onCount={setShotsCount} />
+      </div>
+
+      <div style={{ borderTop: '0.5px solid var(--border)', margin: '18px 0' }} />
 
       {/* Call tracking */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
