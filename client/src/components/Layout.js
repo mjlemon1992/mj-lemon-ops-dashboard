@@ -84,7 +84,7 @@ export default function Layout() {
                     padding: '7px 8px', borderRadius: 'var(--radius)',
                     cursor: 'pointer', fontSize: '13px',
                     color: active ? 'var(--accent)' : 'var(--text2)',
-                    background: active ? 'var(--bg3)' : 'transparent',
+                    background: active ? 'rgba(240,84,35,0.12)' : 'transparent',
                     boxShadow: active ? 'inset 2px 0 0 var(--accent)' : 'none',
                     fontWeight: active ? '500' : '400',
                     marginBottom: '1px'
