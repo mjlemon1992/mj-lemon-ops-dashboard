@@ -116,7 +116,7 @@ async function renderPoster({ type, headline, subline, locName }) {
 
 // Capture a bay photo -> AI captions -> review/approve. Posting to FB/IG/GBP is
 // deferred until Meta/GBP access clears, so "Approve" marks ready-to-post for now.
-export default function ApprovalQueue({ locId, locName, onCount }) {
+export default function ApprovalQueue({ locId, locName, onCount, seed }) {
   const { api, token } = useAuth();
   const [configured, setConfigured] = useState(true);
   const [posts, setPosts] = useState([]);
@@ -148,6 +148,14 @@ export default function ApprovalQueue({ locId, locName, onCount }) {
     ]).then(([d, a]) => { setPosts(d || []); setApproved(a || []); setLoading(false); if (onCount) onCount({ drafts: (d || []).length, approved: (a || []).length }); });
   }, [locId, api, onCount]);
   useEffect(() => { refresh(); }, [refresh]);
+
+  // A "shot to grab" was clicked in the rail: prefill the capture note + nudge the user.
+  useEffect(() => {
+    if (seed && seed.note) {
+      setNote(seed.note);
+      setNotice(`Tagged “${seed.note}”. Add a photo and the captions will use that context.`);
+    }
+  }, [seed]);
 
   // Downscale to a sane JPEG before upload: keeps the request small (a full-res
   // phone photo can reset the connection -> "Failed to fetch"), speeds the vision

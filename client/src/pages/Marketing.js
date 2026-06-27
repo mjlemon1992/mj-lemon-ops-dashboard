@@ -48,6 +48,7 @@ export default function Marketing() {
   const [counts, setCounts] = useState({ drafts: 0, approved: 0 });
   const [shotsCount, setShotsCount] = useState(0);
   const [showDetail, setShowDetail] = useState(false);
+  const [captureSeed, setCaptureSeed] = useState(null);
   const fileRef = useRef(null);
   const queueRef = useRef(null);
   const shotsRef = useRef(null);
@@ -109,6 +110,14 @@ export default function Marketing() {
   const scrollTo = (ref) => ref.current && ref.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const openDetail = () => { setShowDetail(true); setTimeout(() => scrollTo(detailRef), 50); };
 
+  // Click a "shot to grab" -> seed the capture note with its context and jump to the queue,
+  // so the next photo you add is already tagged. Nonce makes repeat clicks re-trigger.
+  const useShot = (s) => {
+    const tag = [s.shot, s.ro ? `RO #${s.ro}` : (s.vehicle || '')].filter(Boolean).join(' · ');
+    setCaptureSeed({ note: tag, n: Date.now() });
+    scrollTo(queueRef);
+  };
+
   return (
     <div>
       {/* Location */}
@@ -141,14 +150,14 @@ export default function Marketing() {
           </div>
 
           <div ref={queueRef}>
-            <ApprovalQueue locId={locId} locName={locName} onCount={setCounts} />
+            <ApprovalQueue locId={locId} locName={locName} onCount={setCounts} seed={captureSeed} />
           </div>
         </div>
 
         {/* RIGHT: shots, calls glance, reviews */}
         <div className="mkt-rail">
           <div ref={shotsRef}>
-            <ShotsList locId={locId} onCount={setShotsCount} />
+            <ShotsList locId={locId} onCount={setShotsCount} onUse={useShot} />
           </div>
 
           {/* Calls glance — the read; full tables behind "View detail" */}
