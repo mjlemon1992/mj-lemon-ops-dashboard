@@ -22,7 +22,7 @@ function AuthImg({ url, token, alt, style }) {
 
 const when = (d) => { try { return new Date(d).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }); } catch { return ''; } };
 
-export default function DriveLibrary({ locId, onImported, onClose }) {
+export default function DriveLibrary({ locId, onImported, onClose, defaultNote }) {
   const { api, token } = useAuth();
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -30,7 +30,7 @@ export default function DriveLibrary({ locId, onImported, onClose }) {
   const [busy, setBusy] = useState({});
   const [done, setDone] = useState({});
   const [previewIdx, setPreviewIdx] = useState(null);
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState(defaultNote || '');   // inherit a seeded shot note
 
   const load = useCallback(() => {
     if (!locId) return;
