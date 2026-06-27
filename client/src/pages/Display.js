@@ -116,6 +116,29 @@ export default function Display() {
         </div>
       </div>
 
+      {/* Google reviews — rating + new reviews this month */}
+      {data.reviews && data.reviews.rating != null && (
+        <div style={{ display: 'flex', gap: '28px', marginBottom: '28px' }}>
+          <div style={{ flex: 1, background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '24px 32px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Google rating</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', marginTop: '8px' }}>
+              <span style={{ fontSize: '56px', fontWeight: 800, lineHeight: 1 }}>{Number(data.reviews.rating).toFixed(1)}</span>
+              <span style={{ fontSize: '28px', color: 'var(--accent)', letterSpacing: '2px' }}>★★★★★</span>
+            </div>
+            <div style={{ fontSize: '16px', color: 'var(--text3)', marginTop: '10px' }}>
+              {data.reviews.total != null ? `${Number(data.reviews.total).toLocaleString('en-CA')} reviews total` : ''}
+            </div>
+          </div>
+          <div style={{ flex: 1, background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '24px 32px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>New reviews this month</div>
+            <div style={{ fontSize: '56px', fontWeight: 800, lineHeight: 1, marginTop: '8px', color: data.reviews.delta > 0 ? 'var(--success)' : 'var(--text)' }}>
+              {data.reviews.delta > 0 ? `+${data.reviews.delta}` : (data.reviews.delta || 0)}
+            </div>
+            <div style={{ fontSize: '16px', color: 'var(--text3)', marginTop: '10px' }}>month to date</div>
+          </div>
+        </div>
+      )}
+
       {/* Tech leaderboard */}
       <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
         Technicians · hours sold {data.totals && `(${hrs(data.totals.hours_sold)} sold / ${hrs(data.totals.hours_billed)} billed)`}
