@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import ApprovalQueue from '../components/ApprovalQueue';
 
 const fmt = n => (n == null ? '—' : Number(n).toLocaleString('en-CA'));
 const monthLabel = (d) => {
@@ -81,8 +82,8 @@ export default function Marketing() {
 
   return (
     <div>
-      {/* Controls */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* Location */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '18px', alignItems: 'center', flexWrap: 'wrap' }}>
         {locations.length > 1 ? (
           <select value={locId || ''} onChange={e => setLocId(e.target.value)} style={{ width: 'auto' }}>
             {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -90,6 +91,16 @@ export default function Marketing() {
         ) : (
           <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>{locations.find(l => l.id === locId)?.name || 'Location'}</div>
         )}
+      </div>
+
+      {/* Capture → caption → approve (the daily driver) */}
+      <ApprovalQueue locId={locId} />
+
+      <div style={{ borderTop: '0.5px solid var(--border)', margin: '4px 0 18px' }} />
+
+      {/* Call tracking */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>Call tracking</div>
         <div style={{ flex: 1 }} />
         <input ref={fileRef} type="file" accept="application/pdf" multiple style={{ display: 'none' }}
           onChange={e => onPick(e.target.files)} />
@@ -119,7 +130,7 @@ export default function Marketing() {
       {!loading && summary && (
         <>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <div style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text)' }}>Call tracking — {monthLabel(summary.period_start)}</div>
+            <div style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text)' }}>{monthLabel(summary.period_start)}</div>
             <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Marchex · monthly · lagging trend</div>
           </div>
 

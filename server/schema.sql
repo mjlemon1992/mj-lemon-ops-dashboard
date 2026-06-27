@@ -147,3 +147,22 @@ CREATE TABLE IF NOT EXISTS call_summary (
 );
 
 CREATE INDEX IF NOT EXISTS idx_call_summary_loc_period ON call_summary(location_id, period_start DESC);
+
+-- Marketing: capture -> AI caption -> approval queue. A bay photo (+ note) with
+-- Claude-written platform captions; owner approves/edits/skips. Posting to FB/IG/GBP
+-- is deferred (Meta/GBP access), so 'approved' currently means ready-to-post. Images
+-- are stored in-DB for v1 (migrate to R2 when posting lands); un-actioned drafts are
+-- purged after MARKETING_PURGE_DAYS (default 60).
+CREATE TABLE IF NOT EXISTS marketing_post (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id UUID REFERENCES locations(id) ON DELETE CASCADE,
+  location_name VARCHAR(255),
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',   -- draft | approved | skipped
+  note TEXT,
+  image_data BYTEA,
+  image_mime VARCHAR(60),
+  caption_ig TEXT, caption_fb TEXT, caption_gbp TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  actioned_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_marketing_post_loc_status ON marketing_post(location_id, status, created_at DESC);
