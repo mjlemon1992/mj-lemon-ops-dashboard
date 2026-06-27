@@ -140,7 +140,7 @@ export default function Performance() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '12px', marginBottom: '16px' }}>
+      <div className="stat-grid" style={{ marginBottom: '16px' }}>
         <div className="metric-card">
           <div className="metric-label">Revenue MTD (pre-tax)</div>
           <div className="metric-value">{hasMetrics ? money0(revenue) : '\u2014'}</div>
@@ -160,7 +160,7 @@ export default function Performance() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: showFinancials ? '1fr 1fr' : '1fr', gap: '12px', marginBottom: '16px' }}>
+      <div className={showFinancials ? 'two-col' : ''} style={{ marginBottom: '16px' }}>
         <div className="card">
           <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '12px' }}>Metrics vs target</div>
           {metricsVsTarget.map(([l, a, t, ok]) => (

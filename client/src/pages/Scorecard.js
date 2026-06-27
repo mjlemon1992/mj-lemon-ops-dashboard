@@ -103,7 +103,7 @@ export default function Scorecard() {
           QuickBooks not connected for this view yet — the operations numbers below are live.
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '20px' }}>
+        <div className="stat-grid" style={{ marginBottom: '20px' }}>
           <Tile label="Net income" value={money0(net)} tone={num(net) >= 0 ? 'good' : 'bad'}
             sub={netMargin != null ? `${netMargin.toFixed(1)}% net margin` : ''} />
           <Tile label="Net margin" value={netMargin != null ? `${netMargin.toFixed(1)}%` : '—'}
@@ -118,7 +118,7 @@ export default function Scorecard() {
         <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Operations</div>
         <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Shopmonkey · {hasMetrics ? 'live · pre-tax' : 'awaiting sync'}</div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '12px' }}>
+      <div className="stat-grid">
         <Tile label="Revenue MTD" value={hasMetrics ? money0(revenue) : '—'}
           tone={target?.revenue ? (pace(revenue, target.revenue) >= 90 ? 'good' : 'warn') : ''}
           sub={target?.revenue ? `${pace(revenue, target.revenue)}% of pace` : 'no target set'} />

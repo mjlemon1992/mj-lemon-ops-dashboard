@@ -94,7 +94,7 @@ export default function Finance() {
 
       {!loading && !err && pnl && (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '16px' }}>
+          <div className="stat-grid" style={{ marginBottom: '16px' }}>
             {cards.map(([label, value, tone]) => (
               <div className="metric-card" key={label}>
                 <div className="metric-label">{label}</div>

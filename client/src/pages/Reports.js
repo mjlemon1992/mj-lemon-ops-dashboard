@@ -17,9 +17,12 @@ export default function Reports() {
       <div style={{ background: 'rgba(77,184,255,0.08)', border: '0.5px solid rgba(77,184,255,0.2)', borderRadius: 'var(--radius)', padding: '12px 16px', marginBottom: '16px', fontSize: '12px', color: 'var(--info)' }}>
         Operational reports run live from Shopmonkey. Click an available report to open it.
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+      <div className="two-col">
         {REPORTS.map(r => (
-          <div key={r.title} onClick={() => r.route && navigate(r.route)} className="card" style={{ opacity: r.available ? 1 : 0.6, cursor: r.available ? 'pointer' : 'default' }}>
+          <div key={r.title} onClick={() => r.route && navigate(r.route)} className="card"
+            role={r.available ? 'button' : undefined} tabIndex={r.available ? 0 : undefined}
+            onKeyDown={r.available ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); r.route && navigate(r.route); } }) : undefined}
+            style={{ opacity: r.available ? 1 : 0.6, cursor: r.available ? 'pointer' : 'default' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
               <div style={{ fontSize: '20px', color: 'var(--text2)', flexShrink: 0, marginTop: '1px' }}>{r.icon}</div>
               <div>

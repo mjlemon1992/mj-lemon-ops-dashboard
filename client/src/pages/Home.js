@@ -137,7 +137,7 @@ export default function Home() {
       )}
 
       {(user?.role === 'owner' || user?.role === 'partner') && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
+        <div className="stat-grid" style={{ marginBottom: '20px' }}>
           <div className="metric-card">
             <div className="metric-label">Group revenue MTD</div>
             <div className="metric-value">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
@@ -195,7 +195,9 @@ export default function Home() {
           const m = metrics[loc.id];
           const t = targets[loc.id];
           return (
-            <div key={loc.id} className="card" style={{ marginBottom: '12px', cursor: 'pointer' }} onClick={() => navigate('/performance')}>
+            <div key={loc.id} className="card" style={{ marginBottom: '12px', cursor: 'pointer' }}
+              role="button" tabIndex={0} onClick={() => navigate('/performance')}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/performance'); } }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                 <div>
                   <div style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text)' }}>{loc.name}</div>
@@ -203,7 +205,7 @@ export default function Home() {
                 </div>
                 <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--success)' }}></div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+              <div className="stat-grid-sm">
                 {[
                   { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: (m && t && t.revenue) ? `${pacePct(num(m.revenue_mtd), num(t.revenue), loc.province)}% of pace` : (t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target'), ok: (m && t && t.revenue) ? pacePct(num(m.revenue_mtd), num(t.revenue), loc.province) >= 90 : true, sub2: (m && t && t.revenue) ? `Target ${money0(num(t.revenue))} · ${num(m.revenue_mtd) >= num(t.revenue) ? `${money0(num(m.revenue_mtd) - num(t.revenue))} over` : `${money0(num(t.revenue) - num(m.revenue_mtd))} to go`}` : null },
                   { label: 'Profit / hr', val: m && num(m.pph) > 0 ? `$${Math.round(num(m.pph))}` : '—', sub: (m && num(m.pph) > 0 && loc.pph_target) ? `${targetPct(num(m.pph), num(loc.pph_target))}% of target` : `vs $${loc.pph_target} target`, ok: num(m?.pph) >= loc.pph_target },

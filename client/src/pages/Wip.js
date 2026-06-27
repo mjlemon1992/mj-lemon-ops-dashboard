@@ -49,7 +49,7 @@ return (
 {error && <div style={{ color: 'var(--danger, #d9534f)', fontSize: '13px', padding: '20px 0' }}>{error}</div>}
 {!loading && !error && (<>
 {!(data && data.cached) && (<div style={{ fontSize: '12px', color: 'var(--text3)', margin: '10px 0' }}>No committed WIP cached yet — run a sync to populate.</div>)}
-<div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', margin: '14px 0' }}>
+<div className="stat-grid" style={{ margin: '14px 0' }}>
 <div style={card}><div style={label}>Total committed</div><div style={big}>{money(totalValue)}</div><div style={sub}>{totalCount} orders authorized, not invoiced</div></div>
   <div style={card}><div style={label}>Active (≤{agingDays}d)</div><div style={big}>{money(activeValue)}</div><div style={sub}>{activeCount} fresh pipeline</div></div>
   <div style={card}><div style={label}>Aging (&gt;{agingDays}d)</div><div style={{ ...big, color: agingCount ? 'var(--danger, #d9534f)' : 'var(--text)' }}>{money(agingValue)}</div><div style={sub}>{agingCount} need a chase</div></div>
