@@ -21,46 +21,69 @@ const wrapLines = (ctx, text, maxW) => {
 };
 
 // Render a branded 1080x1080 poster from generated copy -> JPEG Blob.
+// Three distinct layouts (seasonal = bold dark, educational = clean light,
+// testimonial = review card) all on the Mister Transmission palette.
 async function renderPoster({ type, headline, subline, cta, locName }) {
-  const S = 1080, M = 84;
+  const S = 1080, M = 92;
+  const INK = '#15171A', WHITE = '#FFFFFF', MUTE = '#6B7178';
+  const FONT = '"Helvetica Neue", Helvetica, Arial, sans-serif';
   const c = document.createElement('canvas'); c.width = S; c.height = S;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, S, S);
-  ctx.fillStyle = ORANGE; ctx.fillRect(0, 0, S, 18);
 
-  let y = M;
-  try {
-    const logo = await loadImg('/mt-logo.png');
-    const lw = 330, lh = lw * logo.height / logo.width;
-    ctx.drawImage(logo, M, M, lw, lh);
-    y = M + lh + 72;
-  } catch { y = M + 120; }
+  const roundRect = (x, y, w, h, r) => {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+    else { ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+  };
+  const para = (txt, font, color, x, y, maxW, lh) => {
+    ctx.font = font; ctx.fillStyle = color;
+    for (const ln of wrapLines(ctx, txt, maxW)) { ctx.fillText(ln, x, y); y += lh; }
+    return y;
+  };
+  let logo = null; try { logo = await loadImg('/mt-logo.png'); } catch {}
+  const drawLogo = (x, y, w) => { if (!logo) return 0; const h = w * logo.height / logo.width; ctx.drawImage(logo, x, y, w, h); return h; };
+  const ctaPill = (bg, fg) => {
+    const h = 96, y = S - 156;
+    ctx.fillStyle = bg; roundRect(M, y, S - 2 * M, h, 16); ctx.fill();
+    ctx.fillStyle = fg; ctx.font = `700 38px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(cta || 'Book your transmission check', S / 2, y + h / 2);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  };
+  const footer = (color) => { ctx.fillStyle = color; ctx.font = `500 26px ${FONT}`; ctx.fillText(locName || 'Parkland Transmission · Red Deer, AB', M, S - 36); };
 
-  const eyebrow = type === 'educational' ? 'DID YOU KNOW?' : type === 'testimonial' ? '★★★★★   CUSTOMER REVIEW' : 'SEASONAL';
-  ctx.fillStyle = ORANGE; ctx.font = '700 30px Helvetica, Arial, sans-serif';
-  ctx.fillText(eyebrow, M, y); y += 58;
-
-  ctx.fillStyle = '#141414'; ctx.font = '800 76px Helvetica, Arial, sans-serif';
-  for (const line of wrapLines(ctx, headline, S - 2 * M)) { ctx.fillText(line, M, y); y += 86; }
-  y += 16;
-
-  ctx.fillStyle = '#444444'; ctx.font = '400 34px Helvetica, Arial, sans-serif';
-  for (const line of wrapLines(ctx, subline, S - 2 * M)) { ctx.fillText(line, M, y); y += 46; }
-
-  // CTA bar
-  const ctaY = S - 232, ctaH = 92;
-  ctx.fillStyle = ORANGE;
-  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(M, ctaY, S - 2 * M, ctaH, 14); ctx.fill(); }
-  else ctx.fillRect(M, ctaY, S - 2 * M, ctaH);
-  ctx.fillStyle = '#ffffff'; ctx.font = '700 40px Helvetica, Arial, sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(cta || 'Book your transmission check', S / 2, ctaY + ctaH / 2);
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-
-  ctx.fillStyle = '#777777'; ctx.font = '500 26px Helvetica, Arial, sans-serif';
-  ctx.fillText(locName || 'Parkland Transmission · Red Deer, AB', M, S - 64);
-
-  return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+  if (type === 'educational') {
+    ctx.fillStyle = WHITE; ctx.fillRect(0, 0, S, S);
+    ctx.fillStyle = ORANGE; ctx.fillRect(0, 0, S, 156);
+    ctx.fillStyle = WHITE; ctx.font = `800 42px ${FONT}`; ctx.textBaseline = 'middle';
+    ctx.fillText('DID YOU KNOW?', M, 80); ctx.textBaseline = 'alphabetic';
+    let y = 320;
+    y = para(headline, `800 72px ${FONT}`, INK, M, y, S - 2 * M, 84) + 20;
+    para(subline, `400 36px ${FONT}`, '#454B52', M, y, S - 2 * M, 50);
+    drawLogo(M, S - 320, 270);
+    ctaPill(ORANGE, WHITE); footer(MUTE);
+  } else if (type === 'testimonial') {
+    ctx.fillStyle = WHITE; ctx.fillRect(0, 0, S, S);
+    ctx.fillStyle = ORANGE; ctx.fillRect(0, 0, S, 14);
+    const lh = drawLogo(M, M, 290);
+    let y = M + lh + 78;
+    ctx.fillStyle = ORANGE; ctx.font = `700 52px ${FONT}`; ctx.fillText('★★★★★', M, y); y += 40;
+    ctx.fillStyle = 'rgba(240,84,35,0.16)'; ctx.font = `800 150px Georgia, serif`; ctx.fillText('“', M - 10, y + 96);
+    y += 70;
+    y = para(headline, `800 58px ${FONT}`, INK, M, y, S - 2 * M, 72) + 24;
+    para(subline, `500 32px ${FONT}`, MUTE, M, y, S - 2 * M, 44);
+    ctaPill(ORANGE, WHITE); footer(MUTE);
+  } else { // seasonal — bold dark
+    ctx.fillStyle = INK; ctx.fillRect(0, 0, S, S);
+    ctx.fillStyle = ORANGE; ctx.beginPath(); ctx.moveTo(S, 0); ctx.lineTo(S, 240); ctx.lineTo(S - 240, 0); ctx.closePath(); ctx.fill();
+    const lh = drawLogo(M, M, 300);
+    let y = M + lh + 86;
+    ctx.fillStyle = ORANGE; ctx.font = `800 30px ${FONT}`; ctx.fillText('SEASONAL', M, y);
+    ctx.fillStyle = ORANGE; ctx.fillRect(M, y + 16, 84, 5); y += 70;
+    y = para(headline, `800 78px ${FONT}`, WHITE, M, y, S - 2 * M, 90) + 22;
+    para(subline, `400 36px ${FONT}`, '#B9BEC4', M, y, S - 2 * M, 50);
+    ctaPill(ORANGE, WHITE); footer('#8A9099');
+  }
+  return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
 }
 
 // Capture a bay photo -> AI captions -> review/approve. Posting to FB/IG/GBP is
@@ -81,6 +104,9 @@ export default function ApprovalQueue({ locId, locName, onCount }) {
   const [posterType, setPosterType] = useState('seasonal');
   const [posterTopic, setPosterTopic] = useState('');
   const [genPoster, setGenPoster] = useState(false);
+  const [ideas, setIdeas] = useState([]);
+  const [ideasLoading, setIdeasLoading] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
   const fileRef = useRef(null);
 
   useEffect(() => { api('/marketing/posts/status').then(s => setConfigured(!!s.configured)).catch(() => {}); }, [api]);
@@ -185,6 +211,22 @@ export default function ApprovalQueue({ locId, locName, onCount }) {
     finally { setGenPoster(false); }
   };
 
+  // Ask AI for timely, seasonal poster ideas to build.
+  const suggestIdeas = async () => {
+    setIdeasLoading(true); setErr(null);
+    try {
+      const month = new Date().toLocaleDateString('en-CA', { month: 'long' });
+      const res = await api('/marketing/posts/poster-ideas', { method: 'POST', body: JSON.stringify({ month }) });
+      setIdeas(Array.isArray(res.ideas) ? res.ideas : []);
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setIdeasLoading(false); }
+  };
+  const useIdea = (idea) => {
+    if (idea.type) setPosterType(idea.type);
+    setPosterTopic(idea.topic || '');
+    setIdeas([]);
+  };
+
   const act = async (id, what) => {
     try {
       await api(`/marketing/posts/post/${id}/${what}`, { method: 'POST' });
@@ -229,19 +271,33 @@ export default function ApprovalQueue({ locId, locName, onCount }) {
       {notice && <div className="alert-strip" style={{ background: 'rgba(255,184,0,0.08)', borderColor: 'rgba(255,184,0,0.35)' }}><span style={{ color: 'var(--warning)' }}>{notice}</span></div>}
 
       {/* Generate a branded poster/ad (AI copy -> rendered to your brand template) */}
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '14px', padding: '10px 12px', background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)' }}>
-        <span style={{ fontSize: '12px', color: 'var(--text2)', fontWeight: 500 }}>Generate a poster</span>
-        <select value={posterType} onChange={e => setPosterType(e.target.value)} style={{ width: 'auto' }}>
-          <option value="seasonal">Seasonal</option>
-          <option value="educational">Educational</option>
-          <option value="testimonial">Testimonial</option>
-        </select>
-        <input value={posterTopic} onChange={e => setPosterTopic(e.target.value)}
-          placeholder={posterType === 'testimonial' ? 'paste a customer quote (optional)' : 'topic / offer (optional)'}
-          style={{ flex: 1, minWidth: '180px' }} />
-        <button className="primary" disabled={!configured || genPoster || !locId} onClick={makePoster}>
-          {genPoster ? 'Designing…' : '🎨 Generate poster'}
-        </button>
+      <div style={{ marginBottom: '14px', padding: '10px 12px', background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text2)', fontWeight: 500 }}>Generate a poster</span>
+          <select value={posterType} onChange={e => setPosterType(e.target.value)} style={{ width: 'auto' }}>
+            <option value="seasonal">Seasonal</option>
+            <option value="educational">Educational</option>
+            <option value="testimonial">Testimonial</option>
+          </select>
+          <input value={posterTopic} onChange={e => setPosterTopic(e.target.value)}
+            placeholder={posterType === 'testimonial' ? 'paste a customer quote (optional)' : 'topic / offer (optional)'}
+            style={{ flex: 1, minWidth: '160px' }} />
+          <button onClick={suggestIdeas} disabled={!configured || ideasLoading}>{ideasLoading ? 'Thinking…' : '💡 Suggest ideas'}</button>
+          <button className="primary" disabled={!configured || genPoster || !locId} onClick={makePoster}>
+            {genPoster ? 'Designing…' : '🎨 Generate poster'}
+          </button>
+        </div>
+        {ideas.length > 0 && (
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text3)', alignSelf: 'center' }}>Timely ideas — click to use:</span>
+            {ideas.map((idea, i) => (
+              <button key={i} onClick={() => useIdea(idea)} title={idea.why || ''}
+                style={{ fontSize: '12px', textAlign: 'left', maxWidth: '280px' }}>
+                <span style={{ color: 'var(--accent)', textTransform: 'capitalize' }}>{idea.type}</span> · {idea.label || idea.topic}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {!configured && (
@@ -268,7 +324,7 @@ export default function ApprovalQueue({ locId, locName, onCount }) {
             <div className="card" key={p.id} style={{ padding: 0, overflow: 'hidden' }}>
               <div style={{ display: 'flex', gap: '14px', padding: '14px' }}>
                 {p.image
-                  ? <img src={p.image} alt="" style={{ width: 130, height: 130, objectFit: 'cover', borderRadius: 8, border: '0.5px solid var(--border)', flexShrink: 0 }} />
+                  ? <img src={p.image} alt="" onClick={() => setLightbox(p.image)} title="Click to enlarge" style={{ width: 130, height: 130, objectFit: 'cover', borderRadius: 8, border: '0.5px solid var(--border)', flexShrink: 0, cursor: 'zoom-in' }} />
                   : <div style={{ width: 130, height: 130, borderRadius: 8, background: 'var(--bg3)', flexShrink: 0 }} />}
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {p.note && <div style={{ fontSize: '12px', color: 'var(--text3)' }}>note: {p.note}</div>}
@@ -311,7 +367,7 @@ export default function ApprovalQueue({ locId, locName, onCount }) {
             {approved.map(p => (
               <div className="card" key={p.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '10px 12px', flexWrap: 'wrap' }}>
                 {p.image
-                  ? <img src={p.image} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+                  ? <img src={p.image} alt="" onClick={() => setLightbox(p.image)} title="Click to enlarge" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, flexShrink: 0, cursor: 'zoom-in' }} />
                   : <div style={{ width: 44, height: 44, borderRadius: 6, background: 'var(--bg3)', flexShrink: 0 }} />}
                 <div style={{ flex: '1 1 160px', minWidth: 0, fontSize: '12px', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {p.captions?.ig || p.note || '(no caption)'}
@@ -326,6 +382,13 @@ export default function ApprovalQueue({ locId, locName, onCount }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {lightbox && (
+        <div onClick={() => setLightbox(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', cursor: 'zoom-out' }}>
+          <img src={lightbox} alt="" style={{ maxWidth: '92vw', maxHeight: '92vh', borderRadius: 8, boxShadow: '0 10px 50px rgba(0,0,0,0.6)' }} />
         </div>
       )}
     </div>
