@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import ApprovalQueue from '../components/ApprovalQueue';
 import ShotsList from '../components/ShotsList';
+import ReviewsScorecard from '../components/ReviewsScorecard';
 
 const fmt = n => (n == null ? '—' : Number(n).toLocaleString('en-CA'));
 const monthLabel = (d) => {
@@ -14,18 +15,21 @@ const monthLabel = (d) => {
 const pct = (a, b) => (b ? Math.round(((a - b) / b) * 100) : null);
 const delta = (x) => x == null ? null : (x >= 0 ? `+${x}%` : `${x}%`);
 
-// Attention-cluster tile. Clickable when it has real data; dimmed "soon" otherwise.
-function Gauge({ label, value, sub, tone, onClick, soon }) {
+// Attention-cluster tile. A 2px colored top rule (rail) is the glance signal; dimmed "soon"
+// when the feature isn't live. No fake fill bars — color carries the urgency, not a fake gauge.
+function Gauge({ label, value, sub, tone, rail, onClick, soon }) {
   const clickable = onClick && !soon;
   return (
     <div onClick={clickable ? onClick : undefined}
       style={{
-        background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)',
-        padding: '14px 15px', opacity: soon ? 0.5 : 1, cursor: clickable ? 'pointer' : 'default',
+        background: 'var(--bg2)', border: '0.5px solid var(--border)',
+        borderTop: `2px solid ${soon ? 'var(--border2)' : (rail || 'var(--accent)')}`,
+        borderRadius: 'var(--radius)', padding: '12px 13px',
+        opacity: soon ? 0.6 : 1, cursor: clickable ? 'pointer' : 'default',
       }}>
       <div style={{ fontSize: '10px', letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text3)', fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: '28px', fontWeight: 600, lineHeight: 1, marginTop: '8px', color: tone || 'var(--text)' }}>{value}</div>
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '6px' }}>{soon ? 'soon' : sub}</div>
+      <div style={{ fontSize: '26px', fontWeight: 600, lineHeight: 1.1, marginTop: '7px', color: tone || 'var(--text)' }}>{value}</div>
+      <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '5px' }}>{soon ? 'soon' : sub}</div>
     </div>
   );
 }
@@ -43,9 +47,11 @@ export default function Marketing() {
   const [msg, setMsg] = useState(null);
   const [counts, setCounts] = useState({ drafts: 0, approved: 0 });
   const [shotsCount, setShotsCount] = useState(0);
+  const [showDetail, setShowDetail] = useState(false);
   const fileRef = useRef(null);
   const queueRef = useRef(null);
   const shotsRef = useRef(null);
+  const detailRef = useRef(null);
 
   useEffect(() => { api('/marketing/calls/status').then(setStatus).catch(() => {}); }, [api]);
 
@@ -97,139 +103,155 @@ export default function Marketing() {
 
   const t = summary?.totals;
   const prev = summary?.prev?.totals;
-  const chan = (k) => summary?.channels?.find(c => c.channel === k)?.total_calls || 0;
   const ppcCh = summary?.channels?.find(c => c.channel === 'PPC');
   const orgShare = t && t.total ? Math.round((t.organic / t.total) * 100) : 0;
   const locName = locations.find(l => l.id === locId)?.name;
-  const toQueue = () => queueRef.current && queueRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const scrollTo = (ref) => ref.current && ref.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const openDetail = () => { setShowDetail(true); setTimeout(() => scrollTo(detailRef), 50); };
 
   return (
     <div>
       {/* Location */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '18px', alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
         {locations.length > 1 ? (
           <select value={locId || ''} onChange={e => setLocId(e.target.value)} style={{ width: 'auto' }}>
             {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         ) : (
-          <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>{locations.find(l => l.id === locId)?.name || 'Location'}</div>
+          <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>{locName || 'Location'}</div>
         )}
       </div>
 
-      {/* Attention cluster — glance, then act */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '22px' }}>
-        <Gauge label="Approvals waiting" value={counts.drafts}
-          tone={counts.drafts > 0 ? 'var(--accent)' : 'var(--text)'}
-          sub={counts.drafts > 0 ? 'ready to review' : 'all clear'} onClick={toQueue} />
-        <Gauge label="Ready to post" value={counts.approved}
-          tone={counts.approved > 0 ? 'var(--success)' : 'var(--text)'}
-          sub={counts.approved > 0 ? 'approved & waiting' : 'none yet'} onClick={toQueue} />
-        <Gauge label="Shots to grab" value={shotsCount}
-          tone={shotsCount > 0 ? 'var(--accent)' : 'var(--text)'}
-          sub={shotsCount > 0 ? 'ideas from the bench' : 'none yet'}
-          onClick={() => shotsRef.current && shotsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })} />
-        <Gauge label="Scheduled" value="—" soon />
-      </div>
+      {/* Command layout: queue (left) + side rail (right) */}
+      <div className="mkt-grid">
 
-      {/* Capture → caption → approve (the daily driver) */}
-      <div ref={queueRef}>
-        <ApprovalQueue locId={locId} locName={locName} onCount={setCounts} />
-      </div>
-
-      <div style={{ borderTop: '0.5px solid var(--border)', margin: '18px 0' }} />
-
-      {/* This week's shots — RO-grounded ideation */}
-      <div ref={shotsRef} style={{ marginBottom: '6px' }}>
-        <ShotsList locId={locId} onCount={setShotsCount} />
-      </div>
-
-      <div style={{ borderTop: '0.5px solid var(--border)', margin: '18px 0' }} />
-
-      {/* Call tracking */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>Call tracking</div>
-        <div style={{ flex: 1 }} />
-        <input ref={fileRef} type="file" accept="application/pdf" multiple style={{ display: 'none' }}
-          onChange={e => onPick(e.target.files)} />
-        <button className="primary" disabled={!status.configured || uploading || !locId}
-          onClick={() => fileRef.current && fileRef.current.click()}>
-          {uploading ? 'Extracting…' : '⬆ Upload call PDF(s)'}
-        </button>
-      </div>
-
-      {!status.configured && (
-        <div className="alert-strip" style={{ background: 'rgba(77,184,255,0.06)', borderColor: 'rgba(77,184,255,0.3)' }}>
-          <span style={{ color: 'var(--info)' }}>Call-tracking extraction not configured yet.</span>
-          <span style={{ fontSize: '12px', color: 'var(--text2)' }}>Set <code>ANTHROPIC_API_KEY</code> in the dashboard env to enable PDF ingestion.</span>
-        </div>
-      )}
-      {msg && <div className="alert-strip" style={{ background: 'rgba(77,255,145,0.07)', borderColor: 'rgba(77,255,145,0.3)' }}><span style={{ color: 'var(--success)' }}>{msg}</span></div>}
-      {err && <div className="alert-strip" style={{ background: 'rgba(255,77,77,0.07)', borderColor: 'rgba(255,77,77,0.3)' }}><span style={{ color: 'var(--danger)' }}>{err}</span></div>}
-
-      {loading && <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading&hellip;</div>}
-
-      {!loading && !summary && (
-        <div className="card" style={{ textAlign: 'center', color: 'var(--text3)', padding: '40px' }}>
-          No call reports yet. Upload a monthly Marchex/Telmetrics PDF to get started.
-        </div>
-      )}
-
-      {!loading && summary && (
-        <>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <div style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text)' }}>{monthLabel(summary.period_start)}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Marchex · monthly · lagging trend</div>
+        {/* LEFT: attention quadrant + the daily driver */}
+        <div>
+          <div className="mkt-gauges">
+            <Gauge label="Approvals waiting" value={counts.drafts}
+              rail="var(--accent)" tone={counts.drafts > 0 ? 'var(--accent)' : 'var(--text)'}
+              sub={counts.drafts > 0 ? 'ready to review' : 'all clear'} onClick={() => scrollTo(queueRef)} />
+            <Gauge label="Ready to post" value={counts.approved}
+              rail="var(--success)" tone={counts.approved > 0 ? 'var(--success)' : 'var(--text)'}
+              sub={counts.approved > 0 ? 'approved & waiting' : 'none yet'} onClick={() => scrollTo(queueRef)} />
+            <Gauge label="Shots to grab" value={shotsCount}
+              rail="var(--warning)" tone={shotsCount > 0 ? 'var(--warning)' : 'var(--text)'}
+              sub={shotsCount > 0 ? 'ideas from the bench' : 'none yet'} onClick={() => scrollTo(shotsRef)} />
+            <Gauge label="Scheduled" value="—" soon />
           </div>
 
-          <div className="card" style={{ marginBottom: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
-              <div style={{ fontSize: '34px', fontWeight: 600, lineHeight: 1, letterSpacing: '-.02em' }}>{fmt(t.total)}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>total calls</div>
-              <div style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text3)' }}>{prev ? `${delta(pct(t.total, prev.total)) || '—'} MoM` : 'first month'}</div>
+          <div ref={queueRef}>
+            <ApprovalQueue locId={locId} locName={locName} onCount={setCounts} />
+          </div>
+        </div>
+
+        {/* RIGHT: shots, calls glance, reviews */}
+        <div className="mkt-rail">
+          <div ref={shotsRef}>
+            <ShotsList locId={locId} onCount={setShotsCount} />
+          </div>
+
+          {/* Calls glance — the read; full tables behind "View detail" */}
+          <div className="card">
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '9px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Calls</span>
+              <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{summary ? `${monthLabel(summary.period_start)} · Marchex` : 'Marchex'}</span>
             </div>
-            {/* organic vs paid split bar */}
-            <div style={{ height: '9px', borderRadius: '6px', overflow: 'hidden', display: 'flex', margin: '14px 0 10px', border: '0.5px solid var(--border)' }}>
-              <div style={{ width: `${orgShare}%`, background: 'var(--info)' }} />
-              <div style={{ width: `${100 - orgShare}%`, background: 'var(--accent)' }} />
-            </div>
-            <div style={{ display: 'flex', gap: '20px', fontSize: '12px', color: 'var(--text2)', flexWrap: 'wrap' }}>
-              <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'var(--info)', marginRight: 6 }} />Organic <b style={{ color: 'var(--text)' }}>{fmt(t.organic)}</b> ({orgShare}%)</span>
-              <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'var(--accent)', marginRight: 6 }} />Paid <b style={{ color: 'var(--text)' }}>{fmt(t.paid)}</b></span>
-            </div>
-            {ppcCh?.qualified_calls != null && (
-              <div style={{ marginTop: '12px', paddingTop: '11px', borderTop: '0.5px solid var(--border)', fontSize: '12px', color: 'var(--text2)', display: 'flex', justifyContent: 'space-between' }}>
-                <span>PPC qualified (≥{status.qualifiedMinSeconds || 60}s) — real paid-search leads</span>
-                <span><b style={{ color: 'var(--text)' }}>{fmt(ppcCh.qualified_calls)}</b> of {fmt(ppcCh.total_calls)}</span>
+
+            {loading && !summary && <div style={{ color: 'var(--text3)', padding: '8px 0' }}>Loading…</div>}
+
+            {!loading && !summary && (
+              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
+                No call reports yet.
+                <button onClick={openDetail} style={{ marginLeft: '8px', fontSize: '12px', padding: '4px 9px' }}>Upload a PDF</button>
               </div>
+            )}
+
+            {summary && t && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                  <span style={{ fontSize: '29px', fontWeight: 600, letterSpacing: '-.02em', lineHeight: 1 }}>{fmt(t.total)}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text3)' }}>total</span>
+                  {prev && <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text3)' }}>{delta(pct(t.total, prev.total)) || '—'} MoM</span>}
+                </div>
+                <div style={{ height: '7px', borderRadius: '5px', overflow: 'hidden', display: 'flex', margin: '11px 0 8px', border: '0.5px solid var(--border)' }}>
+                  <div style={{ width: `${orgShare}%`, background: 'var(--info)' }} />
+                  <div style={{ width: `${100 - orgShare}%`, background: 'var(--accent)' }} />
+                </div>
+                <div style={{ display: 'flex', gap: '14px', fontSize: '11.5px', color: 'var(--text2)', flexWrap: 'wrap' }}>
+                  <span><span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: 2, background: 'var(--info)', marginRight: 5 }} />Organic <b style={{ color: 'var(--text)' }}>{fmt(t.organic)}</b></span>
+                  <span><span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: 2, background: 'var(--accent)', marginRight: 5 }} />Paid <b style={{ color: 'var(--text)' }}>{fmt(t.paid)}</b></span>
+                </div>
+                {ppcCh?.qualified_calls != null && (
+                  <div style={{ marginTop: '10px', paddingTop: '9px', borderTop: '0.5px solid var(--border)', fontSize: '11.5px', color: 'var(--text2)', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Qualified PPC (≥{status.qualifiedMinSeconds || 60}s)</span>
+                    <span><b style={{ color: 'var(--text)' }}>{fmt(ppcCh.qualified_calls)}</b> of {fmt(ppcCh.total_calls)}</span>
+                  </div>
+                )}
+                <div onClick={() => (showDetail ? setShowDetail(false) : openDetail())}
+                  style={{ marginTop: '10px', fontSize: '11.5px', color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  {showDetail ? '▴ Hide detail' : '▾ View detail'}
+                </div>
+              </>
             )}
           </div>
 
-          <div className="card" style={{ marginBottom: '16px' }}>
-            <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '10px' }}>By channel</div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr><th>Channel</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Answered</th><th style={{ textAlign: 'right' }}>Missed</th><th style={{ textAlign: 'right' }}>Unique</th><th style={{ textAlign: 'right' }}>Qualified</th></tr>
-                </thead>
-                <tbody>
-                  {['ORGANIC', 'PPC', 'CALL_EXTENSION'].map(k => {
-                    const c = summary.channels.find(x => x.channel === k);
-                    if (!c) return null;
-                    return (
-                      <tr key={k}>
-                        <td className="strong">{k === 'CALL_EXTENSION' ? 'Call Extension' : k.charAt(0) + k.slice(1).toLowerCase()}</td>
-                        <td style={{ textAlign: 'right' }}>{fmt(c.total_calls)}</td>
-                        <td style={{ textAlign: 'right' }}>{fmt(c.answered_calls)}</td>
-                        <td style={{ textAlign: 'right' }}>{fmt(c.missed_calls)}</td>
-                        <td style={{ textAlign: 'right' }}>{fmt(c.unique_callers)}</td>
-                        <td style={{ textAlign: 'right' }}>{c.qualified_calls == null ? '—' : fmt(c.qualified_calls)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+          {/* Live Google review scorecard (self-hides until configured) */}
+          <ReviewsScorecard locId={locId} />
+        </div>
+      </div>
+
+      {/* Calls detail — upload + full tables, on demand */}
+      {showDetail && (
+        <div ref={detailRef} style={{ marginTop: '20px', borderTop: '0.5px solid var(--border)', paddingTop: '18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>Call tracking detail</div>
+            <div style={{ flex: 1 }} />
+            <input ref={fileRef} type="file" accept="application/pdf" multiple style={{ display: 'none' }}
+              onChange={e => onPick(e.target.files)} />
+            <button className="primary" disabled={!status.configured || uploading || !locId}
+              onClick={() => fileRef.current && fileRef.current.click()}>
+              {uploading ? 'Extracting…' : '⬆ Upload call PDF(s)'}
+            </button>
           </div>
+
+          {!status.configured && (
+            <div className="alert-strip" style={{ background: 'rgba(77,184,255,0.06)', borderColor: 'rgba(77,184,255,0.3)' }}>
+              <span style={{ color: 'var(--info)' }}>Call-tracking extraction not configured yet.</span>
+              <span style={{ fontSize: '12px', color: 'var(--text2)' }}>Set <code>ANTHROPIC_API_KEY</code> in the dashboard env to enable PDF ingestion.</span>
+            </div>
+          )}
+          {msg && <div className="alert-strip" style={{ background: 'rgba(77,255,145,0.07)', borderColor: 'rgba(77,255,145,0.3)' }}><span style={{ color: 'var(--success)' }}>{msg}</span></div>}
+          {err && <div className="alert-strip" style={{ background: 'rgba(255,77,77,0.07)', borderColor: 'rgba(255,77,77,0.3)' }}><span style={{ color: 'var(--danger)' }}>{err}</span></div>}
+
+          {summary && (
+            <div className="card" style={{ marginBottom: '16px' }}>
+              <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '10px' }}>By channel · {monthLabel(summary.period_start)}</div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Channel</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Answered</th><th style={{ textAlign: 'right' }}>Missed</th><th style={{ textAlign: 'right' }}>Unique</th><th style={{ textAlign: 'right' }}>Qualified</th></tr>
+                  </thead>
+                  <tbody>
+                    {['ORGANIC', 'PPC', 'CALL_EXTENSION'].map(k => {
+                      const c = summary.channels.find(x => x.channel === k);
+                      if (!c) return null;
+                      return (
+                        <tr key={k}>
+                          <td className="strong">{k === 'CALL_EXTENSION' ? 'Call Extension' : k.charAt(0) + k.slice(1).toLowerCase()}</td>
+                          <td style={{ textAlign: 'right' }}>{fmt(c.total_calls)}</td>
+                          <td style={{ textAlign: 'right' }}>{fmt(c.answered_calls)}</td>
+                          <td style={{ textAlign: 'right' }}>{fmt(c.missed_calls)}</td>
+                          <td style={{ textAlign: 'right' }}>{fmt(c.unique_callers)}</td>
+                          <td style={{ textAlign: 'right' }}>{c.qualified_calls == null ? '—' : fmt(c.qualified_calls)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {periods.length > 1 && (
             <div className="card">
@@ -250,8 +272,13 @@ export default function Marketing() {
               </div>
             </div>
           )}
-        </>
+        </div>
       )}
+
+      {/* System-trust line */}
+      <div style={{ marginTop: '20px', paddingTop: '12px', borderTop: '0.5px solid var(--border)', fontSize: '11px', color: 'var(--text3)', lineHeight: 1.5 }}>
+        Pulls from Shopmonkey, Marchex, Google. Nothing posts automatically yet — approvals wait here until Meta/GBP access is live.
+      </div>
     </div>
   );
 }
