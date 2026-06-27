@@ -119,6 +119,17 @@ module.exports = (pool) => {
           .map((r, i) => ({ ...r, rank: i + 1 }));
       } catch (e) { leaderboard = []; }
 
+      // Google reviews scorecard — read the cache the marketing tile populates
+      // (rating, total, and reviews-this-month). DB-only; no Google call here.
+      let reviews = null;
+      try {
+        const rv = await pool.query('SELECT payload FROM marketing_reviews_cache WHERE location_id = $1', [req.params.locationId]);
+        if (rv.rows.length) {
+          const p = typeof rv.rows[0].payload === 'string' ? JSON.parse(rv.rows[0].payload) : rv.rows[0].payload;
+          reviews = { rating: p.rating ?? null, total: p.total ?? null, delta: p.delta ?? 0 };
+        }
+      } catch (e) { reviews = null; }
+
       res.set('Cache-Control', 'no-store');
       res.json({
         location: { id: loc.id, name: loc.name, city: loc.city, province, weekly_hours: locWeekly },
@@ -130,6 +141,7 @@ module.exports = (pool) => {
         parts_margin: num(m.parts_margin),
         techs,
         leaderboard,
+        reviews,
         totals: {
           hours_sold: Math.round(totalSold * 10) / 10,
           hours_billed: Math.round(totalBilled * 10) / 10
