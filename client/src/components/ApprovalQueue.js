@@ -153,7 +153,9 @@ export default function ApprovalQueue({ locId, locName, onCount, seed }) {
   useEffect(() => {
     if (seed && seed.note) {
       setNote(seed.note);
-      setNotice(`Tagged “${seed.note}”. Add a photo and the captions will use that context.`);
+      if (seed.topic) setPosterTopic(seed.topic);
+      if (seed.type) setPosterType(seed.type);
+      setNotice(`Tagged “${seed.note}”. Add a photo, or hit Generate poster — both will use this.`);
     }
   }, [seed]);
 
@@ -233,8 +235,8 @@ export default function ApprovalQueue({ locId, locName, onCount, seed }) {
     if (!locId) return;
     setGenPoster(true); setErr(null); setNotice(null);
     try {
-      const copy = await api('/marketing/posts/poster-copy', { method: 'POST', body: JSON.stringify({ type: posterType, topic: posterTopic }) });
-      const blob = await renderPoster({ type: posterType, ...copy, locName });
+      const copyData = await api('/marketing/posts/poster-copy', { method: 'POST', body: JSON.stringify({ type: posterType, topic: posterTopic }) });
+      const blob = await renderPoster({ type: posterType, ...copyData, locName });
       const res = await fetch(`/api/marketing/posts/${locId}/intake?note=${encodeURIComponent(posterType + ' poster')}`, {
         method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: `Bearer ${token}` }, body: blob,
       });

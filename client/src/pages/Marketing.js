@@ -21,6 +21,8 @@ function Gauge({ label, value, sub, tone, rail, onClick, soon }) {
   const clickable = onClick && !soon;
   return (
     <div onClick={clickable ? onClick : undefined}
+      role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }) : undefined}
       style={{
         background: 'var(--bg2)', border: '0.5px solid var(--border)',
         borderTop: `2px solid ${soon ? 'var(--border2)' : (rail || 'var(--accent)')}`,
@@ -114,7 +116,9 @@ export default function Marketing() {
   // so the next photo you add is already tagged. Nonce makes repeat clicks re-trigger.
   const useShot = (s) => {
     const tag = [s.shot, s.ro ? `RO #${s.ro}` : (s.vehicle || '')].filter(Boolean).join(' · ');
-    setCaptureSeed({ note: tag, n: Date.now() });
+    // Seed both paths: the capture note AND the poster topic, so the next photo OR a
+    // generated poster picks up the shot's context. type=educational fits teardown content.
+    setCaptureSeed({ note: tag, topic: s.shot || tag, type: 'educational', n: Date.now() });
     scrollTo(queueRef);
   };
 
@@ -198,6 +202,8 @@ export default function Marketing() {
                   </div>
                 )}
                 <div onClick={() => (showDetail ? setShowDetail(false) : openDetail())}
+                  role="button" tabIndex={0}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showDetail ? setShowDetail(false) : openDetail(); } }}
                   style={{ marginTop: '10px', fontSize: '11.5px', color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   {showDetail ? '▴ Hide detail' : '▾ View detail'}
                 </div>
