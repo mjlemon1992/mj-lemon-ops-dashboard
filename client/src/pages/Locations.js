@@ -119,7 +119,7 @@ export default function Locations() {
               <button onClick={() => openEdit(loc)}>Edit</button>
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '12px' }}>
+          <div className="stat-grid">
             {[
               ['Shopmonkey ID', loc.shopmonkey_location_id || 'Not set'],
               ['Slack channel', loc.slack_channel || 'Not set'],

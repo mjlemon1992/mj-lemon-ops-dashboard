@@ -82,11 +82,12 @@ export default function Targets() {
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px', marginBottom: '16px' }}>
+      <div className="stat-grid-sm" style={{ marginBottom: '16px' }}>
         {SHORT.map((m, i) => {
           const t = targets[i] || DEFAULT_TARGETS[i];
           return (
             <div key={m} onClick={() => setSelectedMonth(i)}
+              role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedMonth(i); } }}
               className="card"
               style={{ cursor: 'pointer', border: selectedMonth === i ? '0.5px solid var(--accent)' : '0.5px solid var(--border)', padding: '10px 12px' }}>
               <div style={{ fontSize: '11px', fontWeight: '500', color: 'var(--text)', marginBottom: '6px' }}>{m}</div>
