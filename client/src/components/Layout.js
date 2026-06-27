@@ -120,7 +120,7 @@ export default function Layout() {
       {/* Main */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ background: 'var(--bg2)', borderBottom: '0.5px solid var(--border)', padding: '0 24px', height: '52px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-          <div style={{ fontSize: '15px', fontWeight: '500', color: 'var(--text)' }}>
+          <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: '20px', fontWeight: 800, letterSpacing: '-0.5px', color: 'var(--text)' }}>
             {visibleNav.find(n => n.path === location.pathname)?.label || 'Dashboard'}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

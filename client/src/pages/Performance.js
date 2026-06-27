@@ -144,7 +144,7 @@ export default function Performance() {
         <div className="metric-card">
           <div className="metric-label">Revenue MTD (pre-tax)</div>
           <div className="metric-value">{hasMetrics ? money0(revenue) : '\u2014'}</div>
-          <div className="metric-sub">{(hasMetrics && target && target.revenue) ? `${pacePct(revenue, num(target.revenue))}% of pace` : (target && target.revenue ? `vs $${Math.round(num(target.revenue) / 1000)}k target` : (hasMetrics ? 'live from Shopmonkey' : 'awaiting sync'))}</div>
+          <div className={`metric-sub ${(hasMetrics && target && target.revenue) ? (pacePct(revenue, num(target.revenue)) >= 90 ? 'good' : 'warn') : ''}`}>{(hasMetrics && target && target.revenue) ? `${pacePct(revenue, num(target.revenue))}% of pace` : (target && target.revenue ? `vs $${Math.round(num(target.revenue) / 1000)}k target` : (hasMetrics ? 'live from Shopmonkey' : 'awaiting sync'))}</div>
         </div>
         {showFinancials && (
           <div className="metric-card">
