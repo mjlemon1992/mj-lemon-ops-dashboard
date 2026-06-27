@@ -48,58 +48,69 @@ async function svgToBlob(svg, S) {
   return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
 }
 
-async function renderPoster({ type, headline, subline, cta, locName }) {
+// A rotating library of distinct layouts so output isn't repetitive. No CTAs.
+async function renderPoster({ type, headline, subline, locName }) {
   const S = 1080, M = 92;
   const { data: logo, aspect } = await getLogo();
   const img = (x, y, w, op) => logo ? `<image xlink:href="${logo}" x="${x}" y="${y}" width="${w}" height="${w * aspect}"${op != null ? ` opacity="${op}"` : ''}/>` : '';
-  const ctaText = esc(cta || 'Book your transmission check');
+  const chip = (x, y, w, p = 18) => logo ? `<rect x="${x - p}" y="${y - p}" width="${w + 2 * p}" height="${w * aspect + 2 * p}" rx="14" fill="#fff"/>${img(x, y, w)}` : '';
   const foot = esc(locName || 'Parkland Transmission · Red Deer, AB');
-  const ctaPill = (y) => `<rect x="${M}" y="${y}" width="${S - 2 * M}" height="104" rx="18" fill="url(#or)"/><text x="${S / 2}" y="${y + 65}" text-anchor="middle" font-family="${FF}" font-weight="700" font-size="38" fill="#fff">${ctaText}</text>`;
+  const footEl = (x, y, anchor, color) => `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${FF}" font-weight="500" font-size="24" fill="${color}">${foot}</text>`;
+  const stars = (x, y, size, fill) => `<text x="${x}" y="${y}" font-family="${FF}" font-weight="700" font-size="${size}" letter-spacing="${size * 0.12}" fill="${fill}">&#9733;&#9733;&#9733;&#9733;&#9733;</text>`;
+  const wHL = (px, w) => wrapFor(headline, `800 ${px}px ${FF}`, w);
+  const wSL = (px, w) => wrapFor(subline, `400 ${px}px ${FF}`, w);
   const head = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${S} ${S}"><defs>
     <linearGradient id="dk" x1="0" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#23262B"/><stop offset="1" stop-color="#0A0B0D"/></linearGradient>
     <linearGradient id="or" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8703B"/><stop offset="1" stop-color="#E14313"/></linearGradient></defs>`;
-  let body;
 
-  if (type === 'educational') {
-    const hl = wrapFor(headline, '800 72px ' + FF, S - 2 * M);
-    const sl = wrapFor(subline, '400 36px ' + FF, S - 2 * M);
-    body = `<rect width="${S}" height="${S}" fill="#F6F5F3"/>
-      <rect width="${S}" height="170" fill="url(#or)"/>
-      <circle cx="${S - 130}" cy="85" r="58" fill="#fff" opacity="0.14"/>
-      <text x="${M}" y="106" font-family="${FF}" font-weight="800" font-size="44" letter-spacing="1" fill="#fff">DID YOU KNOW?</text>
-      <text x="${M}" y="326" font-family="${FF}" font-weight="800" font-size="72" fill="#16181B">${tspans(hl, M, 84)}</text>
-      <text x="${M}" y="${346 + hl.length * 84}" font-family="${FF}" font-weight="400" font-size="36" fill="#474D54">${tspans(sl, M, 50)}</text>
-      ${img(M, S - 332, 264)}
-      ${ctaPill(S - 156)}
-      <text x="${S - M}" y="${S - 38}" text-anchor="end" font-family="${FF}" font-weight="500" font-size="26" fill="#6B7178">${foot}</text>`;
-  } else if (type === 'testimonial') {
-    const hl = wrapFor(headline, '800 56px ' + FF, S - 2 * M);
-    const sl = wrapFor(subline, '500 32px ' + FF, S - 2 * M);
-    const qy = M + 290 * aspect + 70;
-    body = `<rect width="${S}" height="${S}" fill="#F6F5F3"/>
-      <rect width="${S}" height="14" fill="url(#or)"/>
-      ${img(M, M, 290)}
-      <text x="${M - 12}" y="${qy + 250}" font-family="Georgia, serif" font-weight="800" font-size="340" fill="#F05423" opacity="0.10">&#8220;</text>
-      <text x="${M}" y="${qy + 14}" font-family="${FF}" font-weight="700" font-size="50" letter-spacing="8" fill="#F05423">&#9733;&#9733;&#9733;&#9733;&#9733;</text>
-      <text x="${M}" y="${qy + 100}" font-family="${FF}" font-weight="800" font-size="56" fill="#16181B">${tspans(hl, M, 70)}</text>
-      <text x="${M}" y="${qy + 100 + hl.length * 70 + 28}" font-family="${FF}" font-weight="500" font-size="32" fill="#6B7178">${tspans(sl, M, 44)}</text>
-      ${ctaPill(S - 156)}
-      <text x="${S - M}" y="${S - 38}" text-anchor="end" font-family="${FF}" font-weight="500" font-size="26" fill="#6B7178">${foot}</text>`;
-  } else { // seasonal — bold dark, watermark + diagonal accent
-    const hl = wrapFor(headline, '800 80px ' + FF, S - 2 * M);
-    const sl = wrapFor(subline, '400 36px ' + FF, S - 2 * M);
-    const hy = M + 300 * aspect + 168;
-    body = `<rect width="${S}" height="${S}" fill="url(#dk)"/>
-      ${img(515, 560, 760, 0.05)}
-      <polygon points="${S},0 ${S},250 ${S - 250},0" fill="url(#or)"/>
-      ${img(M, M, 300)}
-      <rect x="${M}" y="${M + 300 * aspect + 64}" width="196" height="50" rx="9" fill="url(#or)"/>
-      <text x="${M + 24}" y="${M + 300 * aspect + 98}" font-family="${FF}" font-weight="800" font-size="24" letter-spacing="3" fill="#fff">SEASONAL</text>
+  // ── Layouts (general pool) ──
+  const editorial = () => { const hl = wHL(76, S - 2 * M), sl = wSL(34, S - 2 * M), hy = 640;
+    return `<rect width="${S}" height="${S}" fill="#F6F5F3"/><rect width="${S}" height="10" fill="url(#or)"/>
+      ${img(M, M, 250)}<rect x="${M}" y="${hy - 84}" width="72" height="6" fill="#F05423"/>
+      <text x="${M}" y="${hy}" font-family="${FF}" font-weight="800" font-size="76" fill="#16181B">${tspans(hl, M, 86)}</text>
+      <text x="${M}" y="${hy + hl.length * 86 + 26}" font-family="${FF}" font-weight="400" font-size="34" fill="#525860">${tspans(sl, M, 48)}</text>
+      ${footEl(M, S - 50, 'start', '#9AA0A7')}`; };
+  const darkCentered = () => { const cx = S / 2, hl = wHL(74, S - 2 * M), sl = wSL(32, S - 2 * M), hy = 540;
+    return `<rect width="${S}" height="${S}" fill="url(#dk)"/>${img(515, 560, 760, 0.05)}${img(cx - 110, 150, 220)}
+      <text x="${cx}" y="${hy}" text-anchor="middle" font-family="${FF}" font-weight="800" font-size="74" fill="#fff">${tspans(hl, cx, 84)}</text>
+      <rect x="${cx - 45}" y="${hy + hl.length * 84 + 6}" width="90" height="6" fill="#F05423"/>
+      <text x="${cx}" y="${hy + hl.length * 84 + 72}" text-anchor="middle" font-family="${FF}" font-weight="400" font-size="32" fill="#B9BEC4">${tspans(sl, cx, 46)}</text>
+      ${footEl(cx, S - 50, 'middle', '#7C828A')}`; };
+  const orangeRail = () => { const rail = 380, tx = rail + 56, mw = S - tx - M, hl = wHL(62, mw), sl = wSL(31, mw), hy = 410;
+    return `<rect width="${S}" height="${S}" fill="#F6F5F3"/><rect width="${rail}" height="${S}" fill="url(#or)"/>
+      ${chip(58, 90, rail - 150)}<text x="58" y="${S - 64}" font-family="${FF}" font-weight="800" font-size="20" letter-spacing="2" fill="#fff" opacity="0.92">MISTER TRANSMISSION</text>
+      <text x="${tx}" y="${hy}" font-family="${FF}" font-weight="800" font-size="62" fill="#16181B">${tspans(hl, tx, 74)}</text>
+      <text x="${tx}" y="${hy + hl.length * 74 + 24}" font-family="${FF}" font-weight="400" font-size="31" fill="#525860">${tspans(sl, tx, 44)}</text>
+      ${footEl(S - M, S - 50, 'end', '#9AA0A7')}`; };
+  const fullOrange = () => { const hl = wHL(80, S - 2 * M), sl = wSL(34, S - 2 * M), hy = 540;
+    return `<rect width="${S}" height="${S}" fill="url(#or)"/>${chip(M, M, 240)}
       <text x="${M}" y="${hy}" font-family="${FF}" font-weight="800" font-size="80" fill="#fff">${tspans(hl, M, 90)}</text>
-      <text x="${M}" y="${hy + hl.length * 90 + 16}" font-family="${FF}" font-weight="400" font-size="36" fill="#B9BEC4">${tspans(sl, M, 50)}</text>
-      ${ctaPill(S - 156)}
-      <text x="${S - M}" y="${S - 38}" text-anchor="end" font-family="${FF}" font-weight="500" font-size="26" fill="#8A9099">${foot}</text>`;
-  }
+      <text x="${M}" y="${hy + hl.length * 90 + 26}" font-family="${FF}" font-weight="400" font-size="34" fill="#FFE7DC">${tspans(sl, M, 48)}</text>
+      ${footEl(M, S - 50, 'start', 'rgba(255,255,255,0.82)')}`; };
+  const diagonal = () => { const hl = wHL(72, S - 2 * M), sl = wSL(32, S - 2 * M);
+    return `<rect width="${S}" height="${S}" fill="url(#dk)"/><polygon points="0,${S} 0,730 ${S},560 ${S},${S}" fill="url(#or)"/>
+      ${img(M, M, 270)}<text x="${M}" y="440" font-family="${FF}" font-weight="800" font-size="72" fill="#fff">${tspans(hl, M, 84)}</text>
+      <text x="${M}" y="840" font-family="${FF}" font-weight="500" font-size="32" fill="#fff">${tspans(sl, M, 46)}</text>
+      ${footEl(S - M, S - 50, 'end', 'rgba(255,255,255,0.85)')}`; };
+
+  // ── Testimonial layouts ──
+  const quoteLight = () => { const hl = wHL(56, S - 2 * M), sl = wSL(32, S - 2 * M), qy = 470;
+    return `<rect width="${S}" height="${S}" fill="#F6F5F3"/><rect width="${S}" height="12" fill="url(#or)"/>
+      <text x="${M - 16}" y="440" font-family="Georgia, serif" font-weight="800" font-size="300" fill="#F05423" opacity="0.12">&#8220;</text>
+      ${stars(M, 300, 54, '#F05423')}
+      <text x="${M}" y="${qy}" font-family="${FF}" font-weight="800" font-size="56" fill="#16181B">${tspans(hl, M, 70)}</text>
+      <text x="${M}" y="${qy + hl.length * 70 + 28}" font-family="${FF}" font-weight="500" font-size="32" fill="#6B7178">${tspans(sl, M, 44)}</text>
+      ${img(M, S - 300, 240)}${footEl(S - M, S - 50, 'end', '#9AA0A7')}`; };
+  const quoteDark = () => { const hl = wHL(58, S - 2 * M), sl = wSL(32, S - 2 * M), qy = 520;
+    return `<rect width="${S}" height="${S}" fill="url(#dk)"/>${img(S - M - 210, M, 210)}
+      <text x="${M - 16}" y="500" font-family="Georgia, serif" font-weight="800" font-size="300" fill="#F8703B" opacity="0.18">&#8220;</text>
+      ${stars(M, 360, 54, '#F8703B')}
+      <text x="${M}" y="${qy}" font-family="${FF}" font-weight="800" font-size="58" fill="#fff">${tspans(hl, M, 72)}</text>
+      <text x="${M}" y="${qy + hl.length * 72 + 28}" font-family="${FF}" font-weight="500" font-size="32" fill="#B9BEC4">${tspans(sl, M, 44)}</text>
+      ${footEl(M, S - 50, 'start', '#7C828A')}`; };
+
+  const pool = type === 'testimonial' ? [quoteLight, quoteDark] : [editorial, darkCentered, orangeRail, fullOrange, diagonal];
+  const body = pool[Math.floor(Math.random() * pool.length)]();
   return await svgToBlob(head + body + '</svg>', S);
 }
 
