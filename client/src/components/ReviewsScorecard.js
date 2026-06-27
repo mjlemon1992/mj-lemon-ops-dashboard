@@ -31,16 +31,22 @@ export default function ReviewsScorecard({ locId }) {
 
   if (hidden || !data) return null;
 
-  const { rating, total, delta, reviews } = data;
+  const { rating, total, delta, reviews, demo } = data;
   const recent = (reviews || [])[0];
 
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '10px' }}>
         <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Google reviews</span>
-        <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }} />live
-        </span>
+        {demo ? (
+          <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warning)', display: 'inline-block' }} />sample
+          </span>
+        ) : (
+          <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }} />live
+          </span>
+        )}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -62,6 +68,12 @@ export default function ReviewsScorecard({ locId }) {
             {recent.author || 'Customer'}{recent.when ? ` · ${recent.when}` : ''}{recent.rating ? ` · ${'★'.repeat(recent.rating)}` : ''}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.45 }}>{recent.text}</div>
+        </div>
+      )}
+
+      {demo && (
+        <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--warning)' }}>
+          Sample data — set the Google API key + place_id to go live.
         </div>
       )}
     </div>

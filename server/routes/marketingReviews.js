@@ -8,6 +8,16 @@ const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth
 const GOOGLE_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const MODEL_FRESH_MS = 12 * 60 * 60 * 1000;
 
+// Preview mode: set MARKETING_REVIEWS_DEMO=1 to render a clearly-labelled SAMPLE scorecard
+// before the Google key / place_id are wired up. Returned with demo:true so the UI marks it
+// "sample" (not "live"); never cached, and real data always wins once the key is set.
+const DEMO = /^(1|true|yes)$/i.test(process.env.MARKETING_REVIEWS_DEMO || '');
+const demoPayload = () => ({
+  rating: 4.7, total: 127, delta: 3, demo: true,
+  reviews: [{ author: 'Martin F.', rating: 5, when: '2 days ago',
+    text: 'Honest about what actually needed doing. Saved me a grand vs the dealer quote.' }],
+});
+
 module.exports = (pool) => {
   const router = express.Router();
 
@@ -67,11 +77,17 @@ module.exports = (pool) => {
           return res.json({ ...p, cached: true });
         }
       }
-      if (!GOOGLE_KEY) return res.status(503).json({ error: 'GOOGLE_MAPS_API_KEY not set' });
+      if (!GOOGLE_KEY) {
+        if (DEMO) return res.json(demoPayload());
+        return res.status(503).json({ error: 'GOOGLE_MAPS_API_KEY not set' });
+      }
       const { rows: lr } = await pool.query('SELECT google_place_id FROM locations WHERE id=$1', [id]);
       if (!lr.length) return res.status(404).json({ error: 'Location not found' });
       const placeId = lr[0].google_place_id;
-      if (!placeId) return res.status(503).json({ error: 'google_place_id not set for this location' });
+      if (!placeId) {
+        if (DEMO) return res.json(demoPayload());
+        return res.status(503).json({ error: 'google_place_id not set for this location' });
+      }
 
       const r = await fetchPlace(placeId);
       const total = r.user_ratings_total ?? null, rating = r.rating ?? null;
