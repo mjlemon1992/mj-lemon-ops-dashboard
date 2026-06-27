@@ -180,6 +180,7 @@ module.exports = (pool) => {
   // NOTE: "approve" marks ready-to-post; real publishing waits on Meta/GBP access.
   router.post('/post/:postId/approve', ...gate, setStatus('approved'));
   router.post('/post/:postId/skip', ...gate, setStatus('skipped'));
+  router.post('/post/:postId/unapprove', ...gate, setStatus('draft'));
 
   // Edit captions before approving.
   router.patch('/post/:postId', ...gate, async (req, res) => {

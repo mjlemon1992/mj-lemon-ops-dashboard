@@ -7,6 +7,7 @@ export default function ApprovalQueue({ locId }) {
   const { api, token } = useAuth();
   const [configured, setConfigured] = useState(true);
   const [posts, setPosts] = useState([]);
+  const [approved, setApproved] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [note, setNote] = useState('');
@@ -22,8 +23,10 @@ export default function ApprovalQueue({ locId }) {
   const refresh = useCallback(() => {
     if (!locId) return;
     setLoading(true); setErr(null);
-    api(`/marketing/posts/${locId}/queue`).then(p => { setPosts(p || []); setLoading(false); })
-      .catch(e => { setErr(String(e.message || e)); setLoading(false); });
+    Promise.all([
+      api(`/marketing/posts/${locId}/queue?status=draft`).catch(() => []),
+      api(`/marketing/posts/${locId}/queue?status=approved`).catch(() => []),
+    ]).then(([d, a]) => { setPosts(d || []); setApproved(a || []); setLoading(false); });
   }, [locId, api]);
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -85,8 +88,11 @@ export default function ApprovalQueue({ locId }) {
   };
 
   const act = async (id, what) => {
-    try { await api(`/marketing/posts/post/${id}/${what}`, { method: 'POST' }); refresh(); }
-    catch (e) { setErr(String(e.message || e)); }
+    try {
+      await api(`/marketing/posts/post/${id}/${what}`, { method: 'POST' });
+      if (what === 'approve') setNotice('Approved — moved to “Ready to post” below.');
+      refresh();
+    } catch (e) { setErr(String(e.message || e)); }
   };
   const saveEdits = async (id) => {
     const d = drafts[id]; if (!d) return;
@@ -174,6 +180,32 @@ export default function ApprovalQueue({ locId }) {
           );
         })}
       </div>
+
+      {approved.length > 0 && (
+        <div style={{ marginTop: '20px' }}>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>
+            Ready to post <span style={{ color: 'var(--text3)', fontWeight: 400 }}>({approved.length})</span>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)', margin: '2px 0 10px' }}>
+            Approved and waiting — these publish automatically once Meta/GBP access is live.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {approved.map(p => (
+              <div className="card" key={p.id} style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '10px 12px' }}>
+                {p.image
+                  ? <img src={p.image} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+                  : <div style={{ width: 44, height: 44, borderRadius: 6, background: 'var(--bg3)', flexShrink: 0 }} />}
+                <div style={{ flex: 1, minWidth: 0, fontSize: '12px', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {p.captions?.ig || p.note || '(no caption)'}
+                </div>
+                <span className="badge success">approved</span>
+                <button onClick={() => act(p.id, 'unapprove')} style={{ fontSize: '12px' }}>↩ Back to drafts</button>
+                <button onClick={() => act(p.id, 'skip')} style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '12px' }}>Remove</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
