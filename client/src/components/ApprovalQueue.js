@@ -24,14 +24,33 @@ export default function ApprovalQueue({ locId }) {
   }, [locId, api]);
   useEffect(() => { refresh(); }, [refresh]);
 
+  // Downscale to a sane JPEG before upload: keeps the request small (a full-res
+  // phone photo can reset the connection -> "Failed to fetch"), speeds the vision
+  // call, and normalizes format. Falls back to the original if it can't decode
+  // (e.g. HEIC in Chrome) so the server can return a clear unsupported-type error.
+  const prepImage = async (file) => {
+    try {
+      const bmp = await createImageBitmap(file);
+      const max = 1600;
+      const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+      const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(bmp, 0, 0, w, h);
+      if (bmp.close) bmp.close();
+      const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+      return blob && blob.size ? blob : file;
+    } catch { return file; }
+  };
+
   const onPick = async (file) => {
     if (!file) return;
     setUploading(true); setErr(null);
     try {
+      const img = await prepImage(file);
       const res = await fetch(`/api/marketing/posts/${locId}/intake?note=${encodeURIComponent(note)}`, {
         method: 'POST',
-        headers: { 'Content-Type': file.type || 'image/jpeg', Authorization: `Bearer ${token}` },
-        body: file,
+        headers: { 'Content-Type': img.type || 'image/jpeg', Authorization: `Bearer ${token}` },
+        body: img,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Upload failed');
