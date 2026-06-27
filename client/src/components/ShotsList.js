@@ -9,16 +9,24 @@ export default function ShotsList({ locId, onCount, onUse }) {
   const [openOrders, setOpenOrders] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
+  const [hidden, setHidden] = useState({});   // locally dismissed shots (reset on (re)load)
 
   const load = useCallback((force) => {
     if (!locId) return;
     setLoading(true); setErr(null);
     api(`/marketing/shots/${locId}/shots${force ? '?force=1' : ''}`)
-      .then(d => { setShots(d.shots || []); setOpenOrders(d.open_orders); if (onCount) onCount((d.shots || []).length); })
+      .then(d => { setShots(d.shots || []); setOpenOrders(d.open_orders); setHidden({}); if (onCount) onCount((d.shots || []).length); })
       .catch(e => setErr(String(e.message || e)))
       .finally(() => setLoading(false));
   }, [locId, api, onCount]);
   useEffect(() => { load(false); }, [load]);
+
+  const dismiss = (i) => setHidden(h => {
+    const n = { ...h, [i]: true };
+    if (onCount) onCount(shots.filter((_, j) => !n[j]).length);
+    return n;
+  });
+  const visible = shots.map((s, i) => [s, i]).filter(([, i]) => !hidden[i]);
 
   return (
     <div>
@@ -36,9 +44,12 @@ export default function ShotsList({ locId, onCount, onUse }) {
       {!loading && !shots.length && !err && (
         <div className="card" style={{ textAlign: 'center', color: 'var(--text3)', padding: '24px' }}>No shots suggested yet — hit Refresh.</div>
       )}
+      {!loading && shots.length > 0 && !visible.length && (
+        <div className="card" style={{ textAlign: 'center', color: 'var(--text3)', padding: '20px' }}>All shots cleared — hit Refresh for a new set.</div>
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {shots.map((s, i) => (
+        {visible.map(([s, i]) => (
           <div className="card" key={i}
             onClick={onUse ? () => onUse(s) : undefined}
             onKeyDown={onUse ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onUse(s); } }) : undefined}
@@ -54,6 +65,8 @@ export default function ShotsList({ locId, onCount, onUse }) {
               {s.why && <div style={{ fontSize: '12px', color: 'var(--text2)', marginTop: 4 }}>{s.why}</div>}
             </div>
             {onUse && <span style={{ alignSelf: 'center', fontSize: '11px', fontWeight: 500, color: 'var(--accent)', whiteSpace: 'nowrap' }}>Use →</span>}
+            <button onClick={e => { e.stopPropagation(); dismiss(i); }} title="Dismiss this shot"
+              style={{ alignSelf: 'center', border: 0, background: 'none', color: 'var(--text3)', fontSize: '14px', lineHeight: 1, padding: '2px 4px', cursor: 'pointer' }}>✕</button>
           </div>
         ))}
       </div>
