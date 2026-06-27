@@ -470,7 +470,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       )}
 
       {libOpen && (
-        <DriveLibrary locId={locId} onClose={() => setLibOpen(false)} onImported={refresh} />
+        <DriveLibrary locId={locId} onClose={() => setLibOpen(false)} onImported={refresh} defaultNote={note} />
       )}
     </div>
   );
