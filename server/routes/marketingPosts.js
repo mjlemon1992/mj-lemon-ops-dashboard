@@ -246,5 +246,37 @@ Never invent prices or specifics you weren't given.`;
     } catch (e) { fail(res, e); }
   });
 
+  // Suggest timely poster ideas for the current season / time of year.
+  const IDEAS_SYSTEM = `You suggest timely social-media POSTER ideas for a transmission repair shop in
+Alberta & BC, Canada (Mister Transmission — Parkland Transmission). Given the current month, propose
+ideas tied to the season and what drivers are doing then: summer road trips, towing/RV/boat season,
+heat stress on transmissions, fall maintenance, winter cold-starts & block heaters, holiday travel,
+spring thaw, back-to-school. Mix practical/educational with a seasonal hook.
+Return ONLY a JSON array of 4 items, no prose, no fences:
+[{"type":"seasonal|educational|testimonial","topic":"specific concrete topic, <=70 chars","label":"3-5 word button label","why":"<=60 chars why it's timely"}]
+Honest, on-brand, no hype, no invented stats.`;
+
+  router.post('/poster-ideas', ...gate, async (req, res) => {
+    try {
+      if (!ANTHROPIC_KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set' });
+      const { month = '' } = req.body || {};
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: MODEL, max_tokens: 700, system: IDEAS_SYSTEM,
+          messages: [{ role: 'user', content: `Current month: ${month || '(unknown)'}. Region: Alberta & BC, Canada. Suggest 4 timely poster ideas.` }],
+        }),
+      });
+      const body = await r.json();
+      if (!r.ok) return res.status(502).json({ error: `Anthropic ${r.status}` });
+      let raw = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('').replace(/```json|```/g, '').trim();
+      const s = raw.indexOf('['), e = raw.lastIndexOf(']');
+      if (s >= 0 && e > s) raw = raw.slice(s, e + 1);
+      const ideas = JSON.parse(raw);
+      res.json({ ideas: Array.isArray(ideas) ? ideas.slice(0, 6) : [] });
+    } catch (e) { fail(res, e); }
+  });
+
   return router;
 };
