@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 // "This week's shots" — AI shoot list from today's open repair orders (Shopmonkey).
-export default function ShotsList({ locId, onCount }) {
+// onUse(shot) (optional) makes each row actionable: hand the shot to the capture flow.
+export default function ShotsList({ locId, onCount, onUse }) {
   const { api } = useAuth();
   const [shots, setShots] = useState([]);
   const [openOrders, setOpenOrders] = useState(null);
@@ -38,7 +39,12 @@ export default function ShotsList({ locId, onCount }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {shots.map((s, i) => (
-          <div className="card" key={i} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', padding: '12px 14px' }}>
+          <div className="card" key={i}
+            onClick={onUse ? () => onUse(s) : undefined}
+            onKeyDown={onUse ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onUse(s); } }) : undefined}
+            role={onUse ? 'button' : undefined} tabIndex={onUse ? 0 : undefined}
+            title={onUse ? 'Use this shot — tags your next capture' : undefined}
+            style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', padding: '12px 14px', cursor: onUse ? 'pointer' : 'default' }}>
             <div style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 8, border: '0.5px solid var(--border2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', fontSize: 16 }}>📷</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text)' }}>{s.shot}</div>
@@ -47,6 +53,7 @@ export default function ShotsList({ locId, onCount }) {
               </div>
               {s.why && <div style={{ fontSize: '12px', color: 'var(--text2)', marginTop: 4 }}>{s.why}</div>}
             </div>
+            {onUse && <span style={{ alignSelf: 'center', fontSize: '11px', fontWeight: 500, color: 'var(--accent)', whiteSpace: 'nowrap' }}>Use →</span>}
           </div>
         ))}
       </div>
