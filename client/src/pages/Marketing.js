@@ -40,7 +40,7 @@ export default function Marketing() {
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState(null);
-  const [approvalsCount, setApprovalsCount] = useState(0);
+  const [counts, setCounts] = useState({ drafts: 0, approved: 0 });
   const fileRef = useRef(null);
   const queueRef = useRef(null);
 
@@ -97,6 +97,8 @@ export default function Marketing() {
   const chan = (k) => summary?.channels?.find(c => c.channel === k)?.total_calls || 0;
   const ppcCh = summary?.channels?.find(c => c.channel === 'PPC');
   const orgShare = t && t.total ? Math.round((t.organic / t.total) * 100) : 0;
+  const locName = locations.find(l => l.id === locId)?.name;
+  const toQueue = () => queueRef.current && queueRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   return (
     <div>
@@ -113,18 +115,19 @@ export default function Marketing() {
 
       {/* Attention cluster — glance, then act */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '22px' }}>
-        <Gauge label="Approvals waiting" value={approvalsCount}
-          tone={approvalsCount > 0 ? 'var(--accent)' : 'var(--text)'}
-          sub={approvalsCount > 0 ? 'ready to review' : 'all clear'}
-          onClick={() => queueRef.current && queueRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })} />
-        <Gauge label="Reviews to reply" value="—" soon />
+        <Gauge label="Approvals waiting" value={counts.drafts}
+          tone={counts.drafts > 0 ? 'var(--accent)' : 'var(--text)'}
+          sub={counts.drafts > 0 ? 'ready to review' : 'all clear'} onClick={toQueue} />
+        <Gauge label="Ready to post" value={counts.approved}
+          tone={counts.approved > 0 ? 'var(--success)' : 'var(--text)'}
+          sub={counts.approved > 0 ? 'approved & waiting' : 'none yet'} onClick={toQueue} />
         <Gauge label="Shots to grab" value="—" soon />
         <Gauge label="Scheduled" value="—" soon />
       </div>
 
       {/* Capture → caption → approve (the daily driver) */}
       <div ref={queueRef}>
-        <ApprovalQueue locId={locId} onCount={setApprovalsCount} />
+        <ApprovalQueue locId={locId} locName={locName} onCount={setCounts} />
       </div>
 
       <div style={{ borderTop: '0.5px solid var(--border)', margin: '4px 0 18px' }} />
