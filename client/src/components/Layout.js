@@ -83,8 +83,9 @@ export default function Layout() {
                     display: 'flex', alignItems: 'center', gap: '8px',
                     padding: '7px 8px', borderRadius: 'var(--radius)',
                     cursor: 'pointer', fontSize: '13px',
-                    color: active ? 'var(--text)' : 'var(--text2)',
+                    color: active ? 'var(--accent)' : 'var(--text2)',
                     background: active ? 'var(--bg3)' : 'transparent',
+                    boxShadow: active ? 'inset 2px 0 0 var(--accent)' : 'none',
                     fontWeight: active ? '500' : '400',
                     marginBottom: '1px'
                   }}
@@ -102,7 +103,7 @@ export default function Layout() {
 
         <div style={{ padding: '12px', borderTop: '0.5px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(77,184,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '500', color: 'var(--info)', flexShrink: 0 }}>{initials}</div>
+            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(240,84,35,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '500', color: 'var(--accent)', flexShrink: 0 }}>{initials}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.name}</div>
               <div style={{ fontSize: '11px', color: 'var(--text3)', textTransform: 'capitalize' }}>{user?.role}</div>
