@@ -40,24 +40,30 @@ export default function Marketing() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const onPick = async (file) => {
-    if (!file) return;
+  // Upload one or many PDFs, sequentially (each is its own extraction call).
+  const onPick = async (files) => {
+    const list = Array.from(files || []).filter(Boolean);
+    if (!list.length) return;
     setUploading(true); setErr(null); setMsg(null);
+    const done = [];
     try {
-      const res = await fetch(`/api/marketing/calls/${locId}/ingest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/pdf', Authorization: `Bearer ${token}` },
-        body: file,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Ingestion failed');
-      setMsg(`Ingested ${monthLabel(data.period?.start)} — ${fmt(data.totals?.total)} calls${data.detailRows ? ` (${data.detailRows} detail rows)` : ''}.`);
-      refresh();
+      for (const file of list) {
+        const res = await fetch(`/api/marketing/calls/${locId}/ingest`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/pdf', Authorization: `Bearer ${token}` },
+          body: file,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(`${file.name}: ${data.error || 'Ingestion failed'}`);
+        done.push(`${monthLabel(data.period?.start)} (${fmt(data.totals?.total)} calls)`);
+      }
+      setMsg(`Ingested ${done.length} report${done.length > 1 ? 's' : ''}: ${done.join(', ')}.`);
     } catch (e) {
-      setErr(String(e.message || e));
+      setErr(String(e.message || e) + (done.length ? ` — ${done.length} succeeded first.` : ''));
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
+      refresh();
     }
   };
 
@@ -78,11 +84,11 @@ export default function Marketing() {
           <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>{locations.find(l => l.id === locId)?.name || 'Location'}</div>
         )}
         <div style={{ flex: 1 }} />
-        <input ref={fileRef} type="file" accept="application/pdf" style={{ display: 'none' }}
-          onChange={e => onPick(e.target.files[0])} />
+        <input ref={fileRef} type="file" accept="application/pdf" multiple style={{ display: 'none' }}
+          onChange={e => onPick(e.target.files)} />
         <button className="primary" disabled={!status.configured || uploading || !locId}
           onClick={() => fileRef.current && fileRef.current.click()}>
-          {uploading ? 'Extracting…' : '⬆ Upload monthly call PDF'}
+          {uploading ? 'Extracting…' : '⬆ Upload call PDF(s)'}
         </button>
       </div>
 
@@ -138,7 +144,7 @@ export default function Marketing() {
             <div className="table-wrap">
               <table>
                 <thead>
-                  <tr><th>Channel</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Answered</th><th style={{ textAlign: 'right' }}>Missed</th><th style={{ textAlign: 'right' }}>Unique</th></tr>
+                  <tr><th>Channel</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Answered</th><th style={{ textAlign: 'right' }}>Missed</th><th style={{ textAlign: 'right' }}>Unique</th><th style={{ textAlign: 'right' }}>Qualified</th></tr>
                 </thead>
                 <tbody>
                   {['ORGANIC', 'PPC', 'CALL_EXTENSION'].map(k => {
@@ -151,6 +157,7 @@ export default function Marketing() {
                         <td style={{ textAlign: 'right' }}>{fmt(c.answered_calls)}</td>
                         <td style={{ textAlign: 'right' }}>{fmt(c.missed_calls)}</td>
                         <td style={{ textAlign: 'right' }}>{fmt(c.unique_callers)}</td>
+                        <td style={{ textAlign: 'right' }}>{c.qualified_calls == null ? '—' : fmt(c.qualified_calls)}</td>
                       </tr>
                     );
                   })}

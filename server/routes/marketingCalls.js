@@ -6,9 +6,12 @@ const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth
 // optional Slack card. The dashboard reads the tables, never the PDF, so a future
 // live Marchex API only swaps the writer. Read-path is owner/partner only.
 //
+// Extraction returns AGGREGATES ONLY (per-number + per-channel counts, incl. a
+// qualified-call count). It never emits per-call rows — that keeps the model's
+// output small and the JSON reliable regardless of call volume.
+//
 // "Ships dark": with ANTHROPIC_API_KEY unset, /status reports configured:false and
-// ingestion 503s — the tab still renders. SLACK_MARKETING_WEBHOOK_URL is optional;
-// if unset, data is stored + shown in the tab without a Slack post.
+// ingestion 503s. SLACK_MARKETING_WEBHOOK_URL is optional.
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const SLACK_WEBHOOK = process.env.SLACK_MARKETING_WEBHOOK_URL || null;
@@ -19,20 +22,17 @@ const SCHEMA = `{
   "provider": "marchex", "format": "telmetrics", "location": "Red Deer",
   "period": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" },
   "channels": [{ "channel": "ORGANIC|PPC|CALL_EXTENSION", "total_calls": 0, "answered_calls": 0,
-    "missed_calls": 0, "unique_callers": 0, "avg_duration_seconds": 0,
+    "missed_calls": 0, "unique_callers": 0, "avg_duration_seconds": 0, "qualified_calls": null,
     "numbers": [{ "tracking_number": "587-802-4670", "total_calls": 0, "answered_calls": 0,
-      "missed_calls": 0, "unique_callers": 0, "avg_duration_seconds": 0 }] }],
-  "totals": { "organic_calls": 0, "paid_calls": 0, "total_calls": 0, "qualified_calls": null },
-  "calls": [{ "date": "YYYY-MM-DD", "time": "HH:MM:SS", "tracking_number": "", "channel": "",
-    "caller_number": "", "caller_name": null, "caller_city": null, "caller_province": null,
-    "class": "consumer|business|null", "answer_status": "answered|busy|no_answer|suspended",
-    "rings": 0, "duration_seconds": 0, "qualified": false }]
+      "missed_calls": 0, "unique_callers": 0, "avg_duration_seconds": 0, "qualified_calls": null }] }],
+  "totals": { "organic_calls": 0, "paid_calls": 0, "total_calls": 0, "qualified_calls": null }
 }`;
 
 const SYSTEM_PROMPT = `You extract structured data from a monthly call-measurement PDF report.
 
 Output ONLY a single JSON object matching the schema below. No prose, no markdown fences, no
-explanation. If a field is unknown, use null. Read EVERY page, including all Call Detail pages.
+explanation. If a field is unknown, use null. Do NOT output individual call rows — only the
+per-number and per-channel aggregates in the schema.
 
 CHANNEL: determine each section's channel from its header label:
   "...-PPC" -> "PPC"   "...-ORGANIC" -> "ORGANIC"   "...-CALL EXTENSION" -> "CALL_EXTENSION"
@@ -40,22 +40,20 @@ A tracking number's channel is whatever report section it appears under for this
 infer channel from the number itself.
 
 For each channel, list every tracking number with its This-Period figures (total_calls,
-answered_calls, missed_calls, unique_callers, avg_duration). Channel totals are the sum of their
-numbers. Use the "This Period" column, never "To Date".
+answered_calls, missed_calls, unique_callers, avg_duration_seconds). Channel totals are the sum
+of their numbers. Use the "This Period" column, never "To Date". Convert durations m:ss or
+h:mm:ss to integer seconds.
 
-DURATIONS: convert m:ss or h:mm:ss to integer seconds.
-
-CALL DETAIL (if present): one object per row. Map the called number to its channel. Parse caller
-city/province from the Caller Address column when present (else null). class: "Cons"/"Cons^" ->
-"consumer", "Bus" -> "business", blank -> null. answer_status: "A" -> "answered" (rings = the
-number after A, e.g. A02 -> 2), "B" -> "busy", "N" -> "no_answer", "S" -> "suspended". Set
-qualified = true only if answer_status is "answered" AND duration_seconds >= ${QUALIFIED_MIN_SECONDS}.
+QUALIFIED: if the report includes Call Detail pages, READ them and COUNT (do not list) the
+qualified calls per tracking number — a call qualifies when its answer status is answered
+(status code "A") AND its duration >= ${QUALIFIED_MIN_SECONDS} seconds. Put that count in each
+number's qualified_calls, sum to the channel's qualified_calls, and sum all channels to
+totals.qualified_calls. If the report has NO Call Detail pages, set every qualified_calls to null.
 
 TOTALS:
   organic_calls = sum of ORGANIC channel total_calls
   paid_calls = sum of PPC + CALL_EXTENSION total_calls
   total_calls = organic_calls + paid_calls
-  qualified_calls = count of calls[] where qualified == true (null if no detail)
 
 Schema:
 ${SCHEMA}`;
@@ -82,23 +80,12 @@ module.exports = (pool) => {
         missed_calls INTEGER DEFAULT 0,
         unique_callers INTEGER DEFAULT 0,
         avg_duration_seconds INTEGER DEFAULT 0,
+        qualified_calls INTEGER,
         ingested_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE (location_id, provider, period_start, channel, tracking_number)
       )`);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS call_detail (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        location_id UUID REFERENCES locations(id) ON DELETE CASCADE,
-        provider VARCHAR(50) NOT NULL DEFAULT 'marchex',
-        period_start DATE NOT NULL,
-        call_date DATE, call_time VARCHAR(12),
-        channel VARCHAR(30), tracking_number VARCHAR(40),
-        caller_number VARCHAR(40), caller_city VARCHAR(120), caller_province VARCHAR(40),
-        class VARCHAR(20), answer_status VARCHAR(20), rings INTEGER,
-        duration_seconds INTEGER, qualified BOOLEAN DEFAULT false,
-        ingested_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE (location_id, provider, tracking_number, call_date, call_time, caller_number)
-      )`);
+    // older deploys created the table without qualified_calls — add it idempotently.
+    await pool.query('ALTER TABLE call_summary ADD COLUMN IF NOT EXISTS qualified_calls INTEGER');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_call_summary_loc_period ON call_summary(location_id, period_start DESC)');
     _init = true;
   };
@@ -121,7 +108,7 @@ module.exports = (pool) => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 16000,
+        max_tokens: 8000,
         system: SYSTEM_PROMPT,
         messages: [{
           role: 'user',
@@ -134,14 +121,16 @@ module.exports = (pool) => {
     });
     const body = await res.json();
     if (!res.ok) throw Object.assign(new Error(`Anthropic ${res.status}: ${JSON.stringify(body).slice(0, 300)}`), { status: 502 });
-    const text = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-    let data;
+    if (body.stop_reason === 'max_tokens')
+      throw Object.assign(new Error('Extraction hit the output limit — report unusually large. Tell us and we will raise the cap.'), { status: 502 });
+    let raw = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('').replace(/```json|```/g, '').trim();
+    const s = raw.indexOf('{'), e = raw.lastIndexOf('}');   // tolerate stray prose around the object
+    if (s >= 0 && e > s) raw = raw.slice(s, e + 1);
     try {
-      data = JSON.parse(text.replace(/```json|```/g, '').trim());
-    } catch (e) {
-      throw Object.assign(new Error('Extraction did not return valid JSON (the report may be larger than one pass — try a summary-only PDF or split it)'), { status: 502 });
+      return JSON.parse(raw);
+    } catch (err) {
+      throw Object.assign(new Error('Extraction did not return valid JSON. Re-try; if it persists the PDF layout may need a prompt tweak.'), { status: 502 });
     }
-    return data;
   };
 
   const upsertSummary = async (locationId, locationName, d) => {
@@ -150,36 +139,21 @@ module.exports = (pool) => {
         await pool.query(
           `INSERT INTO call_summary
              (location_id, location_name, provider, format, period_start, period_end, channel,
-              tracking_number, total_calls, answered_calls, missed_calls, unique_callers, avg_duration_seconds, ingested_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
+              tracking_number, total_calls, answered_calls, missed_calls, unique_callers,
+              avg_duration_seconds, qualified_calls, ingested_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
            ON CONFLICT (location_id, provider, period_start, channel, tracking_number) DO UPDATE SET
              total_calls=EXCLUDED.total_calls, answered_calls=EXCLUDED.answered_calls,
              missed_calls=EXCLUDED.missed_calls, unique_callers=EXCLUDED.unique_callers,
-             avg_duration_seconds=EXCLUDED.avg_duration_seconds, period_end=EXCLUDED.period_end,
-             location_name=EXCLUDED.location_name, ingested_at=NOW()`,
+             avg_duration_seconds=EXCLUDED.avg_duration_seconds, qualified_calls=EXCLUDED.qualified_calls,
+             period_end=EXCLUDED.period_end, location_name=EXCLUDED.location_name, ingested_at=NOW()`,
           [locationId, locationName, d.provider || 'marchex', d.format || 'telmetrics',
            d.period.start, d.period.end || null, ch.channel, n.tracking_number,
            n.total_calls || 0, n.answered_calls || 0, n.missed_calls || 0,
-           n.unique_callers || 0, Math.round(n.avg_duration_seconds || 0)]
+           n.unique_callers || 0, Math.round(n.avg_duration_seconds || 0),
+           n.qualified_calls == null ? null : n.qualified_calls]
         );
       }
-    }
-  };
-
-  const upsertDetail = async (locationId, d) => {
-    for (const c of d.calls || []) {
-      await pool.query(
-        `INSERT INTO call_detail
-           (location_id, provider, period_start, call_date, call_time, channel, tracking_number,
-            caller_number, caller_city, caller_province, class, answer_status, rings, duration_seconds, qualified)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-         ON CONFLICT (location_id, provider, tracking_number, call_date, call_time, caller_number) DO NOTHING`,
-        [locationId, d.provider || 'marchex', d.period.start, c.date || null, c.time || null,
-         c.channel || null, c.tracking_number || null, c.caller_number || null, c.caller_city || null,
-         c.caller_province || null, c.class || null, c.answer_status || null,
-         c.rings == null ? null : c.rings, c.duration_seconds == null ? null : c.duration_seconds,
-         !!c.qualified]
-      );
     }
   };
 
@@ -188,32 +162,26 @@ module.exports = (pool) => {
     const { rows } = await pool.query(
       `SELECT channel,
               SUM(total_calls)::int AS total_calls, SUM(answered_calls)::int AS answered_calls,
-              SUM(missed_calls)::int AS missed_calls, SUM(unique_callers)::int AS unique_callers
+              SUM(missed_calls)::int AS missed_calls, SUM(unique_callers)::int AS unique_callers,
+              SUM(qualified_calls)::int AS qualified_calls
          FROM call_summary WHERE location_id=$1 AND period_start=$2 GROUP BY channel`,
       [locationId, periodStart]
     );
     const by = Object.fromEntries(rows.map(r => [r.channel, r]));
     const organic = by.ORGANIC?.total_calls || 0;
     const paid = (by.PPC?.total_calls || 0) + (by.CALL_EXTENSION?.total_calls || 0);
-    const { rows: q } = await pool.query(
-      'SELECT COUNT(*)::int AS n FROM call_detail WHERE location_id=$1 AND period_start=$2 AND qualified=true',
-      [locationId, periodStart]
-    );
-    const { rows: hasDetail } = await pool.query(
-      'SELECT COUNT(*)::int AS n FROM call_detail WHERE location_id=$1 AND period_start=$2',
-      [locationId, periodStart]
-    );
+    const qVals = rows.map(r => r.qualified_calls).filter(v => v != null);
     return {
       period_start: periodStart,
       channels: rows,
-      totals: { organic, paid, total: organic + paid, qualified: hasDetail[0].n ? q[0].n : null },
+      totals: { organic, paid, total: organic + paid, qualified: qVals.length ? qVals.reduce((a, b) => a + b, 0) : null },
     };
   };
 
   const fail = (res, e) => res.status(e.status || 500).json({ error: String(e.message || e) });
 
   // ── Slack card (optional) ──
-  const money = (n) => n.toLocaleString('en-CA');
+  const money = (n) => Number(n || 0).toLocaleString('en-CA');
   const postSlack = async (locationName, provider, cur, prev) => {
     if (!SLACK_WEBHOOK) return;
     const monLabel = new Date(cur.period_start + 'T00:00:00').toLocaleDateString('en-CA', { month: 'long', year: 'numeric' });
@@ -223,9 +191,8 @@ module.exports = (pool) => {
     const pct = (a, b) => (b ? Math.round(((a - b) / b) * 100) : null);
     let mom = '';
     if (prev) {
-      const t = pct(cur.totals.total, prev.totals.total), p = pct(cur.totals.paid, prev.totals.paid), o = pct(cur.totals.organic, prev.totals.organic);
       const s = (x) => (x == null ? 'n/a' : (x >= 0 ? `+${x}%` : `${x}%`));
-      mom = `\nMoM:  Total ${s(t)}   Paid ${s(p)}   Organic ${s(o)}`;
+      mom = `\nMoM:  Total ${s(pct(cur.totals.total, prev.totals.total))}   Paid ${s(pct(cur.totals.paid, prev.totals.paid))}   Organic ${s(pct(cur.totals.organic, prev.totals.organic))}`;
     }
     const orgPctOfTotal = cur.totals.total ? Math.round((cur.totals.organic / cur.totals.total) * 100) : 0;
     const text = `📞 *${locationName} — Call Tracking — ${monLabel}*  (${provider})\n` +
@@ -235,8 +202,7 @@ module.exports = (pool) => {
       `Call Extension  ${money(callExt)}\n` +
       `------------------------------\n` +
       `Total           ${money(cur.totals.total)}    Paid ${money(cur.totals.paid)} · Organic ${money(cur.totals.organic)} (${orgPctOfTotal}%)` +
-      mom +
-      '```';
+      mom + '```';
     try {
       await fetch(SLACK_WEBHOOK, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
     } catch (e) { console.error('[marketing] slack post failed:', e.message); }
@@ -258,7 +224,6 @@ module.exports = (pool) => {
     res.json({ configured: !!ANTHROPIC_KEY, slack: !!SLACK_WEBHOOK, model: MODEL, qualifiedMinSeconds: QUALIFIED_MIN_SECONDS });
   });
 
-  // List stored periods (newest first) for a location.
   router.get('/:locationId/periods', ...gate, async (req, res) => {
     try {
       await ensureTables();
@@ -272,7 +237,6 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
-  // Latest (or ?period=YYYY-MM-DD) summary + MoM vs the prior stored period.
   router.get('/:locationId/summary', ...gate, async (req, res) => {
     try {
       await ensureTables();
@@ -311,7 +275,6 @@ module.exports = (pool) => {
         }
 
         await upsertSummary(req.params.locationId, name, data);
-        if (data.calls?.length) await upsertDetail(req.params.locationId, data);
 
         const cur = await periodSummary(req.params.locationId, data.period.start);
         const { rows: pr } = await pool.query(
@@ -321,7 +284,7 @@ module.exports = (pool) => {
         const prev = pr[0].p ? await periodSummary(req.params.locationId, pr[0].p) : null;
         await postSlack(name, data.provider || 'marchex', cur, prev);
 
-        res.json({ ok: true, period: data.period, totals: cur.totals, detailRows: data.calls?.length || 0 });
+        res.json({ ok: true, period: data.period, totals: cur.totals });
       } catch (e) { fail(res, e); }
     }
   );
