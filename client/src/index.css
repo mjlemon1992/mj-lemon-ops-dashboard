@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
-
 :root {
   --bg: #0a0a0a;
   --bg2: #111111;
@@ -169,7 +167,7 @@ h3 { font-family: 'Archivo', sans-serif; font-size: 14px; font-weight: 700; line
 /* Status-tinted metric cards (approved "F" direction): each card takes a left
    bar + subtle tint from its own .metric-sub tone — no per-card JSX change. */
 .metric-card { position: relative; overflow: hidden; }
-.metric-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); opacity: .85; }
+.metric-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--border2); }
 .metric-card:has(.metric-sub.good)::before { background: var(--success); }
 .metric-card:has(.metric-sub.warn)::before { background: var(--warning); }
 .metric-card:has(.metric-sub.bad)::before  { background: var(--danger); }
