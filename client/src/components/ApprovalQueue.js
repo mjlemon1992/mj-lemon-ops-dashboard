@@ -1,9 +1,71 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 
+const ORANGE = '#F05423';
+
+const loadImg = (src) => new Promise((res, rej) => {
+  const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src;
+});
+
+const wrapLines = (ctx, text, maxW) => {
+  const out = [];
+  for (const para of String(text || '').split('\n')) {
+    let line = '';
+    for (const w of para.split(/\s+/)) {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > maxW && line) { out.push(line); line = w; } else line = test;
+    }
+    if (line) out.push(line);
+  }
+  return out;
+};
+
+// Render a branded 1080x1080 poster from generated copy -> JPEG Blob.
+async function renderPoster({ type, headline, subline, cta, locName }) {
+  const S = 1080, M = 84;
+  const c = document.createElement('canvas'); c.width = S; c.height = S;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, S, S);
+  ctx.fillStyle = ORANGE; ctx.fillRect(0, 0, S, 18);
+
+  let y = M;
+  try {
+    const logo = await loadImg('/mt-logo.png');
+    const lw = 330, lh = lw * logo.height / logo.width;
+    ctx.drawImage(logo, M, M, lw, lh);
+    y = M + lh + 72;
+  } catch { y = M + 120; }
+
+  const eyebrow = type === 'educational' ? 'DID YOU KNOW?' : type === 'testimonial' ? '★★★★★   CUSTOMER REVIEW' : 'SEASONAL';
+  ctx.fillStyle = ORANGE; ctx.font = '700 30px Helvetica, Arial, sans-serif';
+  ctx.fillText(eyebrow, M, y); y += 58;
+
+  ctx.fillStyle = '#141414'; ctx.font = '800 76px Helvetica, Arial, sans-serif';
+  for (const line of wrapLines(ctx, headline, S - 2 * M)) { ctx.fillText(line, M, y); y += 86; }
+  y += 16;
+
+  ctx.fillStyle = '#444444'; ctx.font = '400 34px Helvetica, Arial, sans-serif';
+  for (const line of wrapLines(ctx, subline, S - 2 * M)) { ctx.fillText(line, M, y); y += 46; }
+
+  // CTA bar
+  const ctaY = S - 232, ctaH = 92;
+  ctx.fillStyle = ORANGE;
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(M, ctaY, S - 2 * M, ctaH, 14); ctx.fill(); }
+  else ctx.fillRect(M, ctaY, S - 2 * M, ctaH);
+  ctx.fillStyle = '#ffffff'; ctx.font = '700 40px Helvetica, Arial, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(cta || 'Book your transmission check', S / 2, ctaY + ctaH / 2);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+
+  ctx.fillStyle = '#777777'; ctx.font = '500 26px Helvetica, Arial, sans-serif';
+  ctx.fillText(locName || 'Parkland Transmission · Red Deer, AB', M, S - 64);
+
+  return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+}
+
 // Capture a bay photo -> AI captions -> review/approve. Posting to FB/IG/GBP is
 // deferred until Meta/GBP access clears, so "Approve" marks ready-to-post for now.
-export default function ApprovalQueue({ locId, onCount }) {
+export default function ApprovalQueue({ locId, locName, onCount }) {
   const { api, token } = useAuth();
   const [configured, setConfigured] = useState(true);
   const [posts, setPosts] = useState([]);
@@ -16,6 +78,9 @@ export default function ApprovalQueue({ locId, onCount }) {
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState({});          // per-post regenerate-in-flight
   const [drafts, setDrafts] = useState({});      // per-post local caption edits
+  const [posterType, setPosterType] = useState('seasonal');
+  const [posterTopic, setPosterTopic] = useState('');
+  const [genPoster, setGenPoster] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => { api('/marketing/posts/status').then(s => setConfigured(!!s.configured)).catch(() => {}); }, [api]);
@@ -26,7 +91,7 @@ export default function ApprovalQueue({ locId, onCount }) {
     Promise.all([
       api(`/marketing/posts/${locId}/queue?status=draft`).catch(() => []),
       api(`/marketing/posts/${locId}/queue?status=approved`).catch(() => []),
-    ]).then(([d, a]) => { setPosts(d || []); setApproved(a || []); setLoading(false); if (onCount) onCount((d || []).length); });
+    ]).then(([d, a]) => { setPosts(d || []); setApproved(a || []); setLoading(false); if (onCount) onCount({ drafts: (d || []).length, approved: (a || []).length }); });
   }, [locId, api, onCount]);
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -100,6 +165,26 @@ export default function ApprovalQueue({ locId, onCount }) {
     document.body.appendChild(a); a.click(); a.remove();
   };
 
+  // Generate a branded poster: AI writes the copy, we render it to an image,
+  // then it goes through the normal intake -> becomes a draft (with captions).
+  const makePoster = async () => {
+    if (!locId) return;
+    setGenPoster(true); setErr(null); setNotice(null);
+    try {
+      const copy = await api('/marketing/posts/poster-copy', { method: 'POST', body: JSON.stringify({ type: posterType, topic: posterTopic }) });
+      const blob = await renderPoster({ type: posterType, ...copy, locName });
+      const res = await fetch(`/api/marketing/posts/${locId}/intake?note=${encodeURIComponent(posterType + ' poster')}`, {
+        method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: `Bearer ${token}` }, body: blob,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Poster upload failed');
+      setPosterTopic('');
+      setNotice(data.captionError ? 'Poster created — captions failed; write them in or hit Regenerate.' : 'Poster created — it’s in the queue below.');
+      refresh();
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setGenPoster(false); }
+  };
+
   const act = async (id, what) => {
     try {
       await api(`/marketing/posts/post/${id}/${what}`, { method: 'POST' });
@@ -142,6 +227,22 @@ export default function ApprovalQueue({ locId, onCount }) {
         {dragOver ? 'Drop the photo to add it' : 'Tip: drag a photo straight from Photos or Finder anywhere onto this panel.'}
       </div>
       {notice && <div className="alert-strip" style={{ background: 'rgba(255,184,0,0.08)', borderColor: 'rgba(255,184,0,0.35)' }}><span style={{ color: 'var(--warning)' }}>{notice}</span></div>}
+
+      {/* Generate a branded poster/ad (AI copy -> rendered to your brand template) */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '14px', padding: '10px 12px', background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)' }}>
+        <span style={{ fontSize: '12px', color: 'var(--text2)', fontWeight: 500 }}>Generate a poster</span>
+        <select value={posterType} onChange={e => setPosterType(e.target.value)} style={{ width: 'auto' }}>
+          <option value="seasonal">Seasonal</option>
+          <option value="educational">Educational</option>
+          <option value="testimonial">Testimonial</option>
+        </select>
+        <input value={posterTopic} onChange={e => setPosterTopic(e.target.value)}
+          placeholder={posterType === 'testimonial' ? 'paste a customer quote (optional)' : 'topic / offer (optional)'}
+          style={{ flex: 1, minWidth: '180px' }} />
+        <button className="primary" disabled={!configured || genPoster || !locId} onClick={makePoster}>
+          {genPoster ? 'Designing…' : '🎨 Generate poster'}
+        </button>
+      </div>
 
       {!configured && (
         <div className="alert-strip" style={{ background: 'rgba(77,184,255,0.06)', borderColor: 'rgba(77,184,255,0.3)' }}>

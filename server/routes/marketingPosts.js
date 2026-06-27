@@ -212,5 +212,39 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
+  // Generate poster/ad COPY (headline/subline/cta). The client renders it into a
+  // branded template and uploads the result as a normal image draft.
+  const POSTER_SYSTEM = `You write copy for a BRANDED POSTER / social ad for a transmission repair shop
+(Mister Transmission — Parkland Transmission, Red Deer & Kelowna AB/BC). Voice: expert, plain-spoken,
+honest, no hype, no clickbait. Given a poster TYPE and optional TOPIC, return ONLY JSON, no fences:
+{"headline":"3-7 punchy words","subline":"one sentence, <=120 chars","cta":"short action, <=28 chars"}
+- "seasonal": tie to the season/topic (winter, tow season, road-trip).
+- "educational": a trust-building "did you know" fact about transmissions.
+- "testimonial": treat TOPIC as a customer quote — headline = a short pull-quote from it, subline =
+  brief context, cta = a soft invite. If no quote is given, write a credible, generic one.
+Never invent prices or specifics you weren't given.`;
+
+  router.post('/poster-copy', ...gate, async (req, res) => {
+    try {
+      if (!ANTHROPIC_KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set' });
+      const { type = 'seasonal', topic = '' } = req.body || {};
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: MODEL, max_tokens: 600, system: POSTER_SYSTEM,
+          messages: [{ role: 'user', content: `Poster type: ${type}. Topic: ${topic || '(none — pick something seasonally relevant for an Alberta/BC transmission shop)'}` }],
+        }),
+      });
+      const body = await r.json();
+      if (!r.ok) return res.status(502).json({ error: `Anthropic ${r.status}: ${JSON.stringify(body).slice(0, 200)}` });
+      let raw = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('').replace(/```json|```/g, '').trim();
+      const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
+      if (s >= 0 && e > s) raw = raw.slice(s, e + 1);
+      const j = JSON.parse(raw);
+      res.json({ headline: j.headline || '', subline: j.subline || '', cta: j.cta || 'Book your transmission check' });
+    } catch (e) { fail(res, e); }
+  });
+
   return router;
 };
