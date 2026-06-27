@@ -116,7 +116,7 @@ async function renderPoster({ type, headline, subline, locName }) {
 
 // Capture a bay photo -> AI captions -> review/approve. Posting to FB/IG/GBP is
 // deferred until Meta/GBP access clears, so "Approve" marks ready-to-post for now.
-export default function ApprovalQueue({ locId, locName, onCount, seed }) {
+export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey }) {
   const { api, token } = useAuth();
   const [configured, setConfigured] = useState(true);
   const [posts, setPosts] = useState([]);
@@ -158,6 +158,9 @@ export default function ApprovalQueue({ locId, locName, onCount, seed }) {
       setNotice(`Tagged “${seed.note}”. Add a photo, or hit Generate poster — both will use this.`);
     }
   }, [seed]);
+
+  // A Drive photo was imported elsewhere on the page — pull the new draft in.
+  useEffect(() => { if (reloadKey) refresh(); }, [reloadKey, refresh]);
 
   // Downscale to a sane JPEG before upload: keeps the request small (a full-res
   // phone photo can reset the connection -> "Failed to fetch"), speeds the vision

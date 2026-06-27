@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import ApprovalQueue from '../components/ApprovalQueue';
 import ShotsList from '../components/ShotsList';
 import ReviewsScorecard from '../components/ReviewsScorecard';
+import DriveLibrary from '../components/DriveLibrary';
 
 const fmt = n => (n == null ? '—' : Number(n).toLocaleString('en-CA'));
 const monthLabel = (d) => {
@@ -51,6 +52,7 @@ export default function Marketing() {
   const [shotsCount, setShotsCount] = useState(0);
   const [showDetail, setShowDetail] = useState(false);
   const [captureSeed, setCaptureSeed] = useState(null);
+  const [queueReload, setQueueReload] = useState(0);
   const fileRef = useRef(null);
   const queueRef = useRef(null);
   const shotsRef = useRef(null);
@@ -153,8 +155,10 @@ export default function Marketing() {
             <Gauge label="Scheduled" value="—" soon />
           </div>
 
+          <DriveLibrary locId={locId} onImported={() => setQueueReload(k => k + 1)} />
+
           <div ref={queueRef}>
-            <ApprovalQueue locId={locId} locName={locName} onCount={setCounts} seed={captureSeed} />
+            <ApprovalQueue locId={locId} locName={locName} onCount={setCounts} seed={captureSeed} reloadKey={queueReload} />
           </div>
         </div>
 

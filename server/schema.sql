@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS locations (
   shopmonkey_location_id VARCHAR(255),
   qbo_company_id VARCHAR(255),
   google_place_id VARCHAR(255),
+  google_drive_folder_id VARCHAR(255),
   slack_channel VARCHAR(100),
   num_technicians INTEGER DEFAULT 5,
   labour_rate DECIMAL(10,2) DEFAULT 170.00,
