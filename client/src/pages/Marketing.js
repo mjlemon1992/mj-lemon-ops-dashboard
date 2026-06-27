@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ApprovalQueue from '../components/ApprovalQueue';
 import ShotsList from '../components/ShotsList';
 import ReviewsScorecard from '../components/ReviewsScorecard';
-import DriveLibrary from '../components/DriveLibrary';
 
 const fmt = n => (n == null ? '—' : Number(n).toLocaleString('en-CA'));
 const monthLabel = (d) => {
@@ -39,6 +39,7 @@ function Gauge({ label, value, sub, tone, rail, onClick, soon }) {
 
 export default function Marketing() {
   const { api, token } = useAuth();
+  const navigate = useNavigate();
   const [locations, setLocations] = useState([]);
   const [locId, setLocId] = useState(null);
   const [status, setStatus] = useState({ configured: true, slack: false });
@@ -52,7 +53,6 @@ export default function Marketing() {
   const [shotsCount, setShotsCount] = useState(0);
   const [showDetail, setShowDetail] = useState(false);
   const [captureSeed, setCaptureSeed] = useState(null);
-  const [queueReload, setQueueReload] = useState(0);
   const fileRef = useRef(null);
   const queueRef = useRef(null);
   const shotsRef = useRef(null);
@@ -145,20 +145,19 @@ export default function Marketing() {
           <div className="mkt-gauges">
             <Gauge label="Approvals waiting" value={counts.drafts}
               rail="var(--accent)" tone={counts.drafts > 0 ? 'var(--accent)' : 'var(--text)'}
-              sub={counts.drafts > 0 ? 'ready to review' : 'all clear'} onClick={() => scrollTo(queueRef)} />
+              sub={counts.drafts > 0 ? 'tap to review all' : 'all clear'} onClick={() => navigate('/marketing/approvals')} />
             <Gauge label="Ready to post" value={counts.approved}
               rail="var(--success)" tone={counts.approved > 0 ? 'var(--success)' : 'var(--text)'}
-              sub={counts.approved > 0 ? 'approved & waiting' : 'none yet'} onClick={() => scrollTo(queueRef)} />
+              sub={counts.approved > 0 ? 'approved & waiting' : 'none yet'} onClick={() => navigate('/marketing/approvals')} />
             <Gauge label="Shots to grab" value={shotsCount}
               rail="var(--warning)" tone={shotsCount > 0 ? 'var(--warning)' : 'var(--text)'}
               sub={shotsCount > 0 ? 'ideas from the bench' : 'none yet'} onClick={() => scrollTo(shotsRef)} />
             <Gauge label="Scheduled" value="—" soon />
           </div>
 
-          <DriveLibrary locId={locId} onImported={() => setQueueReload(k => k + 1)} />
-
           <div ref={queueRef}>
-            <ApprovalQueue locId={locId} locName={locName} onCount={setCounts} seed={captureSeed} reloadKey={queueReload} />
+            <ApprovalQueue locId={locId} locName={locName} onCount={setCounts} seed={captureSeed}
+              previewLimit={1} onViewAll={() => navigate('/marketing/approvals')} />
           </div>
         </div>
 
