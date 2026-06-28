@@ -1,5 +1,38 @@
 const express = require('express');
+const crypto = require('crypto');
 const { workingPaceFrac, efficiencyPct } = require('../lib/workdays');
+
+// In-memory PIN brute-force throttle. The display route is public (no JWT), so
+// without this a short numeric PIN is guessable. Per IP+location: after MAX_FAILS
+// wrong PINs in WINDOW_MS, lock that key out for LOCK_MS. Resets on a correct PIN.
+// Single-process / resets on redeploy — fine for this scale.
+const WINDOW_MS = 10 * 60 * 1000, MAX_FAILS = 8, LOCK_MS = 15 * 60 * 1000;
+const pinFails = new Map();
+const rlKey = (req, loc) => {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || req.socket?.remoteAddress || 'unknown';
+  return ip + '|' + loc;
+};
+const isLocked = (k) => {
+  const e = pinFails.get(k);
+  if (e && e.lockedUntil && e.lockedUntil > Date.now()) return true;
+  return false;
+};
+const recordFail = (k) => {
+  const now = Date.now();
+  let e = pinFails.get(k);
+  if (!e || now - e.first > WINDOW_MS) e = { first: now, count: 0, lockedUntil: 0 };
+  e.count++;
+  if (e.count >= MAX_FAILS) e.lockedUntil = now + LOCK_MS;
+  pinFails.set(k, e);
+  if (pinFails.size > 10000) { for (const [key, v] of pinFails) if (now - v.first > WINDOW_MS && (!v.lockedUntil || v.lockedUntil < now)) pinFails.delete(key); }
+};
+// Constant-time PIN compare (length-guarded; PIN length isn't sensitive and the
+// throttle covers brute force).
+const pinEqual = (a, b) => {
+  const ab = Buffer.from(String(a)), bb = Buffer.from(String(b));
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+};
 
 // Public, PIN-gated shop-floor display data. NO JWT — meant to run unattended on
 // a TV in the bay. Each location has a short display_pin; the board passes it as
@@ -26,7 +59,10 @@ module.exports = (pool) => {
 
       const pin = (req.query.pin || '').toString();
       if (!loc.display_pin) return res.status(403).json({ error: 'Display not set up for this location yet. Set a display PIN under Locations.' });
-      if (pin !== loc.display_pin) return res.status(401).json({ error: 'Incorrect PIN' });
+      const rk = rlKey(req, req.params.locationId);
+      if (isLocked(rk)) return res.status(429).json({ error: 'Too many incorrect PIN attempts. Try again later.' });
+      if (!pinEqual(pin, loc.display_pin)) { recordFail(rk); return res.status(401).json({ error: 'Incorrect PIN' }); }
+      pinFails.delete(rk);
 
       const now = new Date();
       const year = now.getFullYear();

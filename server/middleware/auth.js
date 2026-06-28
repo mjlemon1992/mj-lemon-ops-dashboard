@@ -1,6 +1,10 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mj-lemon-ops-secret-change-in-production';
+// Fail closed: never fall back to a committed secret. If JWT_SECRET is missing,
+// the app must refuse to start rather than silently sign tokens with a known
+// string (which would let anyone forge an owner token).
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) throw new Error('JWT_SECRET environment variable is required');
 
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
