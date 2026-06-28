@@ -11,7 +11,7 @@ module.exports = (pool) => {
     if (req.user.role === 'manager') return res.status(403).json({ error: 'Access denied' });
     try {
       const result = await pool.query(
-        `SELECT DISTINCT ON (location_id) location_id, revenue_mtd, car_count_mtd, parts_margin, labour_margin, avg_ro_value, efficiency_avg, pph, total_profit, alerts, created_at
+        `SELECT DISTINCT ON (location_id) location_id, revenue_mtd, car_count_mtd, parts_margin, labour_margin, avg_ro_value, effective_labour_rate, efficiency_avg, pph, total_profit, alerts, created_at
          FROM metrics_cache ORDER BY location_id, created_at DESC`
       );
       res.json(result.rows);

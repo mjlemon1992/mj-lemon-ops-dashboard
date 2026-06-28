@@ -325,6 +325,10 @@ module.exports = (pool) => {
       const hoursForPph = labourHoursSold > 0 ? labourHoursSold : 1;
       const pph = (labourProfit + partsProfit) / hoursForPph;
       const avgRoValue = carCount > 0 ? revenue / carCount : 0;
+      // Effective labour rate = actual labour $ earned per billed hour. Compared to
+      // the posted door rate (locations.labour_rate) it shows discount leakage:
+      // e.g. $170 door vs $158 effective = $12/hr given away on every billed hour.
+      const effectiveLabourRate = labourHoursSold > 0 ? labourRev / labourHoursSold : 0;
 
       // Live alerts (stale vehicles + per-RO margin flags). Best-effort: a failure
       // here must not break the metrics refresh, so it falls back to an empty list.
@@ -342,6 +346,7 @@ module.exports = (pool) => {
         labour_hours_sold: Math.round(labourHoursSold * 10) / 10,
         labour_hours_worked: Math.round(labourHoursWorked * 10) / 10,
         labour_hours_comped: Math.round(labourHoursComped * 10) / 10,
+        effective_labour_rate: Math.round(effectiveLabourRate * 100) / 100,
         efficiency_avg: null,
         pph: Math.round(pph * 100) / 100,
         total_profit: Math.round(totalProfit * 100) / 100,
@@ -351,10 +356,11 @@ module.exports = (pool) => {
       await pool.query('ALTER TABLE metrics_cache ADD COLUMN IF NOT EXISTS labour_hours_worked NUMERIC');
       await pool.query('ALTER TABLE metrics_cache ADD COLUMN IF NOT EXISTS labour_revenue NUMERIC');
       await pool.query('ALTER TABLE metrics_cache ADD COLUMN IF NOT EXISTS labour_hours_comped NUMERIC');
+      await pool.query('ALTER TABLE metrics_cache ADD COLUMN IF NOT EXISTS effective_labour_rate NUMERIC');
       await pool.query(
-        `INSERT INTO metrics_cache (location_id, revenue_mtd, car_count_mtd, parts_margin, labour_margin, avg_ro_value, labour_hours_sold, labour_hours_worked, labour_hours_comped, labour_revenue, efficiency_avg, pph, total_profit, alerts, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())`,
-        [req.params.locationId, payload.revenue_mtd, payload.car_count_mtd, payload.parts_margin, payload.labour_margin, payload.avg_ro_value, payload.labour_hours_sold, payload.labour_hours_worked, payload.labour_hours_comped, payload.labour_revenue, payload.efficiency_avg, payload.pph, payload.total_profit, JSON.stringify(payload.alerts)]
+        `INSERT INTO metrics_cache (location_id, revenue_mtd, car_count_mtd, parts_margin, labour_margin, avg_ro_value, labour_hours_sold, labour_hours_worked, labour_hours_comped, labour_revenue, effective_labour_rate, efficiency_avg, pph, total_profit, alerts, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW())`,
+        [req.params.locationId, payload.revenue_mtd, payload.car_count_mtd, payload.parts_margin, payload.labour_margin, payload.avg_ro_value, payload.labour_hours_sold, payload.labour_hours_worked, payload.labour_hours_comped, payload.labour_revenue, payload.effective_labour_rate, payload.efficiency_avg, payload.pph, payload.total_profit, JSON.stringify(payload.alerts)]
       );
 
       res.json({ message: 'Metrics refreshed from Shopmonkey (pre-tax revenue)', orders_pulled: orders.length, mtd_orders: mtdOrders.length, profitability_data_available: partsWholesaleWithData > 0, metrics: payload });
