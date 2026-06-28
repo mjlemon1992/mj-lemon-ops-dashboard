@@ -8,6 +8,10 @@ const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth
 const BASE = process.env.QBO_CONNECTOR_URL;   // e.g. https://parkland-qbo-production.up.railway.app
 const TOKEN = process.env.QBO_API_TOKEN;      // minted in qbo-connector: npm run issue-key ops-dashboard <slugs>
 const DEFAULT_SLUG = process.env.QBO_DEFAULT_SLUG || null; // single-location fallback (e.g. "red-deer") — avoids a DB write
+// Which location the DEFAULT_SLUG belongs to. With 2+ locations this MUST be set
+// (or each location given its own qbo_slug), otherwise DEFAULT_SLUG would apply
+// to every location and an unmapped shop would inherit another shop's books.
+const DEFAULT_SLUG_LOC_ID = process.env.QBO_DEFAULT_SLUG_LOCATION_ID || null;
 
 module.exports = (pool) => {
   const router = express.Router();
@@ -23,16 +27,29 @@ module.exports = (pool) => {
 
   const slugify = (s) => (s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
-  // Resolve a dashboard location UUID to a connector slug. Prefer the explicit
-  // qbo_slug column; else QBO_DEFAULT_SLUG env (single-location convenience);
-  // else a slugified name (e.g. "Red Deer" -> "red-deer").
+  // Resolve a dashboard location UUID to a connector slug.
+  // 1) Explicit per-location qbo_slug always wins (the correct multi-location path).
+  // 2) DEFAULT_SLUG applies ONLY to its designated location (QBO_DEFAULT_SLUG_LOCATION_ID),
+  //    or — when that env is unset — to a true single-active-location deployment.
+  // 3) Otherwise the location is "not connected" (503). We deliberately do NOT
+  //    blanket-apply DEFAULT_SLUG or fall back to a slugified name, because either
+  //    would make an unmapped shop inherit another shop's books (cross-location bleed).
   const slugFor = async (locationId) => {
     await ensureColumns();
     const { rows } = await pool.query('SELECT name, qbo_slug FROM locations WHERE id = $1', [locationId]);
     if (!rows.length) throw new Error('Location not found');
-    const slug = rows[0].qbo_slug || DEFAULT_SLUG || slugify(rows[0].name);
-    if (!slug) throw new Error('Cannot resolve a QBO slug for this location (set locations.qbo_slug or QBO_DEFAULT_SLUG)');
-    return slug;
+    if (rows[0].qbo_slug) return rows[0].qbo_slug;
+    if (DEFAULT_SLUG) {
+      if (DEFAULT_SLUG_LOC_ID) {
+        if (DEFAULT_SLUG_LOC_ID === locationId) return DEFAULT_SLUG;
+      } else {
+        const { rows: c } = await pool.query('SELECT COUNT(*)::int AS n FROM locations WHERE active = true');
+        if ((c[0] && c[0].n) <= 1) return DEFAULT_SLUG;
+      }
+    }
+    const e = new Error('QuickBooks not connected for this location (set its qbo_slug, or QBO_DEFAULT_SLUG_LOCATION_ID for the default shop)');
+    e.status = 503;
+    throw e;
   };
 
   const connectorGet = async (path) => {

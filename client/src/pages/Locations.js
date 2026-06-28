@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, active: true };
+const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', qbo_slug: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, active: true };
 
 export default function Locations() {
   const { api } = useAuth();
@@ -53,7 +53,7 @@ export default function Locations() {
           </div>
           <div className="form-section">
             <div className="form-section-title">Integrations</div>
-            <div className="form-row">{field('shopmonkey_location_id','Shopmonkey location ID')}</div>
+            <div className="form-row">{field('shopmonkey_location_id','Shopmonkey location ID')} {field('qbo_slug','QBO connector slug (e.g. red-deer)')}</div>
             {field('slack_channel','Slack channel (e.g. #kelowna-alerts)')}
           </div>
           <div className="form-section">
@@ -122,6 +122,7 @@ export default function Locations() {
           <div className="stat-grid">
             {[
               ['Shopmonkey ID', loc.shopmonkey_location_id || 'Not set'],
+              ['QBO slug', loc.qbo_slug || 'Not set'],
               ['Slack channel', loc.slack_channel || 'Not set'],
               ['Technicians (live)', loc.num_technicians],
               ['Labour rate', `$${loc.labour_rate}/hr`],
