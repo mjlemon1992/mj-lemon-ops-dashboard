@@ -163,7 +163,8 @@ async function buildAlerts(apiKey, loc, mtdOrders) {
   try { open = await fetchOpenOrders(apiKey, loc.shopmonkey_location_id || ''); }
   catch (e) { console.error('fetchOpenOrders failed:', e.message); open = []; }
   for (const o of open) {
-    if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) continue;
+    if (!loc.shopmonkey_location_id) continue; // location not connected to Shopmonkey: never inherit account-wide orders
+    if (o.locationId && o.locationId !== loc.shopmonkey_location_id) continue;
     const start = parseShopmonkeyDate(o.createdDate) || parseShopmonkeyDate(o.authorizedDate);
     if (!start) continue;
     const days = Math.floor((now - start.getTime()) / DAY);
@@ -244,7 +245,8 @@ module.exports = (pool) => {
       catch (e) { return res.status(502).json({ error: e.message }); }
 
       const mtdOrders = orders.filter(o => {
-        if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) return false;
+        if (!loc.shopmonkey_location_id) return false; // location not connected to Shopmonkey: never inherit account-wide orders
+        if (o.locationId && o.locationId !== loc.shopmonkey_location_id) return false;
         const invoiced = parseShopmonkeyDate(o.invoicedDate);
         return invoiced && invoiced >= monthStart && invoiced <= now && !isComeback(o);
       });
@@ -407,7 +409,8 @@ module.exports = (pool) => {
       }
 
       const monthOrders = orders.filter(o => {
-        if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) return false;
+        if (!loc.shopmonkey_location_id) return false; // location not connected to Shopmonkey: never inherit account-wide orders
+        if (o.locationId && o.locationId !== loc.shopmonkey_location_id) return false;
         const invoiced = parseShopmonkeyDate(o.invoicedDate);
         return invoiced && invoiced >= monthStart && invoiced <= now;
       });
@@ -525,7 +528,8 @@ module.exports = (pool) => {
       catch (e) { return res.status(502).json({ error: e.message }); }
 
       const comebacks = orders.filter(o => {
-        if (o.locationId && loc.shopmonkey_location_id && o.locationId !== loc.shopmonkey_location_id) return false;
+        if (!loc.shopmonkey_location_id) return false; // location not connected to Shopmonkey: never inherit account-wide orders
+        if (o.locationId && o.locationId !== loc.shopmonkey_location_id) return false;
         const invoiced = parseShopmonkeyDate(o.invoicedDate);
         return invoiced && invoiced >= monthStart && invoiced <= now && isComeback(o);
       });
