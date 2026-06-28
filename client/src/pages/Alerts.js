@@ -1,24 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLocations } from '../context/LocationContext';
 import { parseAlerts, alertId, alertTitle, alertSub } from '../utils/alerts';
 
 export default function Alerts() {
   const { api } = useAuth();
+  const { scopeLocations } = useLocations();
   const [filter, setFilter] = useState('all');
   const [resolved, setResolved] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Stable signature of the scoped location ids so the effect doesn't re-run on
+  // every render (scopeLocations is a fresh array each time).
+  const scopeKey = scopeLocations.map(l => l.id).join(',');
   useEffect(() => {
     let cancelled = false;
-    api('/locations').catch(() => [])
-      .then(locs => Promise.all((locs || []).map(loc =>
-        api(`/metrics/${loc.id}/summary`).then(parseAlerts).catch(() => [])
-      )))
+    const ids = scopeKey ? scopeKey.split(',') : [];
+    if (!ids.length) { setAlerts([]); setLoading(false); return () => { cancelled = true; }; }
+    setLoading(true);
+    Promise.all(ids.map(id => api(`/metrics/${id}/summary`).then(parseAlerts).catch(() => [])))
       .then(lists => { if (!cancelled) { setAlerts(lists.flat()); setLoading(false); } })
       .catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [api, scopeKey]);
 
   const visible = alerts.filter(a => !resolved.includes(alertId(a)));
   const count = type => visible.filter(a => type === 'all' ? true : a.type === type).length;

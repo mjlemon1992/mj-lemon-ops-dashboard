@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { LocationProvider } from './context/LocationContext';
 import Login from './pages/Login';
 import Display from './pages/Display';
 import Layout from './components/Layout';
@@ -37,7 +38,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/display/:locationId" element={<Display />} />
-          <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+          <Route path="/" element={<ProtectedRoute><LocationProvider><Layout /></LocationProvider></ProtectedRoute>}>
             <Route index element={<Home />} />
             <Route path="scorecard" element={<ProtectedRoute ownerOrPartner><Scorecard /></ProtectedRoute>} />
             <Route path="performance" element={<Performance />} />

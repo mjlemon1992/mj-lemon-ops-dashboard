@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { pacePct as wdPacePct } from '../utils/pace';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLocations } from '../context/LocationContext';
 import { parseAlerts } from '../utils/alerts';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 export default function Home() {
   const { user, api } = useAuth();
+  const { isAll, selectedId } = useLocations();
   const navigate = useNavigate();
   const [locations, setLocations] = useState([]);
   const [metrics, setMetrics] = useState({});
@@ -54,14 +56,16 @@ export default function Home() {
 
   if (loading) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading...</div>;
 
-  const activeLocations = locations.filter(l => l.active);
-  const metricList = Object.values(metrics).filter(Boolean);
+  // Scope to the global location selection: "All" = every active shop (group
+  // view), otherwise just the selected one.
+  const activeLocations = locations.filter(l => l.active && (isAll || l.id === selectedId));
+  const metricList = activeLocations.map(l => metrics[l.id]).filter(Boolean);
   const num = v => (typeof v === 'number' ? v : parseFloat(v)) || 0;
 
   const groupRevenue = metricList.reduce((s, m) => s + num(m.revenue_mtd), 0);
   const groupCarCount = metricList.reduce((s, m) => s + num(m.car_count_mtd), 0);
   const groupPPH = metricList.length ? Math.round(metricList.reduce((s, m) => s + num(m.pph), 0) / metricList.length) : 0;
-  const _effList = Object.values(teff).filter(Boolean);
+  const _effList = activeLocations.map(l => teff[l.id]).filter(Boolean);
   const _locEff = (lid) => {
     const d = teff[lid];
     if (!d || !d.technicians) return null;
@@ -96,7 +100,7 @@ export default function Home() {
   const pctColor = p => p == null ? 'var(--text3)' : (p >= 100 ? 'var(--success)' : (p >= 90 ? 'var(--warning)' : 'var(--danger)'));
   const toneClass = p => p == null ? '' : (p >= 100 ? 'good' : (p >= 90 ? 'warn' : 'bad'));
   // Group targets = sum of per-location targets (revenue, car_count) / first loc for rates.
-  const _locTargets = Object.values(targets).filter(Boolean);
+  const _locTargets = activeLocations.map(l => targets[l.id]).filter(Boolean);
   const _sumT = key => _locTargets.reduce((s, t) => s + (parseFloat(t && t[key]) || 0), 0);
   const gRevTarget = _sumT('revenue');
   const gCarTarget = _sumT('car_count');
@@ -104,7 +108,7 @@ export default function Home() {
   const money0 = n => '$' + Math.round(n).toLocaleString('en-CA');
 
 
-  const allAlerts = Object.values(metrics).flatMap(parseAlerts);
+  const allAlerts = metricList.flatMap(parseAlerts);
   const alertCount = allAlerts.length;
   const staleCount = allAlerts.filter(a => a.type === 'stale').length;
   const marginCount = allAlerts.filter(a => a.type === 'margin').length;
@@ -140,7 +144,7 @@ export default function Home() {
       {(user?.role === 'owner' || user?.role === 'partner') && (
         <div className="stat-grid" style={{ marginBottom: '20px' }}>
           <div className="metric-card">
-            <div className="metric-label">Group revenue MTD</div>
+            <div className="metric-label">{isAll ? 'Group revenue MTD' : 'Revenue MTD'}</div>
             <div className="metric-value">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
             <div className={`metric-sub ${toneClass(pacePct(groupRevenue, gRevTarget))}`} style={{ color: pctColor(pacePct(groupRevenue, gRevTarget)) }}>{groupRevenue > 0 ? (pacePct(groupRevenue, gRevTarget) != null ? `${pacePct(groupRevenue, gRevTarget)}% of pace` : 'live from Shopmonkey') : 'awaiting sync'}</div>
             {gRevTarget > 0 && (
@@ -150,7 +154,7 @@ export default function Home() {
             )}
           </div>
           <div className="metric-card">
-            <div className="metric-label">Group car count</div>
+            <div className="metric-label">{isAll ? 'Group car count' : 'Car count'}</div>
             <div className="metric-value">{groupCarCount > 0 ? groupCarCount : '—'}</div>
             <div className={`metric-sub ${toneClass(pacePct(groupCarCount, gCarTarget))}`} style={{ color: pctColor(pacePct(groupCarCount, gCarTarget)) }}>{groupCarCount > 0 ? (pacePct(groupCarCount, gCarTarget) != null ? `${pacePct(groupCarCount, gCarTarget)}% of pace` : 'invoiced this month') : 'awaiting sync'}</div>
           </div>
@@ -226,7 +230,7 @@ export default function Home() {
         })
       )}
 
-      {locations.filter(l => !l.active).map(loc => (
+      {(isAll ? locations.filter(l => !l.active) : []).map(loc => (
         <div key={loc.id} className="card" style={{ marginBottom: '12px', opacity: 0.5 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>

@@ -1,20 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLocations } from '../context/LocationContext';
 
 const money = (n) => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (s) => { if (!s) return '—'; const d = new Date(s); return isNaN(d) ? '—' : d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }); };
 
-export default function Wip() {
+function WipView({ locId }) {
   const { api } = useAuth();
-  const [locations, setLocations] = useState([]);
-  const [activeLoc, setActiveLoc] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-useEffect(() => { api('/locations').then((locs) => { setLocations(locs || []); if (locs && locs.length) setActiveLoc(locs[0].id); }).catch(() => {}); }, []);
-
-useEffect(() => { if (!activeLoc) return; setLoading(true); setError(null); api(`/sync/${activeLoc}/wip`).then((d) => setData(d)).catch((e) => setError(String(e))).finally(() => setLoading(false)); }, [activeLoc]);
+useEffect(() => { if (!locId) return; setLoading(true); setError(null); api(`/sync/${locId}/wip`).then((d) => setData(d)).catch((e) => setError(String(e))).finally(() => setLoading(false)); }, [locId]);
 
 const totalCount = (data && data.total_count) || 0;
   const totalValue = (data && data.total_value) || 0;
@@ -43,7 +40,6 @@ return (
   <h1 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text)', margin: 0 }}>Committed WIP</h1>
 <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '3px' }}>Authorized work not yet invoiced — potential revenue on the floor (pre-tax)</div>
   </div>
-{locations.length > 1 && (<select value={activeLoc || ''} onChange={(e) => setActiveLoc(e.target.value)} style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '8px', padding: '6px 10px', fontSize: '13px' }}>{locations.map((l) => (<option key={l.id} value={l.id}>{l.name}</option>))}</select>)}
   </div>
                                                                                                                 {loading && <div style={{ color: 'var(--text3)', fontSize: '13px', padding: '20px 0' }}>Loading…</div>}
 {error && <div style={{ color: 'var(--danger, #d9534f)', fontSize: '13px', padding: '20px 0' }}>{error}</div>}
@@ -67,4 +63,22 @@ return (
   </>)}
   </div>
 );
+}
+
+export default function Wip() {
+  const { isAll, scopeLocations, selectedId } = useLocations();
+  if (!isAll) {
+    if (!selectedId) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Select a location.</div>;
+    return <WipView locId={selectedId} />;
+  }
+  return (
+    <div>
+      {scopeLocations.map(l => (
+        <div key={l.id} style={{ marginBottom: '32px' }}>
+          <div className="section-label" style={{ marginBottom: '12px' }}>{l.name}</div>
+          <WipView locId={l.id} />
+        </div>
+      ))}
+    </div>
+  );
 }

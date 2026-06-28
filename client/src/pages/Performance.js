@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { pacePct as wdPacePct } from '../utils/pace';
 import { useAuth } from '../context/AuthContext';
+import { useLocations } from '../context/LocationContext';
 
 const num = v => (typeof v === 'number' ? v : parseFloat(v)) || 0;
 const money0 = n => '$' + Math.round(num(n)).toLocaleString('en-CA');
 const hrsNum = n => (Math.round(num(n) * 10) / 10).toLocaleString('en-CA');
 
-export default function Performance() {
+function PerformanceView({ locId }) {
   const { user, api } = useAuth();
-  const [locations, setLocations] = useState([]);
-  const [locId, setLocId] = useState(null);
+  const { locations } = useLocations();
   const [metrics, setMetrics] = useState(null);
   const [target, setTarget] = useState(null);
   const [techData, setTechData] = useState(null);
@@ -17,16 +17,6 @@ export default function Performance() {
 
   const year = new Date().getFullYear();
   const month = new Date().getMonth() + 1;
-
-  useEffect(() => {
-    api('/locations').then(locs => {
-      setLocations(locs);
-      const active = locs.filter(l => l.active);
-      const first = active[0] || locs[0];
-      if (first) setLocId(first.id);
-      else setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []); // eslint-disable-line
 
   useEffect(() => {
     if (!locId) return;
@@ -109,13 +99,6 @@ export default function Performance() {
   return (
     <div>
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center' }}>
-        {locations.length > 1 ? (
-          <select value={locId || ''} onChange={e => setLocId(e.target.value)} style={{ width: 'auto' }}>
-            {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        ) : (
-          <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>{loc?.name || 'Location'}</div>
-        )}
         <div style={{ fontSize: '11px', color: 'var(--text3)' }}>This month &middot; {hasMetrics ? 'live from Shopmonkey \u00b7 pre-tax' : 'awaiting sync'}</div>
       </div>
 
@@ -247,6 +230,24 @@ export default function Performance() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+export default function Performance() {
+  const { isAll, scopeLocations, selectedId } = useLocations();
+  if (!isAll) {
+    if (!selectedId) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Select a location.</div>;
+    return <PerformanceView locId={selectedId} />;
+  }
+  return (
+    <div>
+      {scopeLocations.map(l => (
+        <div key={l.id} style={{ marginBottom: '32px' }}>
+          <div className="section-label" style={{ marginBottom: '12px' }}>{l.name}</div>
+          <PerformanceView locId={l.id} />
+        </div>
+      ))}
     </div>
   );
 }

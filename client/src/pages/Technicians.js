@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLocations } from '../context/LocationContext';
 
 const num = v => (typeof v === 'number' ? v : parseFloat(v)) || 0;
 const money0 = n => '$' + Math.round(num(n)).toLocaleString('en-CA');
 const hrsNum = n => (Math.round(num(n) * 10) / 10).toLocaleString('en-CA');
 
-export default function Technicians() {
+function TechniciansView({ locId }) {
   const { user, api } = useAuth();
-  const [locations, setLocations] = useState([]);
-  const [locId, setLocId] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -18,16 +17,6 @@ export default function Technicians() {
   const [recomputeMsg, setRecomputeMsg] = useState(null);
   const [period, setPeriod] = useState('mtd');
   const [hidden, setHidden] = useState(new Set());
-
-  useEffect(() => {
-    api('/locations').then(locs => {
-      const active = locs.filter(l => l.active);
-      setLocations(active.length ? active : locs);
-      const first = active[0] || locs[0];
-      if (first) setLocId(first.id);
-      else setLoading(false);
-    }).catch(() => { setError('Could not load locations'); setLoading(false); });
-  }, []); // eslint-disable-line
 
   useEffect(() => {
     if (!locId) return;
@@ -113,11 +102,6 @@ export default function Technicians() {
             Live roster pulled from Shopmonkey. Add or remove techs in Shopmonkey and this follows on the next sync &mdash; no manual list to maintain.
           </div>
         </div>
-        {locations.length > 1 && (
-          <select value={locId || ''} onChange={e => setLocId(e.target.value)} style={{ fontSize: '12px' }}>
-            {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        )}
       </div>
 
       {error && <div className="card" style={{ padding: '14px', color: 'var(--danger)', margin: '12px 0' }}>{error}</div>}
@@ -232,6 +216,24 @@ export default function Technicians() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+export default function Technicians() {
+  const { isAll, scopeLocations, selectedId } = useLocations();
+  if (!isAll) {
+    if (!selectedId) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Select a location.</div>;
+    return <TechniciansView locId={selectedId} />;
+  }
+  return (
+    <div>
+      {scopeLocations.map(l => (
+        <div key={l.id} style={{ marginBottom: '32px' }}>
+          <div className="section-label" style={{ marginBottom: '12px' }}>{l.name}</div>
+          <TechniciansView locId={l.id} />
+        </div>
+      ))}
     </div>
   );
 }
