@@ -102,7 +102,12 @@ module.exports = (pool) => {
 
       let roster = [];
       let rosterError = null;
-      if (!apiKey) {
+      if (!loc.shopmonkey_location_id) {
+        // Location not connected to Shopmonkey: no roster. The /v3/user list is
+        // account-wide, so without this guard an unconnected location would show
+        // another shop's technicians (with null stats).
+        rosterError = 'Location not connected to Shopmonkey';
+      } else if (!apiKey) {
         rosterError = 'SHOPMONKEY_API_KEY not configured';
       } else {
         try {
@@ -178,7 +183,14 @@ module.exports = (pool) => {
       });
 
       let derivedCount = technicians.length;
-      if (!rosterError && derivedCount > 0) {
+      if (!loc.shopmonkey_location_id) {
+        // Unconnected location has no technicians; clear any stale inherited count.
+        derivedCount = 0;
+        await pool.query(
+          'UPDATE locations SET num_technicians = 0, updated_at = NOW() WHERE id = $1',
+          [req.params.locationId]
+        );
+      } else if (!rosterError && derivedCount > 0) {
         await pool.query(
           'UPDATE locations SET num_technicians = $1, updated_at = NOW() WHERE id = $2',
           [derivedCount, req.params.locationId]
