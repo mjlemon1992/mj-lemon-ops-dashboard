@@ -104,11 +104,14 @@ export default function Home() {
   const _sumT = key => _locTargets.reduce((s, t) => s + (parseFloat(t && t[key]) || 0), 0);
   const gRevTarget = _sumT('revenue');
   const gCarTarget = _sumT('car_count');
-  const gRoTarget = _locTargets.length ? (_locTargets.reduce((s,t)=>s+(parseFloat(t.avg_ro_value)||0),0) / _locTargets.length) : 0;
-  // PPH and efficiency targets live on the location (not the monthly target row).
-  // They're rate metrics, so the group target is the average across active shops.
-  const gPphTarget = activeLocations.length ? (activeLocations.reduce((s,l)=>s+(parseFloat(l.pph_target)||254),0) / activeLocations.length) : 0;
-  const gEffTarget = activeLocations.length ? (activeLocations.reduce((s,l)=>s+(parseFloat(l.efficiency_target)||80),0) / activeLocations.length) : 0;
+  // Rate-metric group targets = average over shops that ACTUALLY have a target set.
+  // A shop with a 0/unset target (e.g. Hwy 97, not configured) is excluded — we
+  // never invent a default target, so an untargeted shop shows no attainment and
+  // doesn't drag the group denominator. 0 -> targetPct returns null -> no "% of target".
+  const avgPos = vals => { const f = vals.filter(v => v > 0); return f.length ? f.reduce((a, b) => a + b, 0) / f.length : 0; };
+  const gRoTarget = avgPos(_locTargets.map(t => parseFloat(t.avg_ro_value) || 0));
+  const gPphTarget = avgPos(activeLocations.map(l => parseFloat(l.pph_target) || 0));
+  const gEffTarget = avgPos(activeLocations.map(l => parseFloat(l.efficiency_target) || 0));
   const money0 = n => '$' + Math.round(n).toLocaleString('en-CA');
 
 
@@ -216,9 +219,9 @@ export default function Home() {
               </div>
               <div className="stat-grid-sm">
                 {[
-                  { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: (m && t && t.revenue) ? `${pacePct(num(m.revenue_mtd), num(t.revenue), loc.province)}% of pace` : (t ? `vs $${Math.round(t.revenue/1000)}k target` : 'vs target'), ok: (m && t && t.revenue) ? pacePct(num(m.revenue_mtd), num(t.revenue), loc.province) >= 90 : true, sub2: (m && t && t.revenue) ? `Target ${money0(num(t.revenue))} · ${num(m.revenue_mtd) >= num(t.revenue) ? `${money0(num(m.revenue_mtd) - num(t.revenue))} over` : `${money0(num(t.revenue) - num(m.revenue_mtd))} to go`}` : null },
-                  { label: 'Profit / hr', val: m && num(m.pph) > 0 ? `$${Math.round(num(m.pph))}` : '—', sub: (m && num(m.pph) > 0 && loc.pph_target) ? `${targetPct(num(m.pph), num(loc.pph_target))}% of target` : `vs $${loc.pph_target} target`, ok: num(m?.pph) >= loc.pph_target },
-                  { label: 'Efficiency', val: _locEff(loc.id) != null ? `${_locEff(loc.id)}%` : '—', sub: `vs ${loc.efficiency_target}% target`, ok: (_locEff(loc.id) || 0) >= loc.efficiency_target },
+                  { label: 'Revenue MTD', val: m ? money0(num(m.revenue_mtd)) : '—', sub: (m && t && num(t.revenue) > 0) ? `${pacePct(num(m.revenue_mtd), num(t.revenue), loc.province)}% of pace` : ((t && num(t.revenue) > 0) ? `vs $${Math.round(num(t.revenue)/1000)}k target` : 'no target set'), ok: (m && t && num(t.revenue) > 0) ? pacePct(num(m.revenue_mtd), num(t.revenue), loc.province) >= 90 : true, sub2: (m && t && t.revenue) ? `Target ${money0(num(t.revenue))} · ${num(m.revenue_mtd) >= num(t.revenue) ? `${money0(num(m.revenue_mtd) - num(t.revenue))} over` : `${money0(num(t.revenue) - num(m.revenue_mtd))} to go`}` : null },
+                  { label: 'Profit / hr', val: m && num(m.pph) > 0 ? `$${Math.round(num(m.pph))}` : '—', sub: (m && num(m.pph) > 0 && num(loc.pph_target) > 0) ? `${targetPct(num(m.pph), num(loc.pph_target))}% of target` : (num(loc.pph_target) > 0 ? `vs $${Math.round(num(loc.pph_target))} target` : 'no target set'), ok: num(loc.pph_target) > 0 ? num(m?.pph) >= num(loc.pph_target) : true },
+                  { label: 'Efficiency', val: _locEff(loc.id) != null ? `${_locEff(loc.id)}%` : '—', sub: num(loc.efficiency_target) > 0 ? `vs ${loc.efficiency_target}% target` : 'no target set', ok: num(loc.efficiency_target) > 0 ? (_locEff(loc.id) || 0) >= num(loc.efficiency_target) : true },
                   { label: 'Avg RO', val: m && num(m.avg_ro_value) > 0 ? money0(num(m.avg_ro_value)) : '—', sub: (m && num(m.avg_ro_value) > 0 && t && t.avg_ro_value) ? `${targetPct(num(m.avg_ro_value), num(t.avg_ro_value))}% of target` : 'per car', ok: (m && t && t.avg_ro_value) ? num(m.avg_ro_value) >= num(t.avg_ro_value) : true },
                 ].map(item => (
                   <div key={item.label}>
