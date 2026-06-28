@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLocations } from '../context/LocationContext';
 import { parseAlerts } from '../utils/alerts';
 
 const NAV = [
@@ -21,18 +22,17 @@ const NAV = [
 
 export default function Layout() {
   const { user, logout, api } = useAuth();
+  const { locations, selectedId, isAll, canSwitch, select } = useLocations();
   const navigate = useNavigate();
   const location = useLocation();
   const [alertCount, setAlertCount] = useState(0);
 
-  // Live count for the sidebar badge + header pill. Owners/partners see the
-  // group total; a manager sees only their own location's alerts.
+  // Live count for the sidebar badge + header pill, scoped to the current
+  // location selection: a specific shop shows its own alerts, "All" the group.
   useEffect(() => {
     if (!user) return undefined;
     let cancelled = false;
-    const path = (user.role === 'manager' && user.location_id)
-      ? `/metrics/${user.location_id}/summary`
-      : '/metrics/group/summary';
+    const path = isAll ? '/metrics/group/summary' : `/metrics/${selectedId}/summary`;
     api(path)
       .then(res => {
         const rows = Array.isArray(res) ? res : [res];
@@ -41,7 +41,7 @@ export default function Layout() {
       .then(n => { if (!cancelled) setAlertCount(n); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [user, api]);
+  }, [user, api, isAll, selectedId]);
 
   const visibleNav = NAV.filter(n => !n.roles || n.roles.includes(user?.role));
 
@@ -61,8 +61,25 @@ export default function Layout() {
           </div>
         </div>
 
-        <div style={{ margin: '12px', padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)', fontSize: '12px' }}>
-          <div style={{ fontWeight: '500', color: 'var(--text)' }}>All locations</div>
+        <div style={{ margin: '12px', padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)' }}>
+          {canSwitch ? (
+            <select
+              value={selectedId}
+              onChange={e => select(e.target.value)}
+              aria-label="Location"
+              style={{
+                width: '100%', background: 'transparent', border: 'none', padding: 0,
+                fontSize: '12px', fontWeight: 500, color: 'var(--text)', cursor: 'pointer', outline: 'none'
+              }}
+            >
+              <option value="all">All locations</option>
+              {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          ) : (
+            <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text)' }}>
+              {locations.find(l => l.id === selectedId)?.name || 'Location'}
+            </div>
+          )}
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '1px', textTransform: 'capitalize' }}>{user?.role} view</div>
         </div>
 

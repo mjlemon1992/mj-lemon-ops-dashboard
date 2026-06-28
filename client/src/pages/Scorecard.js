@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLocations } from '../context/LocationContext';
 import { pacePct as wdPacePct } from '../utils/pace';
 
 // Weekly CEO scorecard: the books (QBO P&L) + operations (Shopmonkey vs target),
@@ -19,10 +20,9 @@ function Tile({ label, value, sub, tone }) {
   );
 }
 
-export default function Scorecard() {
+function ScorecardView({ locId }) {
   const { api } = useAuth();
-  const [locations, setLocations] = useState([]);
-  const [locId, setLocId] = useState(null);
+  const { locations } = useLocations();
   const [metrics, setMetrics] = useState(null);
   const [target, setTarget] = useState(null);
   const [pnl, setPnl] = useState(null);
@@ -31,14 +31,6 @@ export default function Scorecard() {
 
   const year = new Date().getFullYear();
   const month = new Date().getMonth() + 1;
-
-  useEffect(() => {
-    api('/locations').then(locs => {
-      setLocations(locs);
-      const first = locs.filter(l => l.active)[0] || locs[0];
-      if (first) setLocId(first.id); else setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [api]);
 
   useEffect(() => {
     if (!locId) return;
@@ -83,13 +75,6 @@ export default function Scorecard() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px', flexWrap: 'wrap' }}>
-        {locations.length > 1 ? (
-          <select value={locId || ''} onChange={e => setLocId(e.target.value)} style={{ width: 'auto' }}>
-            {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        ) : (
-          <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text)' }}>{loc?.name || 'Location'}</div>
-        )}
         <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{monthName()} · the one-screen read</span>
       </div>
 
@@ -136,6 +121,24 @@ export default function Scorecard() {
         <Tile label="Profit / hour" value={pph > 0 ? `$${Math.round(pph)}` : '—'}
           tone={pph >= pphTarget ? 'good' : 'warn'} sub={`vs $${pphTarget} target`} />
       </div>
+    </div>
+  );
+}
+
+export default function Scorecard() {
+  const { isAll, scopeLocations, selectedId } = useLocations();
+  if (!isAll) {
+    if (!selectedId) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Select a location.</div>;
+    return <ScorecardView locId={selectedId} />;
+  }
+  return (
+    <div>
+      {scopeLocations.map(l => (
+        <div key={l.id} style={{ marginBottom: '32px' }}>
+          <div className="section-label" style={{ marginBottom: '12px' }}>{l.name}</div>
+          <ScorecardView locId={l.id} />
+        </div>
+      ))}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLocations } from '../context/LocationContext';
 import ApprovalQueue from '../components/ApprovalQueue';
 import ShotsList from '../components/ShotsList';
 import ReviewsScorecard from '../components/ReviewsScorecard';
@@ -37,11 +38,10 @@ function Gauge({ label, value, sub, tone, rail, onClick, soon }) {
   );
 }
 
-export default function Marketing() {
+function MarketingView({ locId }) {
   const { api, token } = useAuth();
+  const { locations } = useLocations();
   const navigate = useNavigate();
-  const [locations, setLocations] = useState([]);
-  const [locId, setLocId] = useState(null);
   const [status, setStatus] = useState({ configured: true, slack: false });
   const [summary, setSummary] = useState(null);
   const [periods, setPeriods] = useState([]);
@@ -59,14 +59,6 @@ export default function Marketing() {
   const detailRef = useRef(null);
 
   useEffect(() => { api('/marketing/calls/status').then(setStatus).catch(() => {}); }, [api]);
-
-  useEffect(() => {
-    api('/locations').then(locs => {
-      setLocations(locs);
-      const first = locs.filter(l => l.active)[0] || locs[0];
-      if (first) setLocId(first.id); else setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [api]);
 
   const refresh = useCallback(() => {
     if (!locId) return;
@@ -126,17 +118,6 @@ export default function Marketing() {
 
   return (
     <div>
-      {/* Location */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
-        {locations.length > 1 ? (
-          <select value={locId || ''} onChange={e => setLocId(e.target.value)} style={{ width: 'auto' }}>
-            {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        ) : (
-          <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>{locName || 'Location'}</div>
-        )}
-      </div>
-
       {/* Command layout: queue (left) + side rail (right) */}
       <div className="mkt-grid">
 
@@ -299,4 +280,63 @@ export default function Marketing() {
       </div>
     </div>
   );
+}
+
+// One shop's marketing summary in the all-locations overview. Marketing actions
+// are per-shop, so "All" shows a read-only glance per location with a drill-in.
+function ShopMarketingCard({ loc, onOpen }) {
+  const { api } = useAuth();
+  const [rev, setRev] = useState(null);
+  const [drafts, setDrafts] = useState(null);
+  const [shots, setShots] = useState(null);
+  useEffect(() => {
+    let on = true;
+    api(`/marketing/reviews/${loc.id}`).then(d => { if (on) setRev(d); }).catch(() => { if (on) setRev(null); });
+    api(`/marketing/posts/${loc.id}/queue?status=draft`).then(d => { if (on) setDrafts((d || []).length); }).catch(() => { if (on) setDrafts(0); });
+    api(`/marketing/shots/${loc.id}/shots`).then(d => { if (on) setShots((d.shots || []).length); }).catch(() => { if (on) setShots(0); });
+    return () => { on = false; };
+  }, [loc.id, api]);
+  const Row = ({ label, value, tone }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '5px 0' }}>
+      <span style={{ color: 'var(--text3)' }}>{label}</span>
+      <span style={{ color: tone || 'var(--text)', fontWeight: 500 }}>{value}</span>
+    </div>
+  );
+  return (
+    <div className="card">
+      <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>{loc.name}</div>
+      <Row label="Google rating" value={rev && rev.rating ? `★ ${rev.rating} (${fmt(rev.total)})` : 'not connected'} tone={rev && rev.rating ? 'var(--success)' : 'var(--text3)'} />
+      <Row label="Awaiting approval" value={drafts == null ? '…' : drafts} tone={drafts ? 'var(--accent)' : undefined} />
+      <Row label="Shots to grab" value={shots == null ? '…' : shots} tone={shots ? 'var(--warning)' : undefined} />
+      <button onClick={() => onOpen(loc.id)} style={{ marginTop: '10px', width: '100%' }}>Open workspace →</button>
+    </div>
+  );
+}
+
+// All-locations marketing: per-shop overview + a reserved broadcast lane (compose
+// once, publish to every shop's Meta + GBP — lights up once channel posting is connected).
+function MarketingOverview() {
+  const { scopeLocations, select } = useLocations();
+  return (
+    <div>
+      <div className="section-label" style={{ marginBottom: '12px' }}>Marketing overview · all locations</div>
+      <div className="stat-grid">
+        {scopeLocations.map(l => <ShopMarketingCard key={l.id} loc={l} onOpen={select} />)}
+      </div>
+      <div className="card" style={{ marginTop: '16px', opacity: 0.6 }}>
+        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Broadcast post → all locations</div>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '4px', lineHeight: 1.5 }}>
+          Compose once, publish to every location's Meta + Google Business Profile. Available once channel posting is connected.
+        </div>
+        <button disabled style={{ marginTop: '10px' }}>Compose broadcast (soon)</button>
+      </div>
+    </div>
+  );
+}
+
+export default function Marketing() {
+  const { isAll, selectedId } = useLocations();
+  if (isAll) return <MarketingOverview />;
+  if (!selectedId) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Select a location.</div>;
+  return <MarketingView locId={selectedId} />;
 }

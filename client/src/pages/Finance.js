@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLocations } from '../context/LocationContext';
 
 const num = v => (typeof v === 'number' ? v : parseFloat(v));
 const money = n => (n == null || Number.isNaN(num(n)))
@@ -9,10 +10,10 @@ const money = n => (n == null || Number.isNaN(num(n)))
 const thisYearStart = () => `${new Date().getFullYear()}-01-01`;
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function Finance() {
+function FinanceView({ locId }) {
   const { api } = useAuth();
-  const [locations, setLocations] = useState([]);
-  const [locId, setLocId] = useState(null);
+  const { locations } = useLocations();
+  const loc = locations.find(l => l.id === locId);
   const [start, setStart] = useState(thisYearStart());
   const [end, setEnd] = useState(today());
   const [configured, setConfigured] = useState(true);
@@ -28,16 +29,6 @@ export default function Finance() {
   }, [api]);
 
   useEffect(() => {
-    api('/locations').then(locs => {
-      setLocations(locs);
-      const active = locs.filter(l => l.active);
-      const first = active[0] || locs[0];
-      if (first) setLocId(first.id);
-      else setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [api]);
-
-  useEffect(() => {
     if (!locId) return;
     setLoading(true); setErr(null); setPnl(null);
     api(`/finance/${locId}/pnl?start=${start}&end=${end}`)
@@ -46,7 +37,6 @@ export default function Finance() {
       .finally(() => setLoading(false));
   }, [locId, start, end, api]);
 
-  const loc = locations.find(l => l.id === locId);
   const h = pnl?.headline || {};
   const summaries = Array.isArray(pnl?.summaries) ? pnl.summaries : [];
 
@@ -61,13 +51,6 @@ export default function Finance() {
     <div>
       {/* Controls */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
-        {locations.length > 1 ? (
-          <select value={locId || ''} onChange={e => setLocId(e.target.value)} style={{ width: 'auto' }}>
-            {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        ) : (
-          <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>{loc?.name || 'Location'}</div>
-        )}
         <input type="date" value={start} max={end} onChange={e => setStart(e.target.value)} style={{ width: 'auto' }} />
         <span style={{ color: 'var(--text3)', fontSize: '12px' }}>to</span>
         <input type="date" value={end} min={start} max={today()} onChange={e => setEnd(e.target.value)} style={{ width: 'auto' }} />
@@ -136,6 +119,24 @@ export default function Finance() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+export default function Finance() {
+  const { isAll, scopeLocations, selectedId } = useLocations();
+  if (!isAll) {
+    if (!selectedId) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Select a location.</div>;
+    return <FinanceView locId={selectedId} />;
+  }
+  return (
+    <div>
+      {scopeLocations.map(l => (
+        <div key={l.id} style={{ marginBottom: '32px' }}>
+          <div className="section-label" style={{ marginBottom: '12px' }}>{l.name}</div>
+          <FinanceView locId={l.id} />
+        </div>
+      ))}
     </div>
   );
 }

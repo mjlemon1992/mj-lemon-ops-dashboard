@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLocations } from '../context/LocationContext';
 
 const money = n => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = s => {
@@ -8,39 +9,26 @@ const fmtDate = s => {
   return isNaN(d) ? '—' : d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
 };
 
-export default function Comebacks() {
+function ComebacksView({ locId }) {
   const { api } = useAuth();
-  const [locations, setLocations] = useState([]);
-  const [activeLoc, setActiveLoc] = useState(null);
   const [data, setData] = useState(null);
   const [revenueCount, setRevenueCount] = useState(null); // for comeback-rate denominator
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    api('/locations')
-      .then(locs => {
-        const active = locs.filter(l => l.active);
-        setLocations(active);
-        if (active.length) setActiveLoc(active[0].id);
-        else setLoading(false);
-      })
-      .catch(() => { setError('Could not load locations'); setLoading(false); });
-  }, []); // eslint-disable-line
-
-  useEffect(() => {
-    if (!activeLoc) return;
+    if (!locId) return;
     setLoading(true);
     setError(null);
     Promise.all([
-      api(`/sync/${activeLoc}/comebacks`).catch(() => null),
-      api(`/metrics/${activeLoc}/summary`).catch(() => null),
+      api(`/sync/${locId}/comebacks`).catch(() => null),
+      api(`/metrics/${locId}/summary`).catch(() => null),
     ]).then(([cb, metrics]) => {
       setData(cb);
       setRevenueCount(metrics && metrics.car_count_mtd != null ? metrics.car_count_mtd : null);
       setLoading(false);
     });
-  }, [activeLoc]); // eslint-disable-line
+  }, [locId]); // eslint-disable-line
 
   const count = data?.count || 0;
   const hours = data?.total_unbilled_hours || 0;
@@ -61,11 +49,6 @@ export default function Comebacks() {
             Warranty re-dos, goodwill work and internal tickets — unbilled labour the shop absorbs this month.
           </div>
         </div>
-        {locations.length > 1 && (
-          <select value={activeLoc || ''} onChange={e => setActiveLoc(e.target.value)} style={{ fontSize: '12px' }}>
-            {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        )}
       </div>
 
       {data?.snapshot_date && (
@@ -170,6 +153,24 @@ export default function Comebacks() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+export default function Comebacks() {
+  const { isAll, scopeLocations, selectedId } = useLocations();
+  if (!isAll) {
+    if (!selectedId) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Select a location.</div>;
+    return <ComebacksView locId={selectedId} />;
+  }
+  return (
+    <div>
+      {scopeLocations.map(l => (
+        <div key={l.id} style={{ marginBottom: '32px' }}>
+          <div className="section-label" style={{ marginBottom: '12px' }}>{l.name}</div>
+          <ComebacksView locId={l.id} />
+        </div>
+      ))}
     </div>
   );
 }
