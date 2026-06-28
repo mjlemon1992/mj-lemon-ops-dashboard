@@ -68,6 +68,9 @@ function ScorecardView({ locId }) {
   const pmTarget = num(loc?.parts_margin_target) || 55;
   const effTarget = num(loc?.efficiency_target) || 80;
   const pphTarget = num(loc?.pph_target) || 254;
+  const door = num(loc?.labour_rate) || 170;
+  const effRate = metrics?.effective_labour_rate != null ? num(metrics.effective_labour_rate)
+    : (num(metrics?.labour_revenue) > 0 && num(metrics?.labour_hours_sold) > 0 ? num(metrics.labour_revenue) / num(metrics.labour_hours_sold) : 0);
   const hasMetrics = !!metrics && revenue > 0;
 
   if (loading) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading scorecard…</div>;
@@ -120,6 +123,8 @@ function ScorecardView({ locId }) {
           sub={eff != null && eff > 0 ? `vs ${effTarget}% target` : 'no hours yet'} />
         <Tile label="Profit / hour" value={pph > 0 ? `$${Math.round(pph)}` : '—'}
           tone={pph >= pphTarget ? 'good' : 'warn'} sub={`vs $${pphTarget} target`} />
+        <Tile label="Effective labour rate" value={effRate > 0 ? `$${Math.round(effRate)}/hr` : '—'}
+          sub={effRate > 0 ? `vs $${Math.round(door)} door${effRate < door ? ` · −$${Math.round(door - effRate)}` : ''}` : 'awaiting sync'} />
       </div>
     </div>
   );

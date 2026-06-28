@@ -56,6 +56,10 @@ function PerformanceView({ locId }) {
   // Falls back to hours*rate only if the field isn't present yet.
   const labourRevenue = metrics?.labour_revenue != null ? num(metrics.labour_revenue) : labourHoursSold * labourRate;
   const partsOtherRevenue = revenue - labourRevenue;
+  // Effective labour rate = labour $ earned per billed hour, vs the posted door rate.
+  // The gap is discount leakage. Prefer the stored field; fall back pre-sync.
+  const effectiveRate = metrics?.effective_labour_rate != null ? num(metrics.effective_labour_rate) : (labourHoursSold > 0 ? labourRevenue / labourHoursSold : 0);
+  const rateGap = effectiveRate > 0 ? effectiveRate - labourRate : 0;
 
   const pphTarget = num(loc?.pph_target) || 254;
   const effTarget = num(loc?.efficiency_target) || 80;
@@ -90,6 +94,7 @@ function PerformanceView({ locId }) {
   const profitRows = [
     ['Total profit', hasMetrics ? money0(profit) : '\u2014', `${profitMargin.toFixed(1)}% margin`],
     ['Labour revenue', hasMetrics ? money0(labourRevenue) : '\u2014', 'billed, pre-tax'],
+    ['Effective labour rate', effectiveRate > 0 ? `$${Math.round(effectiveRate)}/hr` : '\u2014', effectiveRate > 0 ? `vs $${Math.round(labourRate)} door (${rateGap >= 0 ? '+' : '\u2212'}$${Math.abs(Math.round(rateGap))}/hr)` : 'billed-hours basis'],
     ['Parts & other revenue', hasMetrics ? money0(partsOtherRevenue) : '\u2014', 'revenue \u2212 labour'],
     ['Labour hours billed', labourHoursSold > 0 ? hrsNum(labourHoursSold) : '\u2014', 'revenue-generating lines'],
     ['Labour hours comped', labourHoursComped > 0 ? hrsNum(labourHoursComped) : '\u2014', 'discounted to $0 (give-away)'],

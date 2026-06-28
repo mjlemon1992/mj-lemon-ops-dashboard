@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS metrics_cache (
   labour_margin DECIMAL(5,2),
   avg_ro_value DECIMAL(10,2),
   labour_hours_sold DECIMAL(10,2),
+  effective_labour_rate DECIMAL(10,2),
   efficiency_avg DECIMAL(5,2),
   pph DECIMAL(10,2),
   total_profit DECIMAL(12,2),
