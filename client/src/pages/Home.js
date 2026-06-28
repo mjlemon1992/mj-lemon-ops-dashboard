@@ -64,7 +64,11 @@ export default function Home() {
 
   const groupRevenue = metricList.reduce((s, m) => s + num(m.revenue_mtd), 0);
   const groupCarCount = metricList.reduce((s, m) => s + num(m.car_count_mtd), 0);
-  const groupPPH = metricList.length ? Math.round(metricList.reduce((s, m) => s + num(m.pph), 0) / metricList.length) : 0;
+  // Rate metrics (PPH, efficiency) average ONLY over shops that actually have
+  // data. A no-data shop (e.g. Hwy 97, zero row / empty roster) must not be
+  // averaged in as a 0 — that would halve the group number.
+  const _pphVals = metricList.map(m => num(m.pph)).filter(v => v > 0);
+  const groupPPH = _pphVals.length ? Math.round(_pphVals.reduce((a, b) => a + b, 0) / _pphVals.length) : 0;
   const _effList = activeLocations.map(l => teff[l.id]).filter(Boolean);
   const _locEff = (lid) => {
     const d = teff[lid];
@@ -73,13 +77,14 @@ export default function Home() {
     const so = d.technicians.reduce((a, t) => a + num(t.hours_sold), 0);
     return w > 0 ? Math.round((so / w) * 100) : null;
   };
-  const groupEff = _effList.length
-    ? Math.round(_effList.reduce((s, d) => {
-        const w = (d.technicians || []).reduce((a, t) => a + num(t.hours_worked), 0);
-        const so = (d.technicians || []).reduce((a, t) => a + num(t.hours_sold), 0);
-        return s + (w > 0 ? (so / w) * 100 : 0);
-      }, 0) / _effList.length)
-    : 0;
+  const _effVals = _effList
+    .map(d => {
+      const w = (d.technicians || []).reduce((a, t) => a + num(t.hours_worked), 0);
+      const so = (d.technicians || []).reduce((a, t) => a + num(t.hours_sold), 0);
+      return w > 0 ? (so / w) * 100 : null;
+    })
+    .filter(v => v != null);
+  const groupEff = _effVals.length ? Math.round(_effVals.reduce((a, b) => a + b, 0) / _effVals.length) : 0;
   // Revenue-weighted parts margin across locations (falls back to simple avg)
   const marginVals = metricList.map(m => num(m.parts_margin)).filter(v => v > 0);
   const groupMargin = marginVals.length ? (marginVals.reduce((a, b) => a + b, 0) / marginVals.length) : 0;
