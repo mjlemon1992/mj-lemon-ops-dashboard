@@ -105,6 +105,10 @@ export default function Home() {
   const gRevTarget = _sumT('revenue');
   const gCarTarget = _sumT('car_count');
   const gRoTarget = _locTargets.length ? (_locTargets.reduce((s,t)=>s+(parseFloat(t.avg_ro_value)||0),0) / _locTargets.length) : 0;
+  // PPH and efficiency targets live on the location (not the monthly target row).
+  // They're rate metrics, so the group target is the average across active shops.
+  const gPphTarget = activeLocations.length ? (activeLocations.reduce((s,l)=>s+(parseFloat(l.pph_target)||254),0) / activeLocations.length) : 0;
+  const gEffTarget = activeLocations.length ? (activeLocations.reduce((s,l)=>s+(parseFloat(l.efficiency_target)||80),0) / activeLocations.length) : 0;
   const money0 = n => '$' + Math.round(n).toLocaleString('en-CA');
 
 
@@ -168,12 +172,12 @@ export default function Home() {
           <div className="metric-card">
             <div className="metric-label">Profit per hour</div>
             <div className="metric-value">{groupPPH > 0 ? `$${groupPPH}` : '—'}</div>
-            <div className="metric-sub">{groupPPH > 0 ? 'hours sold basis' : 'awaiting sync'}</div>
+            <div className={`metric-sub ${toneClass(targetPct(groupPPH, gPphTarget))}`} style={{ color: pctColor(targetPct(groupPPH, gPphTarget)) }}>{groupPPH > 0 ? (targetPct(groupPPH, gPphTarget) != null ? `${targetPct(groupPPH, gPphTarget)}% of target` : 'hours sold basis') : 'awaiting sync'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Avg efficiency</div>
             <div className="metric-value">{groupEff > 0 ? `${groupEff}%` : '—'}</div>
-            <div className="metric-sub">{groupEff > 0 ? 'hours sold / worked' : 'no hours yet'}</div>
+            <div className={`metric-sub ${toneClass(targetPct(groupEff, gEffTarget))}`} style={{ color: pctColor(targetPct(groupEff, gEffTarget)) }}>{groupEff > 0 ? (targetPct(groupEff, gEffTarget) != null ? `${targetPct(groupEff, gEffTarget)}% of target` : 'hours sold / worked') : 'no hours yet'}</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Avg RO value</div>
