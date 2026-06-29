@@ -6,6 +6,7 @@ import { parseAlerts } from '../utils/alerts';
 
 const NAV = [
   { path: '/', label: 'Home', icon: '⌂', section: 'Overview' },
+  { path: '/chief-of-staff', label: 'Chief of Staff', icon: '★', section: null, roles: ['owner', 'partner'] },
   { path: '/scorecard', label: 'Scorecard', icon: '✦', section: null, roles: ['owner', 'partner'] },
   { path: '/performance', label: 'Performance', icon: '◈', section: null },
   { path: '/technicians', label: 'Technicians', icon: '⚒', section: null },
