@@ -1,5 +1,8 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { recentInbox } = require('../lib/inbox');
+const { upcomingEvents } = require('../lib/calendarFeed');
+const { postSlack } = require('../lib/slack');
 
 // Chief of Staff: stores the daily/weekly brief, the CoS's learnings about the
 // owner (its self-tuning memory), and the owner's feedback. The scheduled CoS
@@ -247,7 +250,7 @@ module.exports = (pool) => {
         type: 'object',
         properties: {
           title: { type: 'string', description: 'Short human label, e.g. "Nightly marketing digest"' },
-          action_type: { type: 'string', enum: ['marketing_digest', 'ops_digest', 'generate_posts'], description: 'marketing_digest = a marketing summary; ops_digest = shop ops summary; generate_posts = draft captioned posts into the approval queue' },
+          action_type: { type: 'string', enum: ['morning_brief', 'marketing_digest', 'ops_digest', 'generate_posts'], description: 'morning_brief = the complete daily brief (email + calendar + shop numbers + marketing) posted to Slack; marketing_digest = a marketing summary; ops_digest = shop ops summary; generate_posts = draft captioned posts into the approval queue' },
           time_local: { type: 'string', description: '24h HH:MM in Mountain time, e.g. "22:00"' },
           frequency: { type: 'string', enum: ['daily', 'weekly'] },
           weekday: { type: 'integer', description: '0=Sunday..6=Saturday, only for weekly', minimum: 0, maximum: 6 },
@@ -389,7 +392,52 @@ module.exports = (pool) => {
       } catch (e) { /* table/column differs */ }
 
       let markdown = '', payload = {};
-      if (a.action_type === 'generate_posts') {
+      if (a.action_type === 'morning_brief') {
+        // The complete brief: email + calendar + shop + marketing -> Slack.
+        const [inbox, cal] = await Promise.all([
+          recentInbox({ user: process.env.GMAIL_IMAP_USER, pass: process.env.GMAIL_IMAP_PASS }),
+          upcomingEvents((process.env.CAL_ICAL_URLS || '').split(',').map(s => s.trim()).filter(Boolean)),
+        ]);
+        let locs = [];
+        try { locs = (await pool.query(`SELECT id, name FROM locations WHERE active = true`)).rows; } catch (e) {}
+        const nameFor = (id) => { const l = locs.find(x => x.id === id); return l ? l.name : 'Shop'; };
+        const cnt = (v) => { if (Array.isArray(v)) return v.length; try { const p = JSON.parse(v); return Array.isArray(p) ? p.length : 0; } catch { return 0; } };
+        const shop = metrics.map(m => ({ shop: nameFor(m.location_id), revenue_mtd: m.revenue_mtd, parts_margin: m.parts_margin, avg_ro_value: m.avg_ro_value, effective_labour_rate: m.effective_labour_rate, open_alerts: cnt(m.alerts) }));
+        const data = {
+          today: new Date().toISOString().slice(0, 10),
+          email: inbox.ok
+            ? { actionNeeded: inbox.threads.filter(t => t.actionNeeded).slice(0, 8).map(t => ({ from: t.fromName, subject: t.subject })), unreadCount: inbox.threads.filter(t => t.unread).length }
+            : { error: inbox.error },
+          calendar: cal.ok
+            ? { events: cal.events.slice(0, 12).map(e => ({ when: e.start, title: e.title, allDay: e.allDay })) }
+            : { error: cal.error },
+          shop,
+          marketingApprovalsWaiting: pendingPosts,
+        };
+        let text = '';
+        if (ANTHROPIC_KEY) {
+          try {
+            const r = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+              body: JSON.stringify({
+                model: MODEL, max_tokens: 800,
+                system: `You write Jamie's morning brief, posted to Slack as mrkdwn. Jamie owns Mister Transmission shops and runs hot/disorganized — keep it short and scannable so he acts fast. Output Slack mrkdwn: *bold* for section headers, • for bullets, real line breaks. Include only sections that have content, in this order: a one-line headline (the single most important thing today); *Needs you* (action-needed emails as "sender — subject"); *Today & this week* (calendar, with times); *Shop pulse* (revenue MTD per shop, total open alerts, flag effective labour rate if notably below ~$150/hr); *Marketing* (N posts awaiting approval + ONE quick photo prompt to grab content today). Use ONLY the data provided — never invent a number, email, or event. If a source has an "error" field, add one short line like "(couldn't reach email this run)". Draft/propose tone; he acts on it.`,
+                messages: [{ role: 'user', content: `Brief data (JSON):\n${JSON.stringify(data).slice(0, 6000)}\n\nWrite the Slack morning brief.` }],
+              }),
+            });
+            const body = await r.json();
+            if (r.ok) text = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+          } catch (e) { /* fall through to template */ }
+        }
+        if (!text) {
+          const acts = inbox.ok ? inbox.threads.filter(t => t.actionNeeded).length : 0;
+          text = `*Morning brief*\n• Email: ${inbox.ok ? `${acts} action-needed, ${inbox.threads.filter(t => t.unread).length} unread` : `unavailable (${inbox.error})`}\n• Calendar: ${cal.ok ? `${cal.events.length} events this week` : `unavailable (${cal.error})`}\n• Shops: ${shop.length} tracked, ${shop.reduce((n, s) => n + (s.open_alerts || 0), 0)} open alerts\n• Marketing: ${pendingPosts} posts awaiting approval`;
+        }
+        const slack = await postSlack(process.env.COS_SLACK_WEBHOOK, text);
+        markdown = text;
+        payload = { headline: a.title, delivered_to_slack: slack.ok, slack_error: slack.error || null, email_ok: inbox.ok, calendar_ok: cal.ok };
+      } else if (a.action_type === 'generate_posts') {
         const count = (a.params && a.params.count) || 2;
         markdown = `${count} marketing post(s) queued. Add bay/job photos in Marketing — they'll be captioned and dropped into the approval queue for you. (Auto-generation from your photo library lands in Phase 2b.)`;
         payload = { headline: `${count} marketing posts to create`, marketing: [{ title: `${count} posts queued for approval`, detail: 'Add photos in Marketing; captions + approval queue follow.' }] };
@@ -494,7 +542,7 @@ SPEAK like a person: short, natural sentences, no markdown, never read out "bull
   const chatTools = [
     { name: 'get_context', description: "Fetch Jamie's latest brief, open alerts, marketing approvals waiting, and his automations. Call this before briefing him or answering about the business.", input_schema: { type: 'object', properties: {} } },
     { name: 'clear_alerts', description: 'Clear/acknowledge alerts. Pass specific alert keys, or all:true to clear every open alert.', input_schema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } }, all: { type: 'boolean' } } } },
-    { name: 'create_automation', description: 'Schedule a recurring automation (e.g. a 10pm marketing digest).', input_schema: { type: 'object', properties: { title: { type: 'string' }, action_type: { type: 'string', enum: ['marketing_digest', 'ops_digest', 'generate_posts'] }, time_local: { type: 'string' }, frequency: { type: 'string', enum: ['daily', 'weekly'] }, weekday: { type: 'integer' }, count: { type: 'integer' } }, required: ['title', 'action_type', 'time_local', 'frequency'] } },
+    { name: 'create_automation', description: 'Schedule a recurring automation (e.g. a 7am morning brief, or a 10pm marketing digest).', input_schema: { type: 'object', properties: { title: { type: 'string' }, action_type: { type: 'string', enum: ['morning_brief', 'marketing_digest', 'ops_digest', 'generate_posts'] }, time_local: { type: 'string' }, frequency: { type: 'string', enum: ['daily', 'weekly'] }, weekday: { type: 'integer' }, count: { type: 'integer' } }, required: ['title', 'action_type', 'time_local', 'frequency'] } },
     { name: 'set_preference', description: 'Record a standing preference (priority/ignore/tone/etc).', input_schema: { type: 'object', properties: { category: { type: 'string' }, insight: { type: 'string' } }, required: ['category', 'insight'] } },
     { name: 'draft_marketing_post', description: 'Draft a social media post (Instagram/Facebook/Google) and stage it in the marketing approval queue. Only call this once you have what the post is about — ask Jamie first if you do not.', input_schema: { type: 'object', properties: { topic: { type: 'string', description: 'What the post is about — the job, offer, or message' }, offer: { type: 'string', description: 'Any promo/offer to include (optional)' } }, required: ['topic'] } }
   ];
