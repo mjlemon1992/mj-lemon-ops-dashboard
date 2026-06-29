@@ -84,6 +84,15 @@ module.exports = (pool) => {
         created_by TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      -- Acknowledged ("cleared") alerts. Alerts are computed live from Shopmonkey,
+      -- so we don't delete them — we record the ones Jamie has cleared (by their
+      -- stable alertId key) and filter those out of the display + the badge count.
+      CREATE TABLE IF NOT EXISTS cos_dismissed_alerts (
+        alert_key TEXT PRIMARY KEY,
+        dismissed_at TIMESTAMPTZ DEFAULT NOW(),
+        dismissed_by TEXT
+      );
     `);
     _ensured = true;
   };
@@ -414,6 +423,47 @@ module.exports = (pool) => {
       );
       await pool.query(`UPDATE cos_automations SET last_run_date = CURRENT_DATE WHERE id = $1`, [a.id]);
       res.json({ ok: true, action_type: a.action_type });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ---------- ALERT ACKNOWLEDGE ("clear the alerts") ----------
+
+  // Clear one or more alerts by their stable alertId key. Used by the Alerts
+  // page Resolve button AND the voice chief of staff ("clear the alerts").
+  router.post('/alerts/ack', syncAuth, ownerOrPartner, async (req, res) => {
+    try {
+      await ensureTables();
+      const keys = Array.isArray(req.body && req.body.keys) ? req.body.keys.filter(k => typeof k === 'string' && k) : [];
+      if (!keys.length) return res.status(400).json({ error: 'keys[] required' });
+      const by = (req.user && req.user.email) || 'owner';
+      for (const k of keys) {
+        await pool.query(
+          `INSERT INTO cos_dismissed_alerts (alert_key, dismissed_by) VALUES ($1,$2)
+           ON CONFLICT (alert_key) DO UPDATE SET dismissed_at = NOW(), dismissed_by = EXCLUDED.dismissed_by`,
+          [k, by]
+        );
+      }
+      res.json({ dismissed: keys.length });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // The set of currently-cleared alert keys (so the UI + badge filter them out).
+  router.get('/alerts/dismissed', syncAuth, ownerOrPartner, async (req, res) => {
+    try {
+      await ensureTables();
+      const r = await pool.query(`SELECT alert_key FROM cos_dismissed_alerts`);
+      res.json(r.rows.map(x => x.alert_key));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Restore (un-clear) alerts.
+  router.post('/alerts/unack', authenticateToken, ownerOrPartner, async (req, res) => {
+    try {
+      await ensureTables();
+      const keys = Array.isArray(req.body && req.body.keys) ? req.body.keys : [];
+      if (!keys.length) return res.status(400).json({ error: 'keys[] required' });
+      await pool.query(`DELETE FROM cos_dismissed_alerts WHERE alert_key = ANY($1)`, [keys]);
+      res.json({ restored: keys.length });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 

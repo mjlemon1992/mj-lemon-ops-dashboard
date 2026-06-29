@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
-import { parseAlerts } from '../utils/alerts';
+import { parseAlerts, alertId } from '../utils/alerts';
 
 const NAV = [
   { path: '/', label: 'Home', icon: '⌂', section: 'Overview' },
@@ -34,10 +34,11 @@ export default function Layout() {
     if (!user) return undefined;
     let cancelled = false;
     const path = isAll ? '/metrics/group/summary' : `/metrics/${selectedId}/summary`;
-    api(path)
-      .then(res => {
+    Promise.all([api(path), api('/cos/alerts/dismissed').catch(() => [])])
+      .then(([res, dismissed]) => {
         const rows = Array.isArray(res) ? res : [res];
-        return rows.reduce((n, m) => n + parseAlerts(m).length, 0);
+        const dset = new Set(dismissed || []);
+        return rows.reduce((n, m) => n + parseAlerts(m).filter(a => !dset.has(alertId(a))).length, 0);
       })
       .then(n => { if (!cancelled) setAlertCount(n); })
       .catch(() => {});

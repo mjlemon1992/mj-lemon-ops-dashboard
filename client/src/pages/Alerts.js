@@ -14,6 +14,13 @@ export default function Alerts() {
   // Stable signature of the scoped location ids so the effect doesn't re-run on
   // every render (scopeLocations is a fresh array each time).
   const scopeKey = scopeLocations.map(l => l.id).join(',');
+  // Cleared alerts persist server-side (cos_dismissed_alerts) so a Resolve
+  // sticks across reloads and matches what the voice chief of staff clears.
+  useEffect(() => {
+    let cancelled = false;
+    api('/cos/alerts/dismissed').then(keys => { if (!cancelled) setResolved(keys || []); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [api]);
   useEffect(() => {
     let cancelled = false;
     const ids = scopeKey ? scopeKey.split(',') : [];
@@ -59,7 +66,7 @@ export default function Alerts() {
             <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '2px' }}>{alertTitle(alert)}</div>
             <div style={{ fontSize: '11px', color: 'var(--text2)' }}>{alertSub(alert)}</div>
           </div>
-          <button onClick={() => setResolved(prev => [...prev, alertId(alert)])} style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}>
+          <button onClick={() => { const id = alertId(alert); setResolved(prev => [...prev, id]); api('/cos/alerts/ack', { method: 'POST', body: JSON.stringify({ keys: [id] }) }).catch(() => {}); }} style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}>
             Resolve
           </button>
         </div>
