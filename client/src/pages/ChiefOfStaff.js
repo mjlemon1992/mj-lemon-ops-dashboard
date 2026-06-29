@@ -67,7 +67,7 @@ export default function ChiefOfStaff() {
           rows={2}
           style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg3)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '10px', fontSize: '13px', color: 'var(--text)', resize: 'vertical', fontFamily: 'inherit' }}
         />
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px', flexWrap: 'wrap' }}>
           <button onClick={sendCommand} disabled={!cmd.trim() || cmdBusy}
             style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', padding: '7px 14px', fontSize: '13px', fontWeight: 500, cursor: cmd.trim() ? 'pointer' : 'default', opacity: cmd.trim() ? 1 : 0.5 }}>
             {cmdBusy ? 'Setting up…' : 'Create'}
