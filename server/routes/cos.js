@@ -116,6 +116,21 @@ module.exports = (pool) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Run the complete morning brief now (compose email + calendar + shop +
+  // marketing and push to Slack), persisting the result. Same composer the 7am
+  // automation uses — this is the manual "run my brief now" trigger.
+  router.post('/brief/run', syncAuth, ownerOrPartner, async (req, res) => {
+    try {
+      await ensureTables();
+      const r = await runMorningBrief('Morning brief');
+      await pool.query(
+        `INSERT INTO cos_brief (brief_date, kind, payload, markdown) VALUES ($1,$2,$3,$4)`,
+        [new Date().toISOString().slice(0, 10), 'morning_brief', r.payload, r.markdown]
+      );
+      res.json({ ok: true, ...r.payload, markdown: r.markdown });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // Latest brief for the dashboard tab.
   router.get('/brief/latest', authenticateToken, ownerOrPartner, async (req, res) => {
     try {
@@ -238,6 +253,68 @@ module.exports = (pool) => {
 
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
   const MODEL = 'claude-sonnet-4-6';
+
+  // Compose the complete morning brief (email + calendar + shop + marketing) and
+  // push it to Slack. Single source of truth for both the scheduled automation
+  // and the manual /brief/run trigger. Returns { markdown, payload }; the caller
+  // persists the cos_brief row.
+  const runMorningBrief = async (title = 'Morning brief') => {
+    let metrics = [], pendingPosts = 0;
+    try {
+      const m = await pool.query(`SELECT DISTINCT ON (location_id) location_id, revenue_mtd, parts_margin, avg_ro_value, effective_labour_rate, alerts FROM metrics_cache ORDER BY location_id, created_at DESC`);
+      metrics = m.rows;
+    } catch (e) { /* table not ready */ }
+    try {
+      const p = await pool.query(`SELECT COUNT(*)::int AS n FROM marketing_post WHERE status = 'draft'`);
+      pendingPosts = p.rows[0] ? p.rows[0].n : 0;
+    } catch (e) { /* table/column differs */ }
+
+    const [inbox, cal] = await Promise.all([
+      recentInbox({ user: process.env.GMAIL_IMAP_USER, pass: process.env.GMAIL_IMAP_PASS }),
+      upcomingEvents((process.env.CAL_ICAL_URLS || '').split(',').map(s => s.trim()).filter(Boolean)),
+    ]);
+    let locs = [];
+    try { locs = (await pool.query(`SELECT id, name FROM locations WHERE active = true`)).rows; } catch (e) {}
+    const nameFor = (id) => { const l = locs.find(x => x.id === id); return l ? l.name : 'Shop'; };
+    const cnt = (v) => { if (Array.isArray(v)) return v.length; try { const p = JSON.parse(v); return Array.isArray(p) ? p.length : 0; } catch { return 0; } };
+    const shop = metrics.map(m => ({ shop: nameFor(m.location_id), revenue_mtd: m.revenue_mtd, parts_margin: m.parts_margin, avg_ro_value: m.avg_ro_value, effective_labour_rate: m.effective_labour_rate, open_alerts: cnt(m.alerts) }));
+    const data = {
+      today: new Date().toISOString().slice(0, 10),
+      email: inbox.ok
+        ? { actionNeeded: inbox.threads.filter(t => t.actionNeeded).slice(0, 8).map(t => ({ from: t.fromName, subject: t.subject })), unreadCount: inbox.threads.filter(t => t.unread).length }
+        : { error: inbox.error },
+      calendar: cal.ok
+        ? { events: cal.events.slice(0, 12).map(e => ({ when: e.start, title: e.title, allDay: e.allDay })) }
+        : { error: cal.error },
+      shop,
+      marketingApprovalsWaiting: pendingPosts,
+    };
+    let text = '';
+    if (ANTHROPIC_KEY) {
+      try {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: MODEL, max_tokens: 800,
+            system: `You write Jamie's morning brief, posted to Slack as mrkdwn. Jamie owns Mister Transmission shops and runs hot/disorganized — keep it short and scannable so he acts fast. Output Slack mrkdwn: *bold* for section headers, • for bullets, real line breaks. Include only sections that have content, in this order: a one-line headline (the single most important thing today); *Needs you* (action-needed emails as "sender — subject"); *Today & this week* (calendar, with times); *Shop pulse* (revenue MTD per shop, total open alerts, flag effective labour rate if notably below ~$150/hr); *Marketing* (N posts awaiting approval + ONE quick photo prompt to grab content today). Use ONLY the data provided — never invent a number, email, or event. If a source has an "error" field, add one short line like "(couldn't reach email this run)". Draft/propose tone; he acts on it.`,
+            messages: [{ role: 'user', content: `Brief data (JSON):\n${JSON.stringify(data).slice(0, 6000)}\n\nWrite the Slack morning brief.` }],
+          }),
+        });
+        const body = await r.json();
+        if (r.ok) text = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+      } catch (e) { /* fall through to template */ }
+    }
+    if (!text) {
+      const acts = inbox.ok ? inbox.threads.filter(t => t.actionNeeded).length : 0;
+      text = `*Morning brief*\n• Email: ${inbox.ok ? `${acts} action-needed, ${inbox.threads.filter(t => t.unread).length} unread` : `unavailable (${inbox.error})`}\n• Calendar: ${cal.ok ? `${cal.events.length} events this week` : `unavailable (${cal.error})`}\n• Shops: ${shop.length} tracked, ${shop.reduce((n, s) => n + (s.open_alerts || 0), 0)} open alerts\n• Marketing: ${pendingPosts} posts awaiting approval`;
+    }
+    const slack = await postSlack(process.env.COS_SLACK_WEBHOOK, text);
+    return {
+      markdown: text,
+      payload: { headline: title, delivered_to_slack: slack.ok, slack_error: slack.error || null, email_ok: inbox.ok, calendar_ok: cal.ok },
+    };
+  };
 
   // Bounded tool set the command interpreter may use. Deliberately small: it can
   // schedule, set a preference, or cancel — it cannot invent new powers, and
@@ -394,49 +471,9 @@ module.exports = (pool) => {
       let markdown = '', payload = {};
       if (a.action_type === 'morning_brief') {
         // The complete brief: email + calendar + shop + marketing -> Slack.
-        const [inbox, cal] = await Promise.all([
-          recentInbox({ user: process.env.GMAIL_IMAP_USER, pass: process.env.GMAIL_IMAP_PASS }),
-          upcomingEvents((process.env.CAL_ICAL_URLS || '').split(',').map(s => s.trim()).filter(Boolean)),
-        ]);
-        let locs = [];
-        try { locs = (await pool.query(`SELECT id, name FROM locations WHERE active = true`)).rows; } catch (e) {}
-        const nameFor = (id) => { const l = locs.find(x => x.id === id); return l ? l.name : 'Shop'; };
-        const cnt = (v) => { if (Array.isArray(v)) return v.length; try { const p = JSON.parse(v); return Array.isArray(p) ? p.length : 0; } catch { return 0; } };
-        const shop = metrics.map(m => ({ shop: nameFor(m.location_id), revenue_mtd: m.revenue_mtd, parts_margin: m.parts_margin, avg_ro_value: m.avg_ro_value, effective_labour_rate: m.effective_labour_rate, open_alerts: cnt(m.alerts) }));
-        const data = {
-          today: new Date().toISOString().slice(0, 10),
-          email: inbox.ok
-            ? { actionNeeded: inbox.threads.filter(t => t.actionNeeded).slice(0, 8).map(t => ({ from: t.fromName, subject: t.subject })), unreadCount: inbox.threads.filter(t => t.unread).length }
-            : { error: inbox.error },
-          calendar: cal.ok
-            ? { events: cal.events.slice(0, 12).map(e => ({ when: e.start, title: e.title, allDay: e.allDay })) }
-            : { error: cal.error },
-          shop,
-          marketingApprovalsWaiting: pendingPosts,
-        };
-        let text = '';
-        if (ANTHROPIC_KEY) {
-          try {
-            const r = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-              body: JSON.stringify({
-                model: MODEL, max_tokens: 800,
-                system: `You write Jamie's morning brief, posted to Slack as mrkdwn. Jamie owns Mister Transmission shops and runs hot/disorganized — keep it short and scannable so he acts fast. Output Slack mrkdwn: *bold* for section headers, • for bullets, real line breaks. Include only sections that have content, in this order: a one-line headline (the single most important thing today); *Needs you* (action-needed emails as "sender — subject"); *Today & this week* (calendar, with times); *Shop pulse* (revenue MTD per shop, total open alerts, flag effective labour rate if notably below ~$150/hr); *Marketing* (N posts awaiting approval + ONE quick photo prompt to grab content today). Use ONLY the data provided — never invent a number, email, or event. If a source has an "error" field, add one short line like "(couldn't reach email this run)". Draft/propose tone; he acts on it.`,
-                messages: [{ role: 'user', content: `Brief data (JSON):\n${JSON.stringify(data).slice(0, 6000)}\n\nWrite the Slack morning brief.` }],
-              }),
-            });
-            const body = await r.json();
-            if (r.ok) text = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
-          } catch (e) { /* fall through to template */ }
-        }
-        if (!text) {
-          const acts = inbox.ok ? inbox.threads.filter(t => t.actionNeeded).length : 0;
-          text = `*Morning brief*\n• Email: ${inbox.ok ? `${acts} action-needed, ${inbox.threads.filter(t => t.unread).length} unread` : `unavailable (${inbox.error})`}\n• Calendar: ${cal.ok ? `${cal.events.length} events this week` : `unavailable (${cal.error})`}\n• Shops: ${shop.length} tracked, ${shop.reduce((n, s) => n + (s.open_alerts || 0), 0)} open alerts\n• Marketing: ${pendingPosts} posts awaiting approval`;
-        }
-        const slack = await postSlack(process.env.COS_SLACK_WEBHOOK, text);
-        markdown = text;
-        payload = { headline: a.title, delivered_to_slack: slack.ok, slack_error: slack.error || null, email_ok: inbox.ok, calendar_ok: cal.ok };
+        const r = await runMorningBrief(a.title);
+        markdown = r.markdown;
+        payload = r.payload;
       } else if (a.action_type === 'generate_posts') {
         const count = (a.params && a.params.count) || 2;
         markdown = `${count} marketing post(s) queued. Add bay/job photos in Marketing — they'll be captioned and dropped into the approval queue for you. (Auto-generation from your photo library lands in Phase 2b.)`;
