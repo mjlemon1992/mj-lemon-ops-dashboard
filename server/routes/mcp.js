@@ -8,7 +8,9 @@ const express = require('express');
 
 module.exports = (pool) => {
   const router = express.Router();
-  const TOKEN = process.env.COS_MCP_TOKEN;
+  // Token in the connector URL. Falls back to SYNC_SECRET so no new env var is
+  // needed (SYNC_SECRET is already set on Railway for the scheduler/sync).
+  const TOKEN = process.env.COS_MCP_TOKEN || process.env.SYNC_SECRET;
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
   const MODEL = 'claude-sonnet-4-6';
   const PROTOCOL_VERSION = '2025-03-26';
