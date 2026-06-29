@@ -67,6 +67,23 @@ module.exports = (pool) => {
         processed BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      -- Owner-authored automations: the conversational command box translates
+      -- plain English ("send me marketing info at 10pm daily") into a row here,
+      -- and the 24/7 backend scheduler (server/scheduler.js) runs the due ones.
+      CREATE TABLE IF NOT EXISTS cos_automations (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        title TEXT NOT NULL,
+        action_type TEXT NOT NULL,           -- marketing_digest | ops_digest | generate_posts
+        params JSONB NOT NULL DEFAULT '{}',   -- e.g. { "count": 2 }
+        time_local TEXT NOT NULL DEFAULT '07:00',  -- HH:MM in America/Edmonton
+        frequency TEXT NOT NULL DEFAULT 'daily',   -- daily | weekly
+        weekday INT,                          -- 0=Sun..6=Sat, for weekly
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        last_run_date DATE,                   -- guards against double-firing in a day
+        created_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
     _ensured = true;
   };
@@ -202,6 +219,201 @@ module.exports = (pool) => {
         `UPDATE cos_feedback SET processed = TRUE WHERE id = $1 RETURNING *`, [req.params.id]
       );
       res.json(r.rows[0] || null);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ---------- AUTOMATIONS + CONVERSATIONAL COMMAND ----------
+
+  const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+  const MODEL = 'claude-sonnet-4-6';
+
+  // Bounded tool set the command interpreter may use. Deliberately small: it can
+  // schedule, set a preference, or cancel — it cannot invent new powers, and
+  // nothing it creates sends/posts/spends without the approval queue.
+  const TOOLS = [
+    {
+      name: 'create_automation',
+      description: 'Schedule a recurring automation the 24/7 dashboard scheduler will run. Use for requests like "send me marketing info at 10pm daily" or "build 2 marketing posts each week for approval".',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Short human label, e.g. "Nightly marketing digest"' },
+          action_type: { type: 'string', enum: ['marketing_digest', 'ops_digest', 'generate_posts'], description: 'marketing_digest = a marketing summary; ops_digest = shop ops summary; generate_posts = draft captioned posts into the approval queue' },
+          time_local: { type: 'string', description: '24h HH:MM in Mountain time, e.g. "22:00"' },
+          frequency: { type: 'string', enum: ['daily', 'weekly'] },
+          weekday: { type: 'integer', description: '0=Sunday..6=Saturday, only for weekly', minimum: 0, maximum: 6 },
+          count: { type: 'integer', description: 'For generate_posts: how many per run (e.g. 2)' }
+        },
+        required: ['title', 'action_type', 'time_local', 'frequency']
+      }
+    },
+    {
+      name: 'set_preference',
+      description: 'Record a standing preference about how the chief of staff should behave (priority, tone, what to ignore, format, timing).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', enum: ['priority', 'focus', 'ignore', 'tone', 'timing', 'format', 'source'] },
+          insight: { type: 'string', description: 'The preference as a clear rule, e.g. "Always surface legal and bank items first"' }
+        },
+        required: ['category', 'insight']
+      }
+    },
+    {
+      name: 'cancel_automation',
+      description: 'Disable an existing automation the owner no longer wants.',
+      input_schema: {
+        type: 'object',
+        properties: { title_match: { type: 'string', description: 'Words from the automation title to match' } },
+        required: ['title_match']
+      }
+    }
+  ];
+
+  const SYSTEM = `You are the configuration brain for Jamie's Chief of Staff inside his ops dashboard. Jamie speaks plainly ("from now on send me marketing info at 10pm every day", "build 2 marketing designs each week and send them for approval"). Translate each instruction into the right tool call(s). Times are Mountain time. "designs/posts for approval" => create_automation action_type generate_posts (they land in the approval queue, never auto-posted). A recurring info/summary => marketing_digest or ops_digest. A standing rule about behaviour => set_preference. If the instruction is ambiguous (e.g. no time given), ask one short clarifying question instead of guessing. After acting, never claim anything was sent or posted — everything waits for Jamie's approval.`;
+
+  const callClaude = async (text) => {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: MODEL, max_tokens: 700, system: SYSTEM, tools: TOOLS, messages: [{ role: 'user', content: text }] })
+    });
+    const body = await r.json();
+    if (!r.ok) throw Object.assign(new Error(`Anthropic ${r.status}: ${JSON.stringify(body).slice(0, 200)}`), { status: 502 });
+    return body;
+  };
+
+  // Owner types an instruction; Claude turns it into automation(s)/preference(s).
+  router.post('/command', authenticateToken, ownerOrPartner, async (req, res) => {
+    try {
+      await ensureTables();
+      if (!ANTHROPIC_KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not configured on the server' });
+      const text = (req.body && req.body.text || '').trim();
+      if (!text) return res.status(400).json({ error: 'text required' });
+
+      const body = await callClaude(text);
+      const blocks = Array.isArray(body.content) ? body.content : [];
+      const says = blocks.filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
+      const toolUses = blocks.filter(b => b.type === 'tool_use');
+      const done = [];
+
+      for (const t of toolUses) {
+        const a = t.input || {};
+        if (t.name === 'create_automation') {
+          const r = await pool.query(
+            `INSERT INTO cos_automations (title, action_type, params, time_local, frequency, weekday, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+            [a.title || 'Automation', a.action_type, a.count ? { count: a.count } : {},
+             a.time_local || '07:00', a.frequency || 'daily',
+             (a.frequency === 'weekly' && a.weekday != null) ? a.weekday : null, req.user.email || 'owner']
+          );
+          done.push({ kind: 'automation', row: r.rows[0] });
+        } else if (t.name === 'set_preference') {
+          const r = await pool.query(
+            `INSERT INTO cos_learnings (category, insight, confidence, source) VALUES ($1,$2,7,'stated') RETURNING *`,
+            [a.category || 'priority', a.insight]
+          );
+          done.push({ kind: 'preference', row: r.rows[0] });
+        } else if (t.name === 'cancel_automation') {
+          const r = await pool.query(
+            `UPDATE cos_automations SET enabled = FALSE WHERE title ILIKE $1 AND enabled = TRUE RETURNING *`,
+            [`%${a.title_match}%`]
+          );
+          done.push({ kind: 'cancelled', rows: r.rows });
+        }
+      }
+
+      // Build a plain confirmation without a second model round-trip.
+      let reply = says;
+      if (!reply) {
+        if (!done.length) reply = "I didn't catch a clear instruction — try e.g. “send me a marketing digest at 10pm daily”.";
+        else reply = done.map(d => {
+          if (d.kind === 'automation') { const r = d.row; return `Scheduled “${r.title}” — ${r.frequency}${r.weekday != null ? ' (weekly)' : ''} at ${r.time_local} Mountain.`; }
+          if (d.kind === 'preference') return `Got it — I'll remember: “${d.row.insight}”.`;
+          if (d.kind === 'cancelled') return d.rows.length ? `Turned off ${d.rows.length} automation(s).` : `Couldn't find a matching automation to cancel.`;
+          return '';
+        }).filter(Boolean).join(' ');
+      }
+      res.json({ reply, actions: done });
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // List the owner's automations.
+  router.get('/automations', authenticateToken, ownerOrPartner, async (req, res) => {
+    try {
+      await ensureTables();
+      const r = await pool.query(`SELECT * FROM cos_automations ORDER BY enabled DESC, created_at DESC`);
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Toggle an automation on/off.
+  router.post('/automations/:id/toggle', authenticateToken, ownerOrPartner, async (req, res) => {
+    try {
+      await ensureTables();
+      const r = await pool.query(
+        `UPDATE cos_automations SET enabled = NOT enabled WHERE id = $1 RETURNING *`, [req.params.id]
+      );
+      res.json(r.rows[0] || null);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Scheduler (sync key) invokes this when an automation is due. Generates the
+  // output and stores it as a cos_brief of the automation's kind. Generative
+  // marketing output is queued for approval — never auto-posted.
+  router.post('/run-automation/:id', syncAuth, ownerOrPartner, async (req, res) => {
+    try {
+      await ensureTables();
+      const ar = await pool.query(`SELECT * FROM cos_automations WHERE id = $1 AND enabled = TRUE`, [req.params.id]);
+      const a = ar.rows[0];
+      if (!a) return res.status(404).json({ error: 'automation not found or disabled' });
+
+      // Best-effort context (never let a missing table break the run).
+      let metrics = [], pendingPosts = 0;
+      try {
+        const m = await pool.query(`SELECT DISTINCT ON (location_id) location_id, revenue_mtd, parts_margin, avg_ro_value, effective_labour_rate, alerts FROM metrics_cache ORDER BY location_id, created_at DESC`);
+        metrics = m.rows;
+      } catch (e) { /* table not ready */ }
+      try {
+        const p = await pool.query(`SELECT COUNT(*)::int AS n FROM marketing_post WHERE status = 'pending'`);
+        pendingPosts = p.rows[0] ? p.rows[0].n : 0;
+      } catch (e) { /* table/column differs */ }
+
+      let markdown = '', payload = {};
+      if (a.action_type === 'generate_posts') {
+        const count = (a.params && a.params.count) || 2;
+        markdown = `${count} marketing post(s) queued. Add bay/job photos in Marketing — they'll be captioned and dropped into the approval queue for you. (Auto-generation from your photo library lands in Phase 2b.)`;
+        payload = { headline: `${count} marketing posts to create`, marketing: [{ title: `${count} posts queued for approval`, detail: 'Add photos in Marketing; captions + approval queue follow.' }] };
+      } else {
+        const lens = a.action_type === 'ops_digest'
+          ? 'shop operations (alerts, parts margin, effective labour rate, average RO value)'
+          : 'marketing (reviews, posts awaiting approval, what to push this period)';
+        let says = '';
+        if (ANTHROPIC_KEY) {
+          try {
+            const r = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+              body: JSON.stringify({
+                model: MODEL, max_tokens: 600,
+                system: `You write a tight ${lens} digest for Jamie, an automotive shop owner. 4-7 short concrete bullets, no fluff. Use ONLY the data provided; never invent numbers. If the data is thin, say plainly what's missing.`,
+                messages: [{ role: 'user', content: `Data (JSON):\n${JSON.stringify({ metrics, pendingApprovals: pendingPosts }).slice(0, 4000)}\n\nWrite the digest.` }]
+              })
+            });
+            const body = await r.json();
+            if (r.ok) says = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+          } catch (e) { /* fall through to template */ }
+        }
+        markdown = says || `Digest: ${metrics.length} location(s) tracked; ${pendingPosts} marketing post(s) awaiting approval.`;
+        payload = { headline: a.title };
+      }
+
+      await pool.query(
+        `INSERT INTO cos_brief (brief_date, kind, payload, markdown) VALUES ($1,$2,$3,$4)`,
+        [new Date().toISOString().slice(0, 10), a.action_type, payload, markdown]
+      );
+      await pool.query(`UPDATE cos_automations SET last_run_date = CURRENT_DATE WHERE id = $1`, [a.id]);
+      res.json({ ok: true, action_type: a.action_type });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
