@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import VoiceChat from '../components/VoiceChat';
 
 // Chief of Staff tab: the brief the scheduled agent wrote, a command box where
 // Jamie tells it what to do in plain English (Claude turns it into scheduled
@@ -92,6 +93,9 @@ export default function ChiefOfStaff() {
         </div>
         {briefDate && <div style={{ fontSize: '11px', color: 'var(--text3)' }}>last brief: {new Date(briefDate).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })}</div>}
       </div>
+
+      {/* VOICE — talk to it out loud */}
+      <VoiceChat />
 
       {/* COMMAND BOX — talk to it, it sets things up */}
       <div className="card" style={{ marginBottom: '20px', borderLeft: '3px solid var(--accent)' }}>
