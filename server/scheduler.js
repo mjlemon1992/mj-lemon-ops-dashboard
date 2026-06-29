@@ -58,6 +58,62 @@ function startScheduler(pool) {
   setTimeout(tick, START_DELAY);
   setInterval(tick, TWO_HOURS);
   console.log('[scheduler] 2h auto-refresh enabled.');
+
+  // Owner-authored Chief of Staff automations: every minute, fire any enabled
+  // automation whose Mountain-time slot has arrived and that hasn't run today.
+  // The endpoint does the work + stamps last_run_date (so this won't double-fire).
+  let autoRunning = false;
+  const autoTick = async () => {
+    if (autoRunning) return;
+    autoRunning = true;
+    try { await runAutomations(pool, baseUrl, secret); }
+    catch (e) { console.error('[scheduler] automation tick:', e.message); }
+    finally { autoRunning = false; }
+  };
+  setInterval(autoTick, AUTOMATION_INTERVAL);
+  console.log('[scheduler] CoS automation tick enabled (60s).');
+}
+
+const AUTOMATION_INTERVAL = 60 * 1000;
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+async function runAutomations(pool, baseUrl, secret) {
+  let rows;
+  try {
+    const r = await pool.query('SELECT id, time_local, frequency, weekday, last_run_date FROM cos_automations WHERE enabled = true');
+    rows = r.rows;
+  } catch (e) {
+    return; // cos_automations not created yet (cos route runs ensureTables on first hit)
+  }
+  if (!rows.length) return;
+
+  // Current time in Mountain (handles DST via Intl).
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Edmonton', hour12: false,
+      weekday: 'short', hour: '2-digit', minute: '2-digit',
+      year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(new Date()).map(p => [p.type, p.value])
+  );
+  const curMin = parseInt(parts.hour, 10) * 60 + parseInt(parts.minute, 10);
+  const todayStr = `${parts.year}-${parts.month}-${parts.day}`;
+  const dow = DOW.indexOf(parts.weekday);
+
+  for (const a of rows) {
+    const [h, m] = String(a.time_local || '07:00').split(':').map(n => parseInt(n, 10));
+    if (curMin < (h * 60 + m)) continue;                          // not time yet today
+    if (a.frequency === 'weekly' && a.weekday != null && a.weekday !== dow) continue;
+    const lastRun = a.last_run_date ? new Date(a.last_run_date).toISOString().slice(0, 10) : null;
+    if (lastRun === todayStr) continue;                            // already ran today
+    try {
+      const res = await fetch(`${baseUrl}/api/cos/run-automation/${a.id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Sync-Key': secret }
+      });
+      if (!res.ok) console.error(`[scheduler] automation ${a.id} -> ${res.status}`);
+    } catch (e) {
+      console.error(`[scheduler] automation ${a.id} failed:`, e.message);
+    }
+  }
 }
 
 module.exports = { startScheduler };
