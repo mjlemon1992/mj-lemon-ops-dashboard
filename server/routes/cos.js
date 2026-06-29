@@ -467,5 +467,103 @@ module.exports = (pool) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ---------- VOICE / CONVERSATIONAL CHAT ----------
+
+  // Server-side mirror of client alertId(): stable key per alert.
+  const alertKey = (a) => `${a.type}-${a.ro || a.vehicle || ''}`;
+  const liveAlerts = async () => {
+    const m = await pool.query(`SELECT DISTINCT ON (location_id) location_id, alerts FROM metrics_cache ORDER BY location_id, created_at DESC`);
+    const d = await pool.query(`SELECT alert_key FROM cos_dismissed_alerts`);
+    const dset = new Set(d.rows.map(x => x.alert_key));
+    const out = [];
+    for (const row of m.rows) {
+      let arr = row.alerts;
+      if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch { arr = []; } }
+      if (!Array.isArray(arr)) arr = [];
+      for (const a of arr) { const key = alertKey(a); if (!dset.has(key)) out.push({ key, ...a }); }
+    }
+    return out;
+  };
+
+  const VOICE_SYSTEM = `You are Jamie's chief of staff, talking to him out loud inside his ops dashboard. He owns Mister Transmission shops and is disorganized — keep him organized. SPEAK like a person: short, natural sentences, no markdown, no lists read as "bullet one, bullet two". Lead with the most important thing, then a couple more, then hand it back. Use get_context before briefing or answering about his business. You CAN: clear alerts, schedule automations, set preferences — all from here. You CANNOT draft email or read his calendar from this dashboard; if he asks for those, tell him to use the Claude app voice for email and calendar. Never claim anything was sent or posted — work stays in the approval queue. Confirm before clearing alerts ("clear all 4?").`;
+
+  const chatTools = [
+    { name: 'get_context', description: "Fetch Jamie's latest brief, open alerts, marketing approvals waiting, and his automations. Call this before briefing him or answering about the business.", input_schema: { type: 'object', properties: {} } },
+    { name: 'clear_alerts', description: 'Clear/acknowledge alerts. Pass specific alert keys, or all:true to clear every open alert.', input_schema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } }, all: { type: 'boolean' } } } },
+    { name: 'create_automation', description: 'Schedule a recurring automation (e.g. a 10pm marketing digest).', input_schema: { type: 'object', properties: { title: { type: 'string' }, action_type: { type: 'string', enum: ['marketing_digest', 'ops_digest', 'generate_posts'] }, time_local: { type: 'string' }, frequency: { type: 'string', enum: ['daily', 'weekly'] }, weekday: { type: 'integer' }, count: { type: 'integer' } }, required: ['title', 'action_type', 'time_local', 'frequency'] } },
+    { name: 'set_preference', description: 'Record a standing preference (priority/ignore/tone/etc).', input_schema: { type: 'object', properties: { category: { type: 'string' }, insight: { type: 'string' } }, required: ['category', 'insight'] } }
+  ];
+
+  const execTool = async (name, input, who) => {
+    if (name === 'get_context') {
+      const [brief, alerts] = await Promise.all([
+        pool.query(`SELECT brief_date, payload, markdown FROM cos_brief WHERE kind='daily' ORDER BY created_at DESC LIMIT 1`).then(r => r.rows[0] || null),
+        liveAlerts()
+      ]);
+      let pendingApprovals = 0;
+      try { const p = await pool.query(`SELECT COUNT(*)::int n FROM marketing_post WHERE status='pending'`); pendingApprovals = p.rows[0] ? p.rows[0].n : 0; } catch (e) {}
+      const autos = await pool.query(`SELECT title, action_type, time_local, frequency FROM cos_automations WHERE enabled=true`).then(r => r.rows).catch(() => []);
+      return { brief, alerts, pendingApprovals, automations: autos };
+    }
+    if (name === 'clear_alerts') {
+      let keys = Array.isArray(input.keys) ? input.keys : [];
+      if (input.all) keys = (await liveAlerts()).map(a => a.key);
+      for (const k of keys) {
+        await pool.query(`INSERT INTO cos_dismissed_alerts (alert_key, dismissed_by) VALUES ($1,$2) ON CONFLICT (alert_key) DO UPDATE SET dismissed_at=NOW()`, [k, who]);
+      }
+      return { cleared: keys.length };
+    }
+    if (name === 'create_automation') {
+      const r = await pool.query(
+        `INSERT INTO cos_automations (title, action_type, params, time_local, frequency, weekday, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING title, time_local, frequency`,
+        [input.title || 'Automation', input.action_type, input.count ? { count: input.count } : {}, input.time_local || '07:00', input.frequency || 'daily', (input.frequency === 'weekly' && input.weekday != null) ? input.weekday : null, who]
+      );
+      return { scheduled: r.rows[0] };
+    }
+    if (name === 'set_preference') {
+      await pool.query(`INSERT INTO cos_learnings (category, insight, confidence, source) VALUES ($1,$2,7,'stated')`, [input.category || 'priority', input.insight]);
+      return { remembered: input.insight };
+    }
+    return { error: 'unknown tool' };
+  };
+
+  // Voice/text conversation. The browser does speech<->text; this runs the
+  // reasoning + actions. Pass {briefing:true} on the first turn to open with the
+  // briefing, then send the running {messages} array each turn.
+  router.post('/chat', authenticateToken, ownerOrPartner, async (req, res) => {
+    try {
+      await ensureTables();
+      if (!ANTHROPIC_KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not configured on the server' });
+      const who = (req.user && req.user.email) || 'owner';
+      let messages = Array.isArray(req.body && req.body.messages) ? req.body.messages.slice(-20) : [];
+      if (req.body && req.body.briefing) messages = [{ role: 'user', content: 'Good morning — give me my briefing.' }];
+      if (!messages.length) return res.status(400).json({ error: 'messages[] or briefing required' });
+
+      for (let i = 0; i < 4; i++) {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          body: JSON.stringify({ model: MODEL, max_tokens: 700, system: VOICE_SYSTEM, tools: chatTools, messages })
+        });
+        const body = await r.json();
+        if (!r.ok) return res.status(502).json({ error: `Anthropic ${r.status}: ${JSON.stringify(body).slice(0, 200)}` });
+        const blocks = Array.isArray(body.content) ? body.content : [];
+        const toolUses = blocks.filter(b => b.type === 'tool_use');
+        if (!toolUses.length) {
+          const reply = blocks.filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
+          return res.json({ reply, messages: [...messages, { role: 'assistant', content: blocks }] });
+        }
+        messages.push({ role: 'assistant', content: blocks });
+        const results = [];
+        for (const t of toolUses) {
+          let out; try { out = await execTool(t.name, t.input || {}, who); } catch (e) { out = { error: e.message }; }
+          results.push({ type: 'tool_result', tool_use_id: t.id, content: JSON.stringify(out).slice(0, 4000) });
+        }
+        messages.push({ role: 'user', content: results });
+      }
+      res.json({ reply: "Sorry, I got a bit tangled — say that again?", messages });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   return router;
 };
