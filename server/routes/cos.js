@@ -474,6 +474,30 @@ module.exports = (pool) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Diagnostic for the morning-brief sources. Returns the REAL connection error
+  // (and password shape — length / has-space — but never the password itself or
+  // email content) so we can fix the wiring without guessing.
+  router.get('/debug/sources', syncAuth, ownerOrPartner, async (req, res) => {
+    try {
+      const pass = process.env.GMAIL_IMAP_PASS || '';
+      const icals = (process.env.CAL_ICAL_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
+      const inbox = await recentInbox({ user: process.env.GMAIL_IMAP_USER, pass, max: 3 });
+      const cal = await upcomingEvents(icals);
+      res.json({
+        env: {
+          gmail_user: process.env.GMAIL_IMAP_USER || null,
+          gmail_pass_set: !!pass,
+          gmail_pass_len: pass.length,
+          gmail_pass_has_space: /\s/.test(pass),
+          ical_count: icals.length,
+          slack_set: !!process.env.COS_SLACK_WEBHOOK,
+        },
+        inbox: { ok: inbox.ok, error: inbox.error || null, count: (inbox.threads || []).length },
+        calendar: { ok: cal.ok, error: cal.error || null, count: (cal.events || []).length },
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // ---------- ALERT ACKNOWLEDGE ("clear the alerts") ----------
 
   // Clear one or more alerts by their stable alertId key. Used by the Alerts
