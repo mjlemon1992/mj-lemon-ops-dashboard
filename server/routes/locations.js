@@ -15,6 +15,39 @@ module.exports = (pool) => {
     _colInit = true;
   };
 
+  // Owner machine auth (same pattern as the sync/CoS routes): a valid X-Sync-Key
+  // stands in for an owner JWT. Fails closed if SYNC_SECRET is unset.
+  const syncAuth = (req, res, next) => {
+    const secret = process.env.SYNC_SECRET;
+    const provided = req.get('X-Sync-Key');
+    if (secret && provided && provided === secret) {
+      req.user = { role: 'owner', via: 'sync-key' };
+      return next();
+    }
+    return authenticateToken(req, res, next);
+  };
+
+  // Set ONLY the shop-floor display PIN. Owner-gated (JWT or sync key). Narrow on
+  // purpose: lets the owner set/clear a board PIN without exposing the full
+  // location update. PIN must be 3-12 digits (or empty string to clear).
+  router.put('/:id/display-pin', syncAuth, requireOwner, async (req, res) => {
+    try {
+      await ensureColumns();
+      const raw = (req.body && req.body.display_pin != null) ? String(req.body.display_pin).trim() : '';
+      if (raw && !/^\d{3,12}$/.test(raw)) {
+        return res.status(400).json({ error: 'display_pin must be 3-12 digits (or empty to clear)' });
+      }
+      const r = await pool.query(
+        'UPDATE locations SET display_pin = $1, updated_at = NOW() WHERE id = $2 RETURNING id, name',
+        [raw || null, req.params.id]
+      );
+      if (!r.rows.length) return res.status(404).json({ error: 'Location not found' });
+      res.json({ ok: true, id: r.rows[0].id, name: r.rows[0].name, pin_set: !!raw });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/', authenticateToken, async (req, res) => {
     try {
       let query = 'SELECT * FROM locations ORDER BY name';
