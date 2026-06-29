@@ -384,7 +384,7 @@ module.exports = (pool) => {
         metrics = m.rows;
       } catch (e) { /* table not ready */ }
       try {
-        const p = await pool.query(`SELECT COUNT(*)::int AS n FROM marketing_post WHERE status = 'pending'`);
+        const p = await pool.query(`SELECT COUNT(*)::int AS n FROM marketing_post WHERE status = 'draft'`);
         pendingPosts = p.rows[0] ? p.rows[0].n : 0;
       } catch (e) { /* table/column differs */ }
 
@@ -485,13 +485,18 @@ module.exports = (pool) => {
     return out;
   };
 
-  const VOICE_SYSTEM = `You are Jamie's chief of staff, talking to him out loud inside his ops dashboard. He owns Mister Transmission shops and is disorganized — keep him organized. SPEAK like a person: short, natural sentences, no markdown, no lists read as "bullet one, bullet two". Lead with the most important thing, then a couple more, then hand it back. Use get_context before briefing or answering about his business. You CAN: clear alerts, schedule automations, set preferences — all from here. You CANNOT draft email or read his calendar from this dashboard; if he asks for those, tell him to use the Claude app voice for email and calendar. Never claim anything was sent or posted — work stays in the approval queue. Confirm before clearing alerts ("clear all 4?").`;
+  const VOICE_SYSTEM = `You are Jamie's chief of staff, talking WITH him out loud inside his ops dashboard — a sharp, warm executive assistant who knows his business (Mister Transmission shops; he runs hot and disorganized, so you keep him on track). This is a real two-way conversation: HE leads, you help. Don't dump a briefing unless he asks for one. He might say "give me today's briefing", "I want to create a marketing post", "clear the alerts", "schedule something", or just ask a question.
+
+When he wants to CREATE something (like a marketing post), have a short back-and-forth first — ask one or two quick clarifying questions to get what you need (what's it about? which shop? any offer?), then do it. One question at a time, conversational.
+
+SPEAK like a person: short, natural sentences, no markdown, never read out "bullet one, bullet two". Before briefing him or quoting his numbers, call get_context. You CAN, right here: brief him, draft a marketing post into the approval queue, clear alerts, schedule automations, set preferences. You CANNOT draft email or read his calendar from this dashboard — for those, tell him to use the Claude app voice. Never claim anything was sent, posted, or paid — everything stays a draft / in the approval queue for his tap. Confirm before clearing alerts or staging a post.`;
 
   const chatTools = [
     { name: 'get_context', description: "Fetch Jamie's latest brief, open alerts, marketing approvals waiting, and his automations. Call this before briefing him or answering about the business.", input_schema: { type: 'object', properties: {} } },
     { name: 'clear_alerts', description: 'Clear/acknowledge alerts. Pass specific alert keys, or all:true to clear every open alert.', input_schema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } }, all: { type: 'boolean' } } } },
     { name: 'create_automation', description: 'Schedule a recurring automation (e.g. a 10pm marketing digest).', input_schema: { type: 'object', properties: { title: { type: 'string' }, action_type: { type: 'string', enum: ['marketing_digest', 'ops_digest', 'generate_posts'] }, time_local: { type: 'string' }, frequency: { type: 'string', enum: ['daily', 'weekly'] }, weekday: { type: 'integer' }, count: { type: 'integer' } }, required: ['title', 'action_type', 'time_local', 'frequency'] } },
-    { name: 'set_preference', description: 'Record a standing preference (priority/ignore/tone/etc).', input_schema: { type: 'object', properties: { category: { type: 'string' }, insight: { type: 'string' } }, required: ['category', 'insight'] } }
+    { name: 'set_preference', description: 'Record a standing preference (priority/ignore/tone/etc).', input_schema: { type: 'object', properties: { category: { type: 'string' }, insight: { type: 'string' } }, required: ['category', 'insight'] } },
+    { name: 'draft_marketing_post', description: 'Draft a social media post (Instagram/Facebook/Google) and stage it in the marketing approval queue. Only call this once you have what the post is about — ask Jamie first if you do not.', input_schema: { type: 'object', properties: { topic: { type: 'string', description: 'What the post is about — the job, offer, or message' }, offer: { type: 'string', description: 'Any promo/offer to include (optional)' } }, required: ['topic'] } }
   ];
 
   const execTool = async (name, input, who) => {
@@ -501,7 +506,7 @@ module.exports = (pool) => {
         liveAlerts()
       ]);
       let pendingApprovals = 0;
-      try { const p = await pool.query(`SELECT COUNT(*)::int n FROM marketing_post WHERE status='pending'`); pendingApprovals = p.rows[0] ? p.rows[0].n : 0; } catch (e) {}
+      try { const p = await pool.query(`SELECT COUNT(*)::int n FROM marketing_post WHERE status='draft'`); pendingApprovals = p.rows[0] ? p.rows[0].n : 0; } catch (e) {}
       const autos = await pool.query(`SELECT title, action_type, time_local, frequency FROM cos_automations WHERE enabled=true`).then(r => r.rows).catch(() => []);
       return { brief, alerts, pendingApprovals, automations: autos };
     }
@@ -523,6 +528,37 @@ module.exports = (pool) => {
     if (name === 'set_preference') {
       await pool.query(`INSERT INTO cos_learnings (category, insight, confidence, source) VALUES ($1,$2,7,'stated')`, [input.category || 'priority', input.insight]);
       return { remembered: input.insight };
+    }
+    if (name === 'draft_marketing_post') {
+      const topic = (input.topic || '').trim();
+      if (!topic) return { error: 'need a topic first' };
+      const loc = await pool.query(`SELECT id, name FROM locations WHERE active = true ORDER BY created_at LIMIT 1`).then(r => r.rows[0] || null).catch(() => null);
+      let caps = { ig: '', fb: '', gbp: '' };
+      if (ANTHROPIC_KEY) {
+        try {
+          const r = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+            body: JSON.stringify({
+              model: MODEL, max_tokens: 600,
+              system: 'You write social captions for an automotive transmission repair shop. Given a topic (and optional offer), return ONLY a JSON object {"ig":"...","fb":"...","gbp":"..."} with an Instagram, Facebook, and Google Business Profile caption. Friendly, local, trustworthy. No invented claims, no fake reviews.',
+              messages: [{ role: 'user', content: `Topic: ${topic}${input.offer ? `\nOffer: ${input.offer}` : ''}\nWrite the captions.` }]
+            })
+          });
+          const body = await r.json();
+          if (r.ok) {
+            const txt = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+            const mt = txt.match(/\{[\s\S]*\}/);
+            if (mt) { const j = JSON.parse(mt[0]); caps = { ig: j.ig || '', fb: j.fb || '', gbp: j.gbp || '' }; }
+          }
+        } catch (e) { /* fall through with empty captions */ }
+      }
+      await pool.query(
+        `INSERT INTO marketing_post (location_id, location_name, status, note, caption_ig, caption_fb, caption_gbp)
+         VALUES ($1,$2,'draft',$3,$4,$5,$6)`,
+        [loc ? loc.id : null, loc ? loc.name : null, topic, caps.ig, caps.fb, caps.gbp]
+      );
+      return { staged: true, topic, note: 'Drafted captions and added it to the Marketing approval queue. Add a photo and approve it there when ready.' };
     }
     return { error: 'unknown tool' };
   };
