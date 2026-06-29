@@ -32,6 +32,7 @@ const marketingShotsRoutes = require('./routes/marketingShots');
 const marketingReviewsRoutes = require('./routes/marketingReviews');
 const marketingDriveRoutes = require('./routes/marketingDrive');
 const cosRoutes = require('./routes/cos');
+const mcpRoutes = require('./routes/mcp');
 const { startScheduler } = require('./scheduler');
 
 app.use('/api/auth', authRoutes(pool));
@@ -51,6 +52,7 @@ app.use('/api/marketing/shots', marketingShotsRoutes(pool));
 app.use('/api/marketing/reviews', marketingReviewsRoutes(pool));
 app.use('/api/marketing/drive', marketingDriveRoutes(pool));
 app.use('/api/cos', cosRoutes(pool));
+app.use('/mcp', mcpRoutes(pool));
 app.use('/report', require('./report')(pool));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
