@@ -60,16 +60,18 @@ export default function VoiceChat() {
     if (activeRef.current && SR) listen();
   };
 
+  // Open like a person — greet and hand it to him. No forced briefing; he leads.
+  const greeting = () => {
+    const h = new Date().getHours();
+    const part = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+    return `${part}, Jamie. How can I help?`;
+  };
+
   const start = async () => {
     setActive(true); activeRef.current = true; setTranscript([]); convoRef.current = [];
-    setStatus('Thinking…');
-    try {
-      const resp = await api('/cos/chat', { method: 'POST', body: JSON.stringify({ briefing: true }) });
-      convoRef.current = resp.messages || [];
-      addLine('cos', resp.reply || '');
-      await speak(resp.reply || '');
-    } catch (e) { addLine('cos', `Sorry — ${e.message}`); }
-    setStatus('');
+    const g = greeting();
+    addLine('cos', g);
+    await speak(g);
     if (activeRef.current && SR) listen();
   };
 
@@ -94,7 +96,7 @@ export default function VoiceChat() {
         {!active ? (
           <button onClick={start}
             style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', padding: '7px 14px', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>
-            Start voice briefing
+            Start talking
           </button>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -142,7 +144,7 @@ export default function VoiceChat() {
 
       {!active && (
         <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '8px' }}>
-          It briefs you aloud, then you talk back — “clear the alerts”, “schedule a marketing digest at 10pm”, “what's waiting for approval”. Email + calendar live in the Claude app voice; this handles the dashboard.
+          It opens like a person — “How can I help?” — then you just talk: “give me today's briefing”, “help me create a marketing post”, “clear the alerts”, “schedule a digest at 10pm”. It'll ask you questions back. Email + calendar live in the Claude app voice; this handles the dashboard.
         </div>
       )}
     </div>
