@@ -73,12 +73,12 @@ module.exports = (pool) => {
   // ── Caption generation (Anthropic REST, vision; no SDK dependency) ──
   const generate = async (imageBase64, mime, note) => {
     if (!ANTHROPIC_KEY) throw Object.assign(new Error('ANTHROPIC_API_KEY not set'), { status: 503 });
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const callAnthropic = () => fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1200,
+        max_tokens: 2048,
         system: CAPTION_SYSTEM,
         messages: [{
           role: 'user',
@@ -89,6 +89,13 @@ module.exports = (pool) => {
         }],
       }),
     });
+    // One retry on a transient Anthropic failure (overloaded / rate-limited / 5xx) so a
+    // brief blip doesn't leave the draft with blank captions and no obvious cause.
+    let res = await callAnthropic();
+    if (!res.ok && [429, 500, 502, 503, 529].includes(res.status)) {
+      await new Promise(r => setTimeout(r, 1500));
+      res = await callAnthropic();
+    }
     const body = await res.json();
     if (!res.ok) throw Object.assign(new Error(`Anthropic ${res.status}: ${JSON.stringify(body).slice(0, 300)}`), { status: 502 });
     let raw = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('').replace(/```json|```/g, '').trim();
