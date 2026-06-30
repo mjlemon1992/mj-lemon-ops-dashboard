@@ -96,17 +96,27 @@ async function getLogo() {
   return _logo;
 }
 
-async function svgToBlob(svg, S) {
-  const img = await loadImg('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+async function svgToBlob(svg, S, bg) {
   const c = document.createElement('canvas'); c.width = S; c.height = S;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, S, S);
+  if (bg) {
+    // Photo poster: draw the AI hero image cover-fit, then the transparent SVG
+    // (scrim + text + logo) goes on top.
+    ctx.fillStyle = '#0E0F12'; ctx.fillRect(0, 0, S, S);
+    try {
+      const b = await loadImg(bg);
+      const ar = b.width / b.height; let dw = S, dh = S, dx = 0, dy = 0;
+      if (ar > 1) { dh = S; dw = S * ar; dx = (S - dw) / 2; } else { dw = S; dh = S / ar; dy = (S - dh) / 2; }
+      ctx.drawImage(b, dx, dy, dw, dh);
+    } catch { /* fall through to the SVG, which still has the scrim */ }
+  } else { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, S, S); }
+  const img = await loadImg('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
   ctx.drawImage(img, 0, 0, S, S);
   return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
 }
 
 // A rotating library of distinct layouts so output isn't repetitive. No CTAs.
-async function renderPoster({ type, headline, subline, locName }) {
+async function renderPoster({ type, headline, subline, locName, bg }) {
   const S = 1080, M = 92;
   const { data: logo, aspect } = await getLogo();
   const img = (x, y, w, op) => logo ? `<image xlink:href="${logo}" x="${x}" y="${y}" width="${w}" height="${w * aspect}"${op != null ? ` opacity="${op}"` : ''}/>` : '';
@@ -124,7 +134,8 @@ async function renderPoster({ type, headline, subline, locName }) {
   const head = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${S} ${S}"><defs>
     <style type="text/css"><![CDATA[${fontCss}]]></style>
     <linearGradient id="dk" x1="0" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#23262B"/><stop offset="1" stop-color="#0A0B0D"/></linearGradient>
-    <linearGradient id="or" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8703B"/><stop offset="1" stop-color="#E14313"/></linearGradient></defs>`;
+    <linearGradient id="or" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8703B"/><stop offset="1" stop-color="#E14313"/></linearGradient>
+    <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0A0B0D" stop-opacity="0.15"/><stop offset="0.5" stop-color="#0A0B0D" stop-opacity="0.4"/><stop offset="1" stop-color="#0A0B0D" stop-opacity="0.92"/></linearGradient></defs>`;
 
   // ── Layouts (general pool) ──
   const editorial = () => { const hl = wHL(76, S - 2 * M), sl = wSL(34, S - 2 * M), hy = 640;
@@ -176,9 +187,19 @@ async function renderPoster({ type, headline, subline, locName }) {
       <text x="${M}" y="${qy + hl.length * 72 + 28}" font-family="${FF}" font-weight="500" font-size="32" fill="#B9BEC4">${tspans(sl, M, 44)}</text>
       ${footEl(M, S - 50, 'start', '#7C828A')}`; };
 
+  // ── Photo layout (used when an AI hero image is supplied) ──
+  // Transparent except a bottom scrim so the photo shows through; logo on a
+  // white chip top-left, kicker + headline + subline over the darkened lower band.
+  const photo = () => { const hl = wHL(74, S - 2 * M), sl = wSL(32, S - 2 * M), hy = 678;
+    return `<rect width="${S}" height="${S}" fill="url(#scrim)"/>${chip(M, M, 210)}
+      ${kicker(M, hy - 80, 'start', '#F8703B')}
+      <text x="${M}" y="${hy}" font-family="${DISP}" font-weight="800" font-size="74" letter-spacing="-1.5" fill="#fff">${tspans(hl, M, 84)}</text>
+      <text x="${M}" y="${hy + hl.length * 84 + 26}" font-family="${FF}" font-weight="400" font-size="32" fill="#E7E9EC">${tspans(sl, M, 46)}</text>
+      ${footEl(M, S - 50, 'start', 'rgba(255,255,255,0.85)')}`; };
+
   const pool = type === 'testimonial' ? [quoteLight, quoteDark] : [editorial, darkCentered, orangeRail, fullOrange, diagonal];
-  const body = pool[Math.floor(Math.random() * pool.length)]();
-  return await svgToBlob(head + body + '</svg>', S);
+  const body = bg ? photo() : pool[Math.floor(Math.random() * pool.length)]();
+  return await svgToBlob(head + body + '</svg>', S, bg);
 }
 
 // Capture a bay photo -> AI captions -> review/approve. Posting to FB/IG/GBP is
@@ -186,6 +207,7 @@ async function renderPoster({ type, headline, subline, locName }) {
 export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey, previewLimit, onViewAll }) {
   const { api, token } = useAuth();
   const [configured, setConfigured] = useState(true);
+  const [imageGen, setImageGen] = useState(false);   // AI poster art available (OpenAI key set)
   const [posts, setPosts] = useState([]);
   const [approved, setApproved] = useState([]);
   const [deleted, setDeleted] = useState([]);
@@ -208,7 +230,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
   const [libOpen, setLibOpen] = useState(false);
   const fileRef = useRef(null);
 
-  useEffect(() => { api('/marketing/posts/status').then(s => setConfigured(!!s.configured)).catch(() => {}); }, [api]);
+  useEffect(() => { api('/marketing/posts/status').then(s => { setConfigured(!!s.configured); setImageGen(!!s.imageGen); }).catch(() => {}); }, [api]);
   useEffect(() => { api('/marketing/drive/status').then(s => setDriveOn(!!s.configured)).catch(() => {}); }, [api]);
 
   const refresh = useCallback(() => {
@@ -326,7 +348,16 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
     setGenPoster(true); setErr(null); setNotice(null);
     try {
       const copyData = await api('/marketing/posts/poster-copy', { method: 'POST', body: JSON.stringify({ type: posterType, topic: posterTopic }) });
-      const blob = await renderPoster({ type: posterType, ...copyData, locName });
+      // AI hero art (when an OpenAI key is set) — the photographic background the
+      // copy is laid over. Best-effort: if it fails or is off, fall back to the
+      // flat brand template so a poster always renders.
+      let bg = null;
+      if (imageGen) {
+        setNotice('Generating poster art… (this can take ~15s)');
+        try { const im = await api('/marketing/posts/poster-image', { method: 'POST', body: JSON.stringify({ type: posterType, topic: posterTopic }) }); bg = (im && im.image) || null; }
+        catch (e) { /* fall back to flat template */ }
+      }
+      const blob = await renderPoster({ type: posterType, ...copyData, locName, bg });
       const res = await fetch(`/api/marketing/posts/${locId}/intake?note=${encodeURIComponent(posterType + ' poster')}`, {
         method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: `Bearer ${token}` }, body: blob,
       });

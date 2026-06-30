@@ -17,6 +17,26 @@ const MODEL = 'claude-sonnet-4-6';
 const PURGE_DAYS = parseInt(process.env.MARKETING_PURGE_DAYS || '60', 10);
 const OK_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
+// Optional AI poster ART (the photographic hero behind a generated poster).
+// Anthropic can't generate images, so this uses OpenAI's image API. Ships dark:
+// no OPENAI_API_KEY -> /status imageGen:false, poster-image 503s, and the client
+// falls back to the flat brand template. Model is overridable (gpt-image-1 is
+// best; set OPENAI_IMAGE_MODEL=dall-e-3 if your org isn't verified for it).
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
+const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+
+// The image is a BACKGROUND only — the dashboard overlays the real logo and the
+// exact headline/copy on top, so the model is told to render NO text. That's how
+// we keep spelling, brand colour, and the no-CTA rule perfect every time.
+const IMAGE_STYLE = `Photorealistic, cinematic, professional automotive marketing photography. Premium, trustworthy, clean, dramatic natural light, shallow depth of field. Absolutely NO text, no words, no letters, no numbers, no logos, no watermarks, no badges anywhere in the image. Composition: keep the lower-left area darker and visually uncluttered so text can be overlaid there.`;
+const imagePromptFor = (type, topic) => {
+  const subj = (topic && topic.trim()) ? topic.trim()
+    : type === 'seasonal' ? 'a vehicle on a scenic Alberta or BC road appropriate to the current season'
+    : type === 'testimonial' ? 'a clean, modern, well-lit automotive service bay'
+    : 'a transmission or drivetrain detail in a professional repair shop';
+  return `Marketing poster background image for a transmission repair shop (Mister Transmission, Red Deer & Kelowna, Canada). Subject: ${subj}. ${IMAGE_STYLE}`;
+};
+
 const CAPTION_SYSTEM = `You write social media captions for an automotive TRANSMISSION repair shop
 (Mister Transmission — Parkland Transmission, Red Deer & Kelowna). You are given a photo from the
 shop floor and an optional short note. Write platform-specific captions for the photo.
@@ -170,7 +190,32 @@ module.exports = (pool) => {
   const fail = (res, e) => res.status(e.status || 500).json({ error: String(e.message || e) });
   const gate = [authenticateToken, requireOwnerOrPartner];
 
-  router.get('/status', ...gate, (req, res) => res.json({ configured: !!ANTHROPIC_KEY, model: MODEL, purgeDays: PURGE_DAYS }));
+  router.get('/status', ...gate, (req, res) => res.json({ configured: !!ANTHROPIC_KEY, model: MODEL, purgeDays: PURGE_DAYS, imageGen: !!OPENAI_KEY }));
+
+  // Generate the photographic poster BACKGROUND (no text) for a topic. The client
+  // composites the real logo + exact copy over it. 503 when no key (ships dark).
+  router.post('/poster-image', ...gate, async (req, res) => {
+    try {
+      if (!OPENAI_KEY) return res.status(503).json({ error: 'OPENAI_API_KEY not set' });
+      const { type = 'seasonal', topic = '' } = req.body || {};
+      const isGptImage = /^gpt-image/.test(IMAGE_MODEL);
+      const payload = { model: IMAGE_MODEL, prompt: imagePromptFor(type, topic), n: 1, size: '1024x1024' };
+      // Quality scales differ per model; gpt-image-1 always returns b64, dall-e
+      // needs response_format to get b64 instead of a short-lived URL.
+      if (isGptImage) payload.quality = 'high';
+      else { payload.quality = 'hd'; payload.response_format = 'b64_json'; }
+      const r = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await r.json();
+      if (!r.ok) return res.status(502).json({ error: `OpenAI ${r.status}: ${JSON.stringify(body).slice(0, 200)}` });
+      const b64 = body.data && body.data[0] && body.data[0].b64_json;
+      if (!b64) return res.status(502).json({ error: 'No image returned' });
+      res.json({ image: `data:image/png;base64,${b64}` });
+    } catch (e) { fail(res, e); }
+  });
 
   // Intake: raw image body (Content-Type: image/*), ?note=...
   router.post('/:locationId/intake',
