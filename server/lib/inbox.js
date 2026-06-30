@@ -52,4 +52,28 @@ async function recentInbox({ user, pass, sinceDays = 4, max = 25 } = {}) {
   return { ok: true, threads };
 }
 
-module.exports = { recentInbox };
+// Mark inbox messages read by UID — the "I've handled these, clear them off my
+// list" action. Read-state only: nothing is deleted, archived, or moved, so it's
+// fully reversible from Gmail. Returns { ok, marked, error }.
+async function markRead({ user, pass, uids } = {}) {
+  if (!user || !pass) return { ok: false, error: 'GMAIL_IMAP_USER / GMAIL_IMAP_PASS not set' };
+  const list = (Array.isArray(uids) ? uids : [uids]).map(Number).filter(Boolean);
+  if (!list.length) return { ok: false, error: 'no message uids given' };
+  const client = new ImapFlow({
+    host: 'imap.gmail.com', port: 993, secure: true,
+    auth: { user, pass }, logger: false, emitLogs: false,
+  });
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+    try { await client.messageFlagsAdd(list, ['\\Seen'], { uid: true }); }
+    finally { lock.release(); }
+    return { ok: true, marked: list.length };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  } finally {
+    try { await client.logout(); } catch (_) { /* ignore */ }
+  }
+}
+
+module.exports = { recentInbox, markRead };
