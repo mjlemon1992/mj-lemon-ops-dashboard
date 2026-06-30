@@ -24,6 +24,12 @@ const OK_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 // best; set OPENAI_IMAGE_MODEL=dall-e-3 if your org isn't verified for it).
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+// Google Gemini is the preferred image provider (free-tier key from Google AI
+// Studio, friendlier billing than OpenAI). If GEMINI_API_KEY is set it's used;
+// otherwise we fall back to OpenAI. Model is overridable in case the id drifts.
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image-preview';
+const HAS_IMAGE_GEN = !!(GEMINI_KEY || OPENAI_KEY);
 
 // The image is a BACKGROUND only — the dashboard overlays the real logo and the
 // exact headline/copy on top, so the model is told to render NO text. That's how
@@ -36,6 +42,42 @@ const imagePromptFor = (type, topic) => {
     : 'a transmission or drivetrain detail in a professional repair shop';
   return `Marketing poster background image for a transmission repair shop (Mister Transmission, Red Deer & Kelowna, Canada). Subject: ${subj}. ${IMAGE_STYLE}`;
 };
+
+// Returns a data: URI for a generated background image, or throws with .status.
+async function geminiImage(prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${GEMINI_KEY}`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+    }),
+  });
+  const body = await r.json();
+  if (!r.ok) throw Object.assign(new Error(`Gemini ${r.status}: ${JSON.stringify(body).slice(0, 280)}`), { status: 502 });
+  const parts = ((((body.candidates || [])[0] || {}).content || {}).parts) || [];
+  const part = parts.find(p => p.inlineData && p.inlineData.data);
+  if (!part) throw Object.assign(new Error(`Gemini returned no image: ${JSON.stringify(body).slice(0, 200)}`), { status: 502 });
+  return `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
+}
+
+async function openaiImage(prompt) {
+  const isGptImage = /^gpt-image/.test(IMAGE_MODEL);
+  const payload = { model: IMAGE_MODEL, prompt, n: 1, size: '1024x1024' };
+  if (isGptImage) payload.quality = 'high';
+  else { payload.quality = 'hd'; payload.response_format = 'b64_json'; }
+  const r = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const body = await r.json();
+  if (!r.ok) throw Object.assign(new Error(`OpenAI ${r.status}: ${JSON.stringify(body).slice(0, 200)}`), { status: 502 });
+  const b64 = body.data && body.data[0] && body.data[0].b64_json;
+  if (!b64) throw Object.assign(new Error('OpenAI returned no image'), { status: 502 });
+  return `data:image/png;base64,${b64}`;
+}
 
 const CAPTION_SYSTEM = `You write social media captions for an automotive TRANSMISSION repair shop
 (Mister Transmission — Parkland Transmission, Red Deer & Kelowna). You are given a photo from the
@@ -190,30 +232,18 @@ module.exports = (pool) => {
   const fail = (res, e) => res.status(e.status || 500).json({ error: String(e.message || e) });
   const gate = [authenticateToken, requireOwnerOrPartner];
 
-  router.get('/status', ...gate, (req, res) => res.json({ configured: !!ANTHROPIC_KEY, model: MODEL, purgeDays: PURGE_DAYS, imageGen: !!OPENAI_KEY }));
+  router.get('/status', ...gate, (req, res) => res.json({ configured: !!ANTHROPIC_KEY, model: MODEL, purgeDays: PURGE_DAYS, imageGen: HAS_IMAGE_GEN }));
 
   // Generate the photographic poster BACKGROUND (no text) for a topic. The client
-  // composites the real logo + exact copy over it. 503 when no key (ships dark).
+  // composites the real logo + exact copy over it. Prefers Gemini, falls back to
+  // OpenAI. 503 when neither key is set (ships dark).
   router.post('/poster-image', ...gate, async (req, res) => {
     try {
-      if (!OPENAI_KEY) return res.status(503).json({ error: 'OPENAI_API_KEY not set' });
+      if (!HAS_IMAGE_GEN) return res.status(503).json({ error: 'No image API key set (GEMINI_API_KEY or OPENAI_API_KEY)' });
       const { type = 'seasonal', topic = '' } = req.body || {};
-      const isGptImage = /^gpt-image/.test(IMAGE_MODEL);
-      const payload = { model: IMAGE_MODEL, prompt: imagePromptFor(type, topic), n: 1, size: '1024x1024' };
-      // Quality scales differ per model; gpt-image-1 always returns b64, dall-e
-      // needs response_format to get b64 instead of a short-lived URL.
-      if (isGptImage) payload.quality = 'high';
-      else { payload.quality = 'hd'; payload.response_format = 'b64_json'; }
-      const r = await fetch('https://api.openai.com/v1/images/generations', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const body = await r.json();
-      if (!r.ok) return res.status(502).json({ error: `OpenAI ${r.status}: ${JSON.stringify(body).slice(0, 200)}` });
-      const b64 = body.data && body.data[0] && body.data[0].b64_json;
-      if (!b64) return res.status(502).json({ error: 'No image returned' });
-      res.json({ image: `data:image/png;base64,${b64}` });
+      const prompt = imagePromptFor(type, topic);
+      const image = GEMINI_KEY ? await geminiImage(prompt) : await openaiImage(prompt);
+      res.json({ image, provider: GEMINI_KEY ? 'gemini' : 'openai' });
     } catch (e) { fail(res, e); }
   });
 
