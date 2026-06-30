@@ -141,9 +141,16 @@ td.strong { font-weight: 500; color: var(--text); }
 
 /* Marketing command layout: two columns (queue + side rail), 2x2 gauge quadrant. */
 .mkt-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; align-items: start; }
+/* Grid items default to min-width:auto and refuse to shrink below their content,
+   which blows the 2-col layout wider than the viewport (clipping the gauges on
+   the left and the rail on the right). min-width:0 lets the columns shrink so the
+   layout stays inside the window instead of overflowing. */
+.mkt-grid > * { min-width: 0; }
 .mkt-gauges { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
-.mkt-rail { display: flex; flex-direction: column; gap: 13px; }
-@media (max-width: 920px) { .mkt-grid { grid-template-columns: 1fr; } }
+.mkt-rail { display: flex; flex-direction: column; gap: 13px; min-width: 0; }
+/* Stack to one column earlier (1200px) so a half-width / zoomed window gets a
+   single readable column instead of a squeezed, overflowing two-up. */
+@media (max-width: 1200px) { .mkt-grid { grid-template-columns: 1fr; } }
 
 /* ── Design-system foundation: surfaces, type scale, responsive grids ── */
 /* Aliases so pages that reference --surface render correctly. */
