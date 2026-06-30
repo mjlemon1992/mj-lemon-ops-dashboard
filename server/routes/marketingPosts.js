@@ -25,12 +25,25 @@ Brand voice: expert and plain-spoken, honest, no hype or clickbait. Red Seal tec
 give an honest second opinion; "we fix it right." Never invent specifics that aren't in the photo
 or note (no fake prices, names, or claims).
 
-Output ONLY a single JSON object, no prose, no fences:
-{
-  "instagram": "punchy, 1-3 short lines, end with 4-6 relevant hashtags",
-  "facebook": "conversational, 2-4 sentences, a soft call-to-action, no hashtag spam",
-  "gbp": "Google Business Profile post: 1-2 sentences, informative, a clear call-to-action"
-}`;
+Write the captions by calling the write_captions tool — always call it, never reply with prose.
+If the photo isn't a clear shop or vehicle subject, still write the best generic shop captions you
+can rather than refusing.`;
+
+// Forced-tool schema: the model must return structured captions, so it can never
+// reply with prose that fails JSON parsing (the old cause of blank captions).
+const CAPTION_TOOL = {
+  name: 'write_captions',
+  description: 'Return the three platform-specific captions for the shop photo.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      instagram: { type: 'string', description: 'Punchy, 1-3 short lines, ending with 4-6 relevant hashtags.' },
+      facebook: { type: 'string', description: 'Conversational, 2-4 sentences, a soft call-to-action, no hashtag spam.' },
+      gbp: { type: 'string', description: 'Google Business Profile post: 1-2 informative sentences with a clear call-to-action.' },
+    },
+    required: ['instagram', 'facebook', 'gbp'],
+  },
+};
 
 module.exports = (pool) => {
   const router = express.Router();
@@ -80,6 +93,10 @@ module.exports = (pool) => {
         model: MODEL,
         max_tokens: 2048,
         system: CAPTION_SYSTEM,
+        tools: [CAPTION_TOOL],
+        // Force the structured tool call so the model can't return prose instead of
+        // JSON — which is what previously left captions blank on off-topic photos.
+        tool_choice: { type: 'tool', name: 'write_captions' },
         messages: [{
           role: 'user',
           content: [
@@ -98,15 +115,9 @@ module.exports = (pool) => {
     }
     const body = await res.json();
     if (!res.ok) throw Object.assign(new Error(`Anthropic ${res.status}: ${JSON.stringify(body).slice(0, 300)}`), { status: 502 });
-    let raw = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('').replace(/```json|```/g, '').trim();
-    const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-    if (s >= 0 && e > s) raw = raw.slice(s, e + 1);
-    try {
-      const j = JSON.parse(raw);
-      return { ig: j.instagram || '', fb: j.facebook || '', gbp: j.gbp || '' };
-    } catch (err) {
-      throw Object.assign(new Error('Caption generation returned invalid JSON — try again.'), { status: 502 });
-    }
+    const tu = (body.content || []).find(b => b.type === 'tool_use' && b.name === 'write_captions');
+    if (!tu || !tu.input) throw Object.assign(new Error('Caption generation returned no captions — try again.'), { status: 502 });
+    return { ig: tu.input.instagram || '', fb: tu.input.facebook || '', gbp: tu.input.gbp || '' };
   };
 
   const dataUri = (row) => row.image_data ? `data:${row.image_mime};base64,${row.image_data.toString('base64')}` : null;
