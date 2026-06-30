@@ -52,6 +52,38 @@ const _measure = (() => { try { return document.createElement('canvas').getConte
 const wrapFor = (text, font, maxW) => { if (_measure) _measure.font = font; return _measure ? wrapLines(_measure, text, maxW) : [String(text || '')]; };
 const tspans = (lines, x, lineH) => lines.map((ln, i) => `<tspan x="${x}" dy="${i ? lineH : 0}">${esc(ln)}</tspan>`).join('');
 
+// Display type = Archivo (the brand font). A rasterized SVG can't see web fonts,
+// so we embed Archivo 600/800 as base64 @font-face directly in the SVG. Fetched
+// once from Google Fonts, cached. If anything fails we fall back to the system
+// stack — same as before, so a network hiccup never breaks poster generation.
+const DISP = "'ArchivoP', " + FF;
+let _fontCss;
+async function getFontFaceCss() {
+  if (_fontCss !== undefined) return _fontCss;
+  try {
+    const css = await (await fetch('https://fonts.googleapis.com/css2?family=Archivo:wght@600;800')).text();
+    const faces = [];
+    for (const seg of css.split('/* ').slice(1)) {
+      if (!seg.startsWith('latin */')) continue;            // latin subset only (smallest, all we need)
+      const w = (seg.match(/font-weight:\s*(\d+)/) || [])[1];
+      const url = (seg.match(/url\((https:\/\/[^)]+\.woff2)\)/) || [])[1];
+      if (w && url) faces.push({ w, url });
+    }
+    const out = [];
+    for (const f of faces) {
+      const blob = await (await fetch(f.url)).blob();
+      const data = await new Promise((r, j) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = j; fr.readAsDataURL(blob); });
+      out.push(`@font-face{font-family:'ArchivoP';font-style:normal;font-weight:${f.w};src:url(${data}) format('woff2')}`);
+    }
+    _fontCss = out.join('');
+  } catch { _fontCss = ''; }
+  return _fontCss;
+}
+
+// Eyebrow/kicker label by poster type — the small tracked line above the
+// headline that makes a layout read as designed rather than just text on a box.
+const KICK = { seasonal: 'SEASONAL', educational: 'SHOP TIP', testimonial: 'FROM OUR CUSTOMERS' };
+
 let _logo = null;
 async function getLogo() {
   if (_logo) return _logo;
@@ -82,39 +114,49 @@ async function renderPoster({ type, headline, subline, locName }) {
   const foot = esc(locName || 'Parkland Transmission · Red Deer, AB');
   const footEl = (x, y, anchor, color) => `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${FF}" font-weight="500" font-size="24" fill="${color}">${foot}</text>`;
   const stars = (x, y, size, fill) => `<text x="${x}" y="${y}" font-family="${FF}" font-weight="700" font-size="${size}" letter-spacing="${size * 0.12}" fill="${fill}">&#9733;&#9733;&#9733;&#9733;&#9733;</text>`;
-  const wHL = (px, w) => wrapFor(headline, `800 ${px}px ${FF}`, w);
+  const fontCss = await getFontFaceCss();
+  const kick = KICK[type] || 'MISTER TRANSMISSION';
+  const kicker = (x, y, anchor, color) => `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${DISP}" font-weight="800" font-size="25" letter-spacing="3.5" fill="${color}">${esc(kick)}</text>`;
+  // Measure wraps with Archivo (loaded in the document) so line breaks match the
+  // embedded display font, not the old Arial fallback.
+  const wHL = (px, w) => wrapFor(headline, `800 ${px}px Archivo, ${FF}`, w);
   const wSL = (px, w) => wrapFor(subline, `400 ${px}px ${FF}`, w);
   const head = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${S} ${S}"><defs>
+    <style type="text/css"><![CDATA[${fontCss}]]></style>
     <linearGradient id="dk" x1="0" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#23262B"/><stop offset="1" stop-color="#0A0B0D"/></linearGradient>
     <linearGradient id="or" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8703B"/><stop offset="1" stop-color="#E14313"/></linearGradient></defs>`;
 
   // ── Layouts (general pool) ──
   const editorial = () => { const hl = wHL(76, S - 2 * M), sl = wSL(34, S - 2 * M), hy = 640;
     return `<rect width="${S}" height="${S}" fill="#F6F5F3"/><rect width="${S}" height="10" fill="url(#or)"/>
-      ${img(M, M, 250)}<rect x="${M}" y="${hy - 84}" width="72" height="6" fill="#F05423"/>
-      <text x="${M}" y="${hy}" font-family="${FF}" font-weight="800" font-size="76" fill="#16181B">${tspans(hl, M, 86)}</text>
+      ${img(M, M, 250)}${kicker(M, hy - 80, 'start', '#F05423')}
+      <text x="${M}" y="${hy}" font-family="${DISP}" font-weight="800" font-size="76" letter-spacing="-1.5" fill="#16181B">${tspans(hl, M, 86)}</text>
       <text x="${M}" y="${hy + hl.length * 86 + 26}" font-family="${FF}" font-weight="400" font-size="34" fill="#525860">${tspans(sl, M, 48)}</text>
       ${footEl(M, S - 50, 'start', '#9AA0A7')}`; };
   const darkCentered = () => { const cx = S / 2, hl = wHL(74, S - 2 * M), sl = wSL(32, S - 2 * M), hy = 540;
     return `<rect width="${S}" height="${S}" fill="url(#dk)"/>${img(515, 560, 760, 0.05)}${img(cx - 110, 150, 220)}
-      <text x="${cx}" y="${hy}" text-anchor="middle" font-family="${FF}" font-weight="800" font-size="74" fill="#fff">${tspans(hl, cx, 84)}</text>
+      ${kicker(cx, hy - 64, 'middle', '#F8703B')}
+      <text x="${cx}" y="${hy}" text-anchor="middle" font-family="${DISP}" font-weight="800" font-size="74" letter-spacing="-1.5" fill="#fff">${tspans(hl, cx, 84)}</text>
       <rect x="${cx - 45}" y="${hy + hl.length * 84 + 6}" width="90" height="6" fill="#F05423"/>
       <text x="${cx}" y="${hy + hl.length * 84 + 72}" text-anchor="middle" font-family="${FF}" font-weight="400" font-size="32" fill="#B9BEC4">${tspans(sl, cx, 46)}</text>
       ${footEl(cx, S - 50, 'middle', '#7C828A')}`; };
   const orangeRail = () => { const rail = 380, tx = rail + 56, mw = S - tx - M, hl = wHL(62, mw), sl = wSL(31, mw), hy = 410;
     return `<rect width="${S}" height="${S}" fill="#F6F5F3"/><rect width="${rail}" height="${S}" fill="url(#or)"/>
-      ${chip(58, 90, rail - 150)}<text x="58" y="${S - 64}" font-family="${FF}" font-weight="800" font-size="20" letter-spacing="2" fill="#fff" opacity="0.92">MISTER TRANSMISSION</text>
-      <text x="${tx}" y="${hy}" font-family="${FF}" font-weight="800" font-size="62" fill="#16181B">${tspans(hl, tx, 74)}</text>
+      ${chip(58, 90, rail - 150)}<text x="58" y="${S - 64}" font-family="${DISP}" font-weight="800" font-size="20" letter-spacing="2" fill="#fff" opacity="0.92">MISTER TRANSMISSION</text>
+      ${kicker(tx, hy - 56, 'start', '#F05423')}
+      <text x="${tx}" y="${hy}" font-family="${DISP}" font-weight="800" font-size="62" letter-spacing="-1.2" fill="#16181B">${tspans(hl, tx, 74)}</text>
       <text x="${tx}" y="${hy + hl.length * 74 + 24}" font-family="${FF}" font-weight="400" font-size="31" fill="#525860">${tspans(sl, tx, 44)}</text>
       ${footEl(S - M, S - 50, 'end', '#9AA0A7')}`; };
   const fullOrange = () => { const hl = wHL(80, S - 2 * M), sl = wSL(34, S - 2 * M), hy = 540;
     return `<rect width="${S}" height="${S}" fill="url(#or)"/>${chip(M, M, 240)}
-      <text x="${M}" y="${hy}" font-family="${FF}" font-weight="800" font-size="80" fill="#fff">${tspans(hl, M, 90)}</text>
+      ${kicker(M, hy - 74, 'start', 'rgba(255,255,255,0.92)')}
+      <text x="${M}" y="${hy}" font-family="${DISP}" font-weight="800" font-size="80" letter-spacing="-1.8" fill="#fff">${tspans(hl, M, 90)}</text>
       <text x="${M}" y="${hy + hl.length * 90 + 26}" font-family="${FF}" font-weight="400" font-size="34" fill="#FFE7DC">${tspans(sl, M, 48)}</text>
       ${footEl(M, S - 50, 'start', 'rgba(255,255,255,0.82)')}`; };
   const diagonal = () => { const hl = wHL(72, S - 2 * M), sl = wSL(32, S - 2 * M);
     return `<rect width="${S}" height="${S}" fill="url(#dk)"/><polygon points="0,${S} 0,730 ${S},560 ${S},${S}" fill="url(#or)"/>
-      ${img(M, M, 270)}<text x="${M}" y="440" font-family="${FF}" font-weight="800" font-size="72" fill="#fff">${tspans(hl, M, 84)}</text>
+      ${img(M, M, 270)}${kicker(M, 372, 'start', '#F8703B')}
+      <text x="${M}" y="440" font-family="${DISP}" font-weight="800" font-size="72" letter-spacing="-1.5" fill="#fff">${tspans(hl, M, 84)}</text>
       <text x="${M}" y="840" font-family="${FF}" font-weight="500" font-size="32" fill="#fff">${tspans(sl, M, 46)}</text>
       ${footEl(S - M, S - 50, 'end', 'rgba(255,255,255,0.85)')}`; };
 
@@ -123,14 +165,14 @@ async function renderPoster({ type, headline, subline, locName }) {
     return `<rect width="${S}" height="${S}" fill="#F6F5F3"/><rect width="${S}" height="12" fill="url(#or)"/>
       <text x="${M - 16}" y="440" font-family="Georgia, serif" font-weight="800" font-size="300" fill="#F05423" opacity="0.12">&#8220;</text>
       ${stars(M, 300, 54, '#F05423')}
-      <text x="${M}" y="${qy}" font-family="${FF}" font-weight="800" font-size="56" fill="#16181B">${tspans(hl, M, 70)}</text>
+      <text x="${M}" y="${qy}" font-family="${DISP}" font-weight="800" font-size="56" letter-spacing="-1" fill="#16181B">${tspans(hl, M, 70)}</text>
       <text x="${M}" y="${qy + hl.length * 70 + 28}" font-family="${FF}" font-weight="500" font-size="32" fill="#6B7178">${tspans(sl, M, 44)}</text>
       ${img(M, S - 300, 240)}${footEl(S - M, S - 50, 'end', '#9AA0A7')}`; };
   const quoteDark = () => { const hl = wHL(58, S - 2 * M), sl = wSL(32, S - 2 * M), qy = 520;
     return `<rect width="${S}" height="${S}" fill="url(#dk)"/>${img(S - M - 210, M, 210)}
       <text x="${M - 16}" y="500" font-family="Georgia, serif" font-weight="800" font-size="300" fill="#F8703B" opacity="0.18">&#8220;</text>
       ${stars(M, 360, 54, '#F8703B')}
-      <text x="${M}" y="${qy}" font-family="${FF}" font-weight="800" font-size="58" fill="#fff">${tspans(hl, M, 72)}</text>
+      <text x="${M}" y="${qy}" font-family="${DISP}" font-weight="800" font-size="58" letter-spacing="-1" fill="#fff">${tspans(hl, M, 72)}</text>
       <text x="${M}" y="${qy + hl.length * 72 + 28}" font-family="${FF}" font-weight="500" font-size="32" fill="#B9BEC4">${tspans(sl, M, 44)}</text>
       ${footEl(M, S - 50, 'start', '#7C828A')}`; };
 
