@@ -1,8 +1,32 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import DriveLibrary from './DriveLibrary';
 
 const ORANGE = '#F05423';
+
+// Caption textarea that grows to fit its full content, so the whole caption is
+// visible without scrolling inside the box (IG captions with hashtags can run
+// well past two lines). Re-measures on every value change.
+function AutoTextarea({ value, onChange, minRows = 3, style, ...rest }) {
+  const ref = useRef(null);
+  const fit = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  useLayoutEffect(fit, [value]);
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => { onChange(e); fit(); }}
+      rows={minRows}
+      style={{ ...style, overflow: 'hidden', resize: 'none' }}
+      {...rest}
+    />
+  );
+}
 
 const loadImg = (src) => new Promise((res, rej) => {
   const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src;
@@ -411,9 +435,8 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
                         <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</div>
                         <button onClick={() => copy(cur[k])} style={{ marginLeft: 'auto', fontSize: '10px', padding: '1px 8px', border: 0, background: 'none', color: 'var(--info)' }}>Copy</button>
                       </div>
-                      <textarea value={cur[k] || ''} onChange={e => editField(p.id, k, e.target.value, p.captions)}
-                        rows={2}
-                        style={{ width: '100%', resize: 'vertical', fontSize: '12.5px', lineHeight: 1.45 }} />
+                      <AutoTextarea value={cur[k] || ''} onChange={e => editField(p.id, k, e.target.value, p.captions)}
+                        style={{ width: '100%', fontSize: '12.5px', lineHeight: 1.45 }} />
                     </div>
                   ))}
                 </div>
