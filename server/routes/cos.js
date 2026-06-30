@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
-const { recentInbox } = require('../lib/inbox');
+const { recentInbox, markRead } = require('../lib/inbox');
 const { draftReply } = require('../lib/draft');
 const { upcomingEvents } = require('../lib/calendarFeed');
 const { postSlack } = require('../lib/slack');
@@ -600,7 +600,7 @@ module.exports = (pool) => {
 
 When he wants to CREATE something (like a marketing post), have a short back-and-forth first — ask one or two quick clarifying questions to get what you need (what's it about? which shop? any offer?), then do it. One question at a time, conversational.
 
-SPEAK like a person: short, natural sentences, no markdown, never read out "bullet one, bullet two". Before briefing him or quoting his numbers, call get_context. You CAN, right here: brief him, READ his action-needed emails and DRAFT replies to them (saved to his Gmail Drafts — never sent), draft a marketing post into the approval queue, clear alerts, schedule automations, set preferences. You CANNOT read his calendar from this dashboard — for that, tell him to use the Claude app. Never claim anything was sent, posted, or paid — email replies are saved as Gmail drafts for his review, posts wait in the approval queue. To reply to an email: call get_action_emails to find the right one, write the reply in his plain, friendly, no-hype voice, then call draft_email_reply with the original sender + message id, and tell him it's sitting in his Gmail drafts to review and send. If you're unsure what he wants said, ask one quick question first. Confirm before clearing alerts or staging a post.`;
+SPEAK like a person: short, natural sentences, no markdown, never read out "bullet one, bullet two". Before briefing him or quoting his numbers, call get_context. You CAN, right here: brief him, READ his action-needed emails and DRAFT replies to them (saved to his Gmail Drafts — never sent), draft a marketing post into the approval queue, clear alerts, schedule automations, set preferences. You CANNOT read his calendar from this dashboard — for that, tell him to use the Claude app. Never claim anything was sent, posted, or paid — email replies are saved as Gmail drafts for his review, posts wait in the approval queue. To reply to an email: call get_action_emails to find the right one, write the reply in his plain, friendly, no-hype voice, then call draft_email_reply with the original sender + message id, and tell him it's sitting in his Gmail drafts to review and send. When he says he's done with / has handled / wants to clear one or more emails, call mark_email_done with their uid(s) — that marks them read and clears them off his action list (reversible, nothing deleted). If you're unsure what he wants said, ask one quick question first. Confirm before clearing alerts or staging a post.`;
 
   const chatTools = [
     { name: 'get_context', description: "Fetch Jamie's latest brief, open alerts, marketing approvals waiting, and his automations. Call this before briefing him or answering about the business.", input_schema: { type: 'object', properties: {} } },
@@ -609,7 +609,8 @@ SPEAK like a person: short, natural sentences, no markdown, never read out "bull
     { name: 'set_preference', description: 'Record a standing preference (priority/ignore/tone/etc).', input_schema: { type: 'object', properties: { category: { type: 'string' }, insight: { type: 'string' } }, required: ['category', 'insight'] } },
     { name: 'draft_marketing_post', description: 'Draft a social media post (Instagram/Facebook/Google) and stage it in the marketing approval queue. Only call this once you have what the post is about — ask Jamie first if you do not.', input_schema: { type: 'object', properties: { topic: { type: 'string', description: 'What the post is about — the job, offer, or message' }, offer: { type: 'string', description: 'Any promo/offer to include (optional)' } }, required: ['topic'] } },
     { name: 'get_action_emails', description: "Read Jamie's recent action-needed / unread emails (sender, subject, date, message id). Call this before drafting an email reply so you know who to reply to and can thread it correctly.", input_schema: { type: 'object', properties: {} } },
-    { name: 'draft_email_reply', description: "Write a reply to one of Jamie's emails and SAVE IT AS A DRAFT in his Gmail — it never sends. Use after get_action_emails. YOU compose the full reply text in Jamie's plain, friendly, no-hype voice from his instruction. If unsure what he wants to say, ask him first.", input_schema: { type: 'object', properties: { to: { type: 'string', description: "recipient email — the original sender's address" }, subject: { type: 'string', description: 'the original subject (Re: is added automatically)' }, body: { type: 'string', description: 'the full reply text, ready for Jamie to review and send' }, in_reply_to: { type: 'string', description: 'the original message id from get_action_emails, so the draft threads onto the conversation' } }, required: ['to', 'body'] } }
+    { name: 'draft_email_reply', description: "Write a reply to one of Jamie's emails and SAVE IT AS A DRAFT in his Gmail — it never sends. Use after get_action_emails. YOU compose the full reply text in Jamie's plain, friendly, no-hype voice from his instruction. If unsure what he wants to say, ask him first.", input_schema: { type: 'object', properties: { to: { type: 'string', description: "recipient email — the original sender's address" }, subject: { type: 'string', description: 'the original subject (Re: is added automatically)' }, body: { type: 'string', description: 'the full reply text, ready for Jamie to review and send' }, in_reply_to: { type: 'string', description: 'the original message id from get_action_emails, so the draft threads onto the conversation' } }, required: ['to', 'body'] } },
+    { name: 'mark_email_done', description: "Mark one or more action emails as handled — clears them off Jamie's action list by marking them READ in Gmail. Reversible; nothing is deleted, archived, or moved. Use when Jamie says he's done with / has handled / wants to clear an email. Pass the uid(s) from get_action_emails.", input_schema: { type: 'object', properties: { uids: { type: 'array', items: { type: 'integer' }, description: 'the uid value(s) from get_action_emails for the email(s) Jamie has handled' } }, required: ['uids'] } }
   ];
 
   const execTool = async (name, input, who) => {
@@ -677,7 +678,7 @@ SPEAK like a person: short, natural sentences, no markdown, never read out "bull
       const inbox = await recentInbox({ user: process.env.GMAIL_IMAP_USER, pass: process.env.GMAIL_IMAP_PASS });
       if (!inbox.ok) return { error: inbox.error };
       const emails = inbox.threads.filter(t => t.actionNeeded || t.unread).slice(0, 12).map(t => ({
-        from: t.from, fromName: t.fromName, subject: t.subject, date: t.date, unread: t.unread, messageId: t.messageId,
+        from: t.from, fromName: t.fromName, subject: t.subject, date: t.date, unread: t.unread, messageId: t.messageId, uid: t.uid,
       }));
       return { count: emails.length, emails };
     }
@@ -692,6 +693,13 @@ SPEAK like a person: short, natural sentences, no markdown, never read out "bull
       });
       if (!r.ok) return { error: r.error };
       return { drafted: true, to, where: 'Gmail Drafts', note: 'Saved the reply to his Gmail Drafts — nothing sent. He reviews and sends it from Gmail.' };
+    }
+    if (name === 'mark_email_done') {
+      const uids = Array.isArray(input.uids) ? input.uids : [input.uids];
+      if (!uids.filter(Boolean).length) return { error: 'need the uid(s) from get_action_emails' };
+      const r = await markRead({ user: process.env.GMAIL_IMAP_USER, pass: process.env.GMAIL_IMAP_PASS, uids });
+      if (!r.ok) return { error: r.error };
+      return { done: true, cleared: r.marked, note: 'Marked read in Gmail — cleared off his action list. Reversible; nothing deleted or archived.' };
     }
     return { error: 'unknown tool' };
   };
@@ -751,9 +759,10 @@ SPEAK like a person: short, natural sentences, no markdown, never read out "bull
   //
   // One-time setup: create a Slack app -> Event Subscriptions Request URL =
   //   https://<dashboard>/api/cos/slack/events ; subscribe to bot events
-  //   message.im (DMs) and optionally message.channels ; add a bot token scope
-  //   chat:write ; then set on the server: SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN,
-  //   and optional SLACK_OWNER_USER_ID (restrict Atlas to only answer Jamie).
+  //   message.im (DMs) + app_mention (@Atlas in any channel it's added to) ;
+  //   bot scopes chat:write, im:history, app_mentions:read ; then set on the
+  //   server: SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN, and optional
+  //   SLACK_OWNER_USER_ID (restrict Atlas to only answer Jamie).
   const seenEvents = new Set();   // de-dupe Slack's delivery retries (per process)
   const chanHistory = new Map();  // short rolling context, keyed by Slack channel
 
@@ -789,19 +798,25 @@ SPEAK like a person: short, natural sentences, no markdown, never read out "bull
     try {
       if (b.type !== 'event_callback' || !b.event) return;
       const ev = b.event;
-      if (ev.type !== 'message' || ev.bot_id || ev.subtype) return;   // skip bots/edits/joins
+      if (ev.bot_id || ev.subtype) return;                            // skip the bot's own + edits/joins
+      // DMs (message.im, answer everything) + channel @mentions (app_mention,
+      // answer only when called) — so Atlas is live in any channel it's added to
+      // without butting into every message.
+      if (ev.type !== 'message' && ev.type !== 'app_mention') return;
       const owner = process.env.SLACK_OWNER_USER_ID;
       if (owner && ev.user !== owner) return;                         // only answer Jamie
       if (b.event_id) {                                               // drop duplicate retries
         if (seenEvents.has(b.event_id)) return;
         seenEvents.add(b.event_id); if (seenEvents.size > 1000) seenEvents.clear();
       }
-      const text = (ev.text || '').trim();
+      const text = (ev.text || '').replace(/<@[A-Z0-9]+>/g, '').trim(); // strip the "@Atlas" mention
       if (!text || !ANTHROPIC_KEY) return;
       await ensureTables();
-      const prior = chanHistory.get(ev.channel) || [];
+      // Separate short context per conversation (a DM, or a specific channel thread).
+      const convoKey = ev.channel + (ev.thread_ts ? ':' + ev.thread_ts : '');
+      const prior = chanHistory.get(convoKey) || [];
       const { reply, messages } = await atlasTurn([...prior, { role: 'user', content: text }], 'slack:' + (ev.user || 'owner'));
-      chanHistory.set(ev.channel, messages.slice(-20));
+      chanHistory.set(convoKey, messages.slice(-20));
       await slackReply(ev.channel, reply, ev.thread_ts || ev.ts);
     } catch (e) {
       try { await slackReply(b.event && b.event.channel, `Hit a snag: ${e.message}`); } catch (_) { /* ignore */ }
