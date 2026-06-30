@@ -13,7 +13,9 @@ const pool = new Pool({
 });
 
 app.use(cors({ origin: process.env.CLIENT_URL || '*' }));
-app.use(express.json());
+// Stash the raw body alongside the parsed JSON so the Slack events endpoint can
+// verify request signatures (Slack signs the raw bytes, not the parsed object).
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 const authRoutes = require('./routes/auth');
 const locationsRoutes = require('./routes/locations');
