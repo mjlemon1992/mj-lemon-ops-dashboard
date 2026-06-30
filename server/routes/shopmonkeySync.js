@@ -75,33 +75,37 @@ async function buildCommittedWip(apiKey, locationId) {
   return { total_count: rows.length, total_value: sum(rows), active_count: active.length, active_value: sum(active), aging_count: aging.length, aging_value: sum(aging), aging_days: AGING_DAYS, by_stage: Object.values(byStage).sort((a, b) => b.total - a.total), active: active.sort((a, b) => new Date(b.authorized_date) - new Date(a.authorized_date)), aging: aging.sort((a, b) => new Date(a.authorized_date) - new Date(b.authorized_date)) };
 }
 // ---- end Committed WIP helpers --------------------------------------------
-async function fetchOrdersSince(apiKey, sinceDate, maxPages = 20) {
+async function fetchOrdersSince(apiKey, sinceDate, maxPages = 40) {
   const pageSize = 100;
   const iso = sinceDate.toISOString();
-  // Stable sort on an IMMUTABLE field (createdDate). Without it, skip-pagination
-  // runs over Shopmonkey's default (mutable) order, which reshuffles as the shop
-  // edits orders all day — so page windows overlapped (double-count) and gapped
-  // (miss), making revenue swing thousands of dollars between identical calls.
-  // createdDate-asc is the verified deterministic sort (id/number were ignored).
-  // Dedupe by id is belt-and-suspenders; useSort degrades gracefully on a 400.
+  // Shopmonkey caps pages at 100, and its skip-based 2nd page (skip=100) is LOSSY:
+  // it intermittently drops orders, so probing the SAME data 3x returned 100/102/107
+  // and revenue swung thousands between identical calls. Fix: KEYSET pagination —
+  // sort by createdDate asc and page forward with createdDate >= the last row seen,
+  // never touching the broken skip path. gte + dedupe-by-id handles boundary ties.
   const byId = new Map();
-  let useSort = true;
+  let cursor = null;
   for (let page = 0; page < maxPages; page++) {
-    const p = { where: JSON.stringify({ invoicedDate: { gte: iso } }), limit: String(pageSize), skip: String(page * pageSize) };
-    if (useSort) p.sort = JSON.stringify([{ name: 'createdDate', order: 'asc' }]);
-    const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${new URLSearchParams(p)}`, {
+    const where = { invoicedDate: { gte: iso } };
+    if (cursor) where.createdDate = { gte: cursor };
+    const p = new URLSearchParams({ where: JSON.stringify(where), limit: String(pageSize), sort: JSON.stringify([{ name: 'createdDate', order: 'asc' }]) });
+    const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${p}`, {
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
     });
     if (!res.ok) {
-      if (useSort && res.status === 400) { useSort = false; page--; continue; }   // sort format unsupported → retry unsorted
       const txt = await res.text();
       throw new Error(`Shopmonkey API error ${res.status}: ${txt.slice(0, 200)}`);
     }
-    const data = await res.json();
-    const batch = (data && data.data && data.data.data) ? data.data.data : (data.data || []);
+    const b = await res.json();
+    const batch = Array.isArray(b.data) ? b.data : (b.data && b.data.data) || [];
     if (!batch.length) break;
-    for (const o of batch) if (o && o.id) byId.set(o.id, o);
-    if (batch.length < pageSize) break;
+    let added = 0;
+    for (const o of batch) if (o && o.id && !byId.has(o.id)) { byId.set(o.id, o); added++; }
+    const lastCreated = batch[batch.length - 1].createdDate;
+    const more = b.meta ? b.meta.hasMore !== false : batch.length === pageSize;
+    if (!more) break;
+    if (!lastCreated || (lastCreated === cursor && added === 0)) break;   // no forward progress -> stop
+    cursor = lastCreated;
   }
   return [...byId.values()].filter(o => !o.deleted && o.invoicedDate && o.invoicedDate !== 'empty');
 }
@@ -280,21 +284,14 @@ module.exports = (pool) => {
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const where = JSON.stringify({ invoicedDate: { gte: monthStart.toISOString() } });
-    const single = async (limit) => {
-      const p = new URLSearchParams({ where, limit: String(limit), skip: '0', sort: JSON.stringify([{ name: 'createdDate', order: 'asc' }]) });
-      const r = await fetch(`https://api.shopmonkey.cloud/v3/order?${p}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
-      const b = await r.json();
-      const batch = Array.isArray(b.data) ? b.data : (b.data && b.data.data) || [];
-      return { count: batch.length, hasMore: b.meta && b.meta.hasMore, total: b.meta && b.meta.total };
-    };
-    const out = {};
-    for (const lim of [200, 500, 1000]) {
-      const runs = [];
-      for (let i = 0; i < 3; i++) runs.push(await single(lim));
-      out['limit_' + lim] = { counts: runs.map(r => r.count), hasMore: runs.map(r => r.hasMore), total: runs[0].total };
+    const runs = [];
+    for (let i = 0; i < 4; i++) {
+      const o = await fetchOrdersSince(apiKey, monthStart);
+      runs.push(new Set(o.map(x => x.id)));
     }
-    res.json(out);
+    const union = new Set(); runs.forEach(s => s.forEach(x => union.add(x)));
+    const flapping = [...union].filter(x => !runs.every(s => s.has(x)));
+    res.json({ counts: runs.map(s => s.size), stable: flapping.length === 0, union: union.size, flapping: flapping.length });
   });
 
   router.post('/:locationId/refresh', syncAuth, async (req, res) => {
