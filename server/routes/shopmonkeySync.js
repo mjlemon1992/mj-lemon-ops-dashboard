@@ -272,6 +272,36 @@ module.exports = (pool) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Debug: probe which Shopmonkey sort param format is accepted, so pagination
+  // can be made deterministic. Returns status + first ids for each candidate.
+  router.get('/:locationId/sm-sort-probe', authenticateToken, async (req, res) => {
+    const apiKey = process.env.SHOPMONKEY_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const where = JSON.stringify({ invoicedDate: { gte: monthStart.toISOString() } });
+    const candidates = [
+      { label: 'array-id-asc', extra: { sort: JSON.stringify([{ id: 'asc' }]) } },
+      { label: 'obj-id-asc', extra: { sort: JSON.stringify({ id: 'asc' }) } },
+      { label: 'sort=id+order=asc', extra: { sort: 'id', order: 'asc' } },
+      { label: 'array-name-order', extra: { sort: JSON.stringify([{ name: 'id', order: 'asc' }]) } },
+      { label: 'sortBy+sortOrder', extra: { sortBy: 'id', sortOrder: 'asc' } },
+      { label: 'orderBy-obj', extra: { orderBy: JSON.stringify({ id: 'asc' }) } },
+      { label: 'none', extra: {} },
+    ];
+    const out = [];
+    for (const c of candidates) {
+      try {
+        const p = new URLSearchParams({ where, limit: '5', skip: '0', ...c.extra });
+        const r = await fetch(`https://api.shopmonkey.cloud/v3/order?${p}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+        const b = await r.json().catch(() => ({}));
+        const batch = (b && b.data && b.data.data) ? b.data.data : (b.data || []);
+        out.push({ label: c.label, status: r.status, ok: r.ok, results: Array.isArray(batch) ? batch.length : null, ids: Array.isArray(batch) ? batch.slice(0, 5).map(o => o.id) : null, meta_keys: b && b.data && !Array.isArray(b.data) ? Object.keys(b.data) : Object.keys(b || {}) });
+      } catch (e) { out.push({ label: c.label, error: String(e.message).slice(0, 80) }); }
+    }
+    res.json({ probes: out });
+  });
+
   router.post('/:locationId/refresh', syncAuth, async (req, res) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
