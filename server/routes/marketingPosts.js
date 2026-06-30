@@ -65,14 +65,60 @@ module.exports = (pool) => {
         actioned_at TIMESTAMPTZ
       )`);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_marketing_post_loc_status ON marketing_post(location_id, status, created_at DESC)');
+    // Soft-delete columns: a deleted post is kept (deleted_at set) so it can be
+    // restored and so a vanished draft is never untraceable. deleted_via tells
+    // user-delete from auto-purge; deleted_by records who.
+    await pool.query('ALTER TABLE marketing_post ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ');
+    await pool.query('ALTER TABLE marketing_post ADD COLUMN IF NOT EXISTS deleted_via VARCHAR(20)');
+    await pool.query('ALTER TABLE marketing_post ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(120)');
+    // Append-only audit: every lifecycle event (create/approve/skip/delete/
+    // restore/purge) so "why did this post change/vanish" is always answerable.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS marketing_post_audit (
+        id BIGSERIAL PRIMARY KEY,
+        post_id UUID,
+        location_id UUID,
+        action VARCHAR(20) NOT NULL,
+        actor VARCHAR(120),
+        detail TEXT,
+        at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_mpa_post ON marketing_post_audit(post_id, at DESC)');
     _init = true;
+  };
+
+  // Audit is best-effort: a logging failure must never break the request that
+  // triggered it. actorOf derives a stable label from the authed user.
+  const actorOf = (req) => {
+    const u = req && req.user;
+    if (!u) return 'unknown';
+    return String(u.email || (u.role ? `${u.role}:${u.id || ''}` : '') || u.id || 'unknown').slice(0, 120);
+  };
+  const audit = async (postId, locationId, action, actor, detail) => {
+    try {
+      await pool.query(
+        'INSERT INTO marketing_post_audit (post_id, location_id, action, actor, detail) VALUES ($1,$2,$3,$4,$5)',
+        [postId || null, locationId || null, action, actor || null, detail || null]
+      );
+    } catch (_) { /* never let auditing break the real operation */ }
   };
 
   // Un-actioned drafts self-expire after PURGE_DAYS (the R2 "lifecycle rule",
   // done in SQL for the DB-backed v1). Posted/skipped rows are kept.
   const purge = async () => {
+    // Un-actioned drafts past PURGE_DAYS are SOFT-deleted (recoverable + logged),
+    // not dropped — so an "expired" draft can still be explained and restored.
+    const { rows } = await pool.query(
+      `UPDATE marketing_post SET deleted_at = NOW(), deleted_via = 'purge'
+         WHERE status='draft' AND deleted_at IS NULL AND created_at < NOW() - ($1 || ' days')::interval
+         RETURNING id, location_id`,
+      [String(PURGE_DAYS)]
+    );
+    for (const r of rows) await audit(r.id, r.location_id, 'purge', 'system', `auto-expired after ${PURGE_DAYS}d`);
+    // Reclaim storage: rows soft-deleted longer than PURGE_DAYS are gone for good
+    // (their image bytea would otherwise accumulate forever).
     await pool.query(
-      `DELETE FROM marketing_post WHERE status='draft' AND created_at < NOW() - ($1 || ' days')::interval`,
+      `DELETE FROM marketing_post WHERE deleted_at IS NOT NULL AND deleted_at < NOW() - ($1 || ' days')::interval`,
       [String(PURGE_DAYS)]
     );
   };
@@ -151,6 +197,7 @@ module.exports = (pool) => {
           [req.params.locationId, name, note || null, req.body, mime]
         );
         const id = rows[0].id;
+        await audit(id, req.params.locationId, 'created', actorOf(req), note ? `note: ${note.slice(0, 80)}` : null);
 
         let captionError = null;
         try {
@@ -170,16 +217,25 @@ module.exports = (pool) => {
       await ensureTables();
       await purge();
       const status = req.query.status || 'draft';
+      // status=deleted returns the "Recently deleted" bin (soft-deleted rows,
+      // newest first by when they were deleted). Every other status excludes
+      // soft-deleted rows so a deleted post never lingers in a live queue.
+      const where = status === 'deleted'
+        ? 'location_id=$1 AND deleted_at IS NOT NULL'
+        : 'location_id=$1 AND status=$2 AND deleted_at IS NULL';
+      const params = status === 'deleted' ? [req.params.locationId] : [req.params.locationId, status];
       const { rows } = await pool.query(
         `SELECT id, location_name, status, note, image_mime, image_data,
-                caption_ig, caption_fb, caption_gbp, created_at, actioned_at
-           FROM marketing_post WHERE location_id=$1 AND status=$2 ORDER BY created_at DESC LIMIT 50`,
-        [req.params.locationId, status]
+                caption_ig, caption_fb, caption_gbp, created_at, actioned_at, deleted_at, deleted_via
+           FROM marketing_post WHERE ${where}
+           ORDER BY COALESCE(deleted_at, created_at) DESC LIMIT 50`,
+        params
       );
       res.json(rows.map(r => ({
         id: r.id, location_name: r.location_name, status: r.status, note: r.note,
         captions: { ig: r.caption_ig, fb: r.caption_fb, gbp: r.caption_gbp },
         image: dataUri(r), created_at: r.created_at, actioned_at: r.actioned_at,
+        deleted_at: r.deleted_at, deleted_via: r.deleted_via,
       })));
     } catch (e) { fail(res, e); }
   });
@@ -188,10 +244,11 @@ module.exports = (pool) => {
     try {
       await ensureTables();
       const { rows } = await pool.query(
-        `UPDATE marketing_post SET status=$1, actioned_at=NOW() WHERE id=$2 RETURNING id`,
+        `UPDATE marketing_post SET status=$1, actioned_at=NOW() WHERE id=$2 AND deleted_at IS NULL RETURNING id, location_id`,
         [status, req.params.postId]
       );
       if (!rows.length) return res.status(404).json({ error: 'Post not found' });
+      await audit(rows[0].id, rows[0].location_id, status, actorOf(req), null);
       res.json({ ok: true, id: rows[0].id, status });
     } catch (e) { fail(res, e); }
   };
@@ -200,13 +257,49 @@ module.exports = (pool) => {
   router.post('/post/:postId/skip', ...gate, setStatus('skipped'));
   router.post('/post/:postId/unapprove', ...gate, setStatus('draft'));
 
-  // Hard delete (e.g. imported the wrong image). Removes the row + its image entirely.
+  // Soft delete (e.g. imported the wrong image). The row + image are KEPT and
+  // hidden from the live queues; it lands in "Recently deleted" and can be
+  // restored. A bounded hard-sweep in purge() reclaims the storage later. Every
+  // delete is audited, so a vanished post is always attributable.
   router.delete('/post/:postId', ...gate, async (req, res) => {
     try {
       await ensureTables();
-      const { rows } = await pool.query('DELETE FROM marketing_post WHERE id=$1 RETURNING id', [req.params.postId]);
+      const actor = actorOf(req);
+      const { rows } = await pool.query(
+        `UPDATE marketing_post SET deleted_at = NOW(), deleted_via = 'user', deleted_by = $2
+           WHERE id=$1 AND deleted_at IS NULL RETURNING id, location_id`,
+        [req.params.postId, actor]
+      );
       if (!rows.length) return res.status(404).json({ error: 'Post not found' });
+      await audit(rows[0].id, rows[0].location_id, 'delete', actor, 'soft-deleted via UI');
+      res.json({ ok: true, id: rows[0].id, softDeleted: true });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Restore a soft-deleted post back to its prior status.
+  router.post('/post/:postId/restore', ...gate, async (req, res) => {
+    try {
+      await ensureTables();
+      const { rows } = await pool.query(
+        `UPDATE marketing_post SET deleted_at = NULL, deleted_via = NULL, deleted_by = NULL
+           WHERE id=$1 AND deleted_at IS NOT NULL RETURNING id, location_id`,
+        [req.params.postId]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Post not found or not deleted' });
+      await audit(rows[0].id, rows[0].location_id, 'restore', actorOf(req), null);
       res.json({ ok: true, id: rows[0].id });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Per-post audit trail: who did what, when. Answers "why did this change/vanish".
+  router.get('/post/:postId/audit', ...gate, async (req, res) => {
+    try {
+      await ensureTables();
+      const { rows } = await pool.query(
+        'SELECT action, actor, detail, at FROM marketing_post_audit WHERE post_id=$1 ORDER BY at DESC LIMIT 100',
+        [req.params.postId]
+      );
+      res.json(rows);
     } catch (e) { fail(res, e); }
   });
 
@@ -217,7 +310,7 @@ module.exports = (pool) => {
       const { ig, fb, gbp } = req.body || {};
       const { rows } = await pool.query(
         `UPDATE marketing_post SET caption_ig=COALESCE($1,caption_ig), caption_fb=COALESCE($2,caption_fb),
-           caption_gbp=COALESCE($3,caption_gbp) WHERE id=$4 RETURNING id`,
+           caption_gbp=COALESCE($3,caption_gbp) WHERE id=$4 AND deleted_at IS NULL RETURNING id`,
         [ig ?? null, fb ?? null, gbp ?? null, req.params.postId]
       );
       if (!rows.length) return res.status(404).json({ error: 'Post not found' });
@@ -229,7 +322,7 @@ module.exports = (pool) => {
   router.post('/post/:postId/regenerate', ...gate, async (req, res) => {
     try {
       await ensureTables();
-      const { rows } = await pool.query('SELECT image_data, image_mime, note FROM marketing_post WHERE id=$1', [req.params.postId]);
+      const { rows } = await pool.query('SELECT image_data, image_mime, note FROM marketing_post WHERE id=$1 AND deleted_at IS NULL', [req.params.postId]);
       if (!rows.length) return res.status(404).json({ error: 'Post not found' });
       const r = rows[0];
       if (!r.image_data) return res.status(400).json({ error: 'No stored image to regenerate from' });

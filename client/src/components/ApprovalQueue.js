@@ -122,6 +122,8 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
   const [configured, setConfigured] = useState(true);
   const [posts, setPosts] = useState([]);
   const [approved, setApproved] = useState([]);
+  const [deleted, setDeleted] = useState([]);
+  const [showDeleted, setShowDeleted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [note, setNote] = useState('');
@@ -149,7 +151,8 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
     Promise.all([
       api(`/marketing/posts/${locId}/queue?status=draft`).catch(() => []),
       api(`/marketing/posts/${locId}/queue?status=approved`).catch(() => []),
-    ]).then(([d, a]) => { setPosts(d || []); setApproved(a || []); setLoading(false); if (onCount) onCount({ drafts: (d || []).length, approved: (a || []).length }); });
+      api(`/marketing/posts/${locId}/queue?status=deleted`).catch(() => []),
+    ]).then(([d, a, x]) => { setPosts(d || []); setApproved(a || []); setDeleted(x || []); setLoading(false); if (onCount) onCount({ drafts: (d || []).length, approved: (a || []).length }); });
   }, [locId, api, onCount]);
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -293,10 +296,15 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       refresh();
     } catch (e) { setErr(String(e.message || e)); }
   };
-  // Hard delete — for when the wrong image got imported.
+  // Soft delete — for when the wrong image got imported. Recoverable from
+  // "Recently deleted" below, so this no longer destroys anything outright.
   const del = async (id) => {
-    if (!window.confirm('Delete this post and its image? This can’t be undone.')) return;
+    if (!window.confirm('Delete this post? You can restore it from “Recently deleted” below.')) return;
     try { await api(`/marketing/posts/post/${id}`, { method: 'DELETE' }); refresh(); }
+    catch (e) { setErr(String(e.message || e)); }
+  };
+  const restore = async (id) => {
+    try { await api(`/marketing/posts/post/${id}/restore`, { method: 'POST' }); setNotice('Post restored.'); refresh(); }
     catch (e) { setErr(String(e.message || e)); }
   };
   const saveEdits = async (id) => {
@@ -459,6 +467,33 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {deleted.length > 0 && (
+        <div style={{ marginTop: '18px' }}>
+          <button onClick={() => setShowDeleted(v => !v)}
+            style={{ border: 0, background: 'none', color: 'var(--text3)', fontSize: '12px', cursor: 'pointer', padding: '4px 0' }}>
+            {showDeleted ? '▾' : '▸'} Recently deleted ({deleted.length})
+          </button>
+          {showDeleted && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+              {deleted.map(p => (
+                <div className="card" key={p.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '10px 12px', flexWrap: 'wrap', opacity: 0.75 }}>
+                  {p.image
+                    ? <img src={p.image} alt="" onClick={() => setLightbox(p.image)} title="Click to enlarge" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, flexShrink: 0, cursor: 'zoom-in' }} />
+                    : <div style={{ width: 44, height: 44, borderRadius: 6, background: 'var(--bg3)', flexShrink: 0 }} />}
+                  <div style={{ flex: '1 1 160px', minWidth: 0, fontSize: '12px', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.captions?.ig || p.note || '(no caption)'}
+                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--text3)' }}>
+                    {p.deleted_via === 'purge' ? 'auto-expired' : 'deleted'}
+                  </span>
+                  <button onClick={() => restore(p.id)} style={{ fontSize: '12px' }}>↩ Restore</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
