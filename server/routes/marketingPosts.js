@@ -28,7 +28,9 @@ const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 // Studio, friendlier billing than OpenAI). If GEMINI_API_KEY is set it's used;
 // otherwise we fall back to OpenAI. Model is overridable in case the id drifts.
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image-preview';
+// 'auto' = discover an image-capable model from the key (Google renames these
+// often). Pin a specific id via GEMINI_IMAGE_MODEL only if you want to override.
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'auto';
 const HAS_IMAGE_GEN = !!(GEMINI_KEY || OPENAI_KEY);
 
 // The image is a BACKGROUND only — the dashboard overlays the real logo and the
@@ -43,9 +45,29 @@ const imagePromptFor = (type, topic) => {
   return `Marketing poster background image for a transmission repair shop (Mister Transmission, Red Deer & Kelowna, Canada). Subject: ${subj}. ${IMAGE_STYLE}`;
 };
 
+// Resolve an image-capable Gemini model from the key (cached). 'auto' lists the
+// account's models and picks an image generateContent model, so a Google rename
+// never breaks us. A pinned GEMINI_IMAGE_MODEL is used as-is.
+let _gemModel;
+async function geminiModelId() {
+  if (_gemModel) return _gemModel;
+  if (GEMINI_IMAGE_MODEL && GEMINI_IMAGE_MODEL !== 'auto') { _gemModel = GEMINI_IMAGE_MODEL; return _gemModel; }
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`);
+  const b = await r.json();
+  if (!r.ok) throw Object.assign(new Error(`Gemini list-models ${r.status}: ${JSON.stringify(b).slice(0, 200)}`), { status: 502 });
+  const models = (b.models || []).map(m => ({ id: String(m.name || '').replace(/^models\//, ''), methods: m.supportedGenerationMethods || [] }));
+  // image-output models via generateContent (exclude Imagen, which uses :predict)
+  const img = models.filter(m => /image/i.test(m.id) && m.methods.includes('generateContent') && !/imagen/i.test(m.id));
+  const pick = img.find(m => /flash/i.test(m.id)) || img[0];
+  if (!pick) throw Object.assign(new Error('No Gemini image model for this key. Available: ' + models.map(m => m.id).join(', ').slice(0, 300)), { status: 502 });
+  _gemModel = pick.id;
+  return _gemModel;
+}
+
 // Returns a data: URI for a generated background image, or throws with .status.
 async function geminiImage(prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${GEMINI_KEY}`;
+  const model = await geminiModelId();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
   const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -243,7 +265,19 @@ module.exports = (pool) => {
       const { type = 'seasonal', topic = '' } = req.body || {};
       const prompt = imagePromptFor(type, topic);
       const image = GEMINI_KEY ? await geminiImage(prompt) : await openaiImage(prompt);
-      res.json({ image, provider: GEMINI_KEY ? 'gemini' : 'openai' });
+      res.json({ image, provider: GEMINI_KEY ? 'gemini' : 'openai', model: GEMINI_KEY ? _gemModel : IMAGE_MODEL });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Debug: list the image models this key can use (helps pin GEMINI_IMAGE_MODEL).
+  router.get('/poster-image/models', ...gate, async (req, res) => {
+    try {
+      if (!GEMINI_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY not set' });
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`);
+      const b = await r.json();
+      if (!r.ok) return res.status(502).json({ error: `Gemini ${r.status}: ${JSON.stringify(b).slice(0, 200)}` });
+      const models = (b.models || []).map(m => ({ id: String(m.name || '').replace(/^models\//, ''), methods: m.supportedGenerationMethods || [] }));
+      res.json({ imageModels: models.filter(m => /image/i.test(m.id)).map(m => m.id), all: models.map(m => m.id) });
     } catch (e) { fail(res, e); }
   });
 
