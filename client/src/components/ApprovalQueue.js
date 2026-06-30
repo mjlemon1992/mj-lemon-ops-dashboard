@@ -105,7 +105,7 @@ function trimTransparent(im) {
 async function getLogo() {
   if (_logo) return _logo;
   try {
-    const blob = await (await fetch('/mt-logo.png')).blob();
+    const blob = await (await fetch('/mt-logo-v2.png')).blob();   // tightly-cropped from the .ai vector; new name busts the asset cache
     const raw = await new Promise((r, j) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = j; fr.readAsDataURL(blob); });
     const im = await loadImg(raw);
     _logo = trimTransparent(im) || { data: raw, aspect: im.height / im.width };
