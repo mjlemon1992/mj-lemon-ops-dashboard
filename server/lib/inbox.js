@@ -36,6 +36,9 @@ async function recentInbox({ user, pass, sinceDays = 4, max = 25 } = {}) {
             date: msg.envelope && msg.envelope.date,
             unread: !(msg.flags && msg.flags.has('\\Seen')),
             actionNeeded,
+            // Carried so a reply can be threaded (In-Reply-To/References) and addressed.
+            messageId: (msg.envelope && msg.envelope.messageId) || null,
+            uid: msg.uid,
           });
         }
       }

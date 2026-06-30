@@ -1,6 +1,8 @@
+const crypto = require('crypto');
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 const { recentInbox } = require('../lib/inbox');
+const { draftReply } = require('../lib/draft');
 const { upcomingEvents } = require('../lib/calendarFeed');
 const { postSlack } = require('../lib/slack');
 
@@ -598,14 +600,16 @@ module.exports = (pool) => {
 
 When he wants to CREATE something (like a marketing post), have a short back-and-forth first — ask one or two quick clarifying questions to get what you need (what's it about? which shop? any offer?), then do it. One question at a time, conversational.
 
-SPEAK like a person: short, natural sentences, no markdown, never read out "bullet one, bullet two". Before briefing him or quoting his numbers, call get_context. You CAN, right here: brief him, draft a marketing post into the approval queue, clear alerts, schedule automations, set preferences. You CANNOT draft email or read his calendar from this dashboard — for those, tell him to use the Claude app voice. Never claim anything was sent, posted, or paid — everything stays a draft / in the approval queue for his tap. Confirm before clearing alerts or staging a post.`;
+SPEAK like a person: short, natural sentences, no markdown, never read out "bullet one, bullet two". Before briefing him or quoting his numbers, call get_context. You CAN, right here: brief him, READ his action-needed emails and DRAFT replies to them (saved to his Gmail Drafts — never sent), draft a marketing post into the approval queue, clear alerts, schedule automations, set preferences. You CANNOT read his calendar from this dashboard — for that, tell him to use the Claude app. Never claim anything was sent, posted, or paid — email replies are saved as Gmail drafts for his review, posts wait in the approval queue. To reply to an email: call get_action_emails to find the right one, write the reply in his plain, friendly, no-hype voice, then call draft_email_reply with the original sender + message id, and tell him it's sitting in his Gmail drafts to review and send. If you're unsure what he wants said, ask one quick question first. Confirm before clearing alerts or staging a post.`;
 
   const chatTools = [
     { name: 'get_context', description: "Fetch Jamie's latest brief, open alerts, marketing approvals waiting, and his automations. Call this before briefing him or answering about the business.", input_schema: { type: 'object', properties: {} } },
     { name: 'clear_alerts', description: 'Clear/acknowledge alerts. Pass specific alert keys, or all:true to clear every open alert.', input_schema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } }, all: { type: 'boolean' } } } },
     { name: 'create_automation', description: 'Schedule a recurring automation (e.g. a 7am morning brief, or a 10pm marketing digest).', input_schema: { type: 'object', properties: { title: { type: 'string' }, action_type: { type: 'string', enum: ['morning_brief', 'marketing_digest', 'ops_digest', 'generate_posts'] }, time_local: { type: 'string' }, frequency: { type: 'string', enum: ['daily', 'weekly'] }, weekday: { type: 'integer' }, count: { type: 'integer' } }, required: ['title', 'action_type', 'time_local', 'frequency'] } },
     { name: 'set_preference', description: 'Record a standing preference (priority/ignore/tone/etc).', input_schema: { type: 'object', properties: { category: { type: 'string' }, insight: { type: 'string' } }, required: ['category', 'insight'] } },
-    { name: 'draft_marketing_post', description: 'Draft a social media post (Instagram/Facebook/Google) and stage it in the marketing approval queue. Only call this once you have what the post is about — ask Jamie first if you do not.', input_schema: { type: 'object', properties: { topic: { type: 'string', description: 'What the post is about — the job, offer, or message' }, offer: { type: 'string', description: 'Any promo/offer to include (optional)' } }, required: ['topic'] } }
+    { name: 'draft_marketing_post', description: 'Draft a social media post (Instagram/Facebook/Google) and stage it in the marketing approval queue. Only call this once you have what the post is about — ask Jamie first if you do not.', input_schema: { type: 'object', properties: { topic: { type: 'string', description: 'What the post is about — the job, offer, or message' }, offer: { type: 'string', description: 'Any promo/offer to include (optional)' } }, required: ['topic'] } },
+    { name: 'get_action_emails', description: "Read Jamie's recent action-needed / unread emails (sender, subject, date, message id). Call this before drafting an email reply so you know who to reply to and can thread it correctly.", input_schema: { type: 'object', properties: {} } },
+    { name: 'draft_email_reply', description: "Write a reply to one of Jamie's emails and SAVE IT AS A DRAFT in his Gmail — it never sends. Use after get_action_emails. YOU compose the full reply text in Jamie's plain, friendly, no-hype voice from his instruction. If unsure what he wants to say, ask him first.", input_schema: { type: 'object', properties: { to: { type: 'string', description: "recipient email — the original sender's address" }, subject: { type: 'string', description: 'the original subject (Re: is added automatically)' }, body: { type: 'string', description: 'the full reply text, ready for Jamie to review and send' }, in_reply_to: { type: 'string', description: 'the original message id from get_action_emails, so the draft threads onto the conversation' } }, required: ['to', 'body'] } }
   ];
 
   const execTool = async (name, input, who) => {
@@ -669,12 +673,63 @@ SPEAK like a person: short, natural sentences, no markdown, never read out "bull
       );
       return { staged: true, topic, note: 'Drafted captions and added it to the Marketing approval queue. Add a photo and approve it there when ready.' };
     }
+    if (name === 'get_action_emails') {
+      const inbox = await recentInbox({ user: process.env.GMAIL_IMAP_USER, pass: process.env.GMAIL_IMAP_PASS });
+      if (!inbox.ok) return { error: inbox.error };
+      const emails = inbox.threads.filter(t => t.actionNeeded || t.unread).slice(0, 12).map(t => ({
+        from: t.from, fromName: t.fromName, subject: t.subject, date: t.date, unread: t.unread, messageId: t.messageId,
+      }));
+      return { count: emails.length, emails };
+    }
+    if (name === 'draft_email_reply') {
+      const to = (input.to || '').trim();
+      const body = (input.body || '').trim();
+      if (!to || !body) return { error: 'need a recipient (to) and a reply body' };
+      const r = await draftReply({
+        user: process.env.GMAIL_IMAP_USER, pass: process.env.GMAIL_IMAP_PASS,
+        to, subject: input.subject || '', body, inReplyTo: input.in_reply_to || null,
+        fromName: process.env.GMAIL_FROM_NAME || 'Jamie Lemon',
+      });
+      if (!r.ok) return { error: r.error };
+      return { drafted: true, to, where: 'Gmail Drafts', note: 'Saved the reply to his Gmail Drafts — nothing sent. He reviews and sends it from Gmail.' };
+    }
     return { error: 'unknown tool' };
   };
 
-  // Voice/text conversation. The browser does speech<->text; this runs the
-  // reasoning + actions. Pass {briefing:true} on the first turn to open with the
-  // briefing, then send the running {messages} array each turn.
+  // The Atlas brain: one conversational "turn" = up to 4 model<->tool rounds,
+  // returning the final reply plus the updated message history. Shared by the
+  // dashboard voice chat AND the always-on Slack endpoint below, so both surfaces
+  // run the identical reasoning + tools.
+  const atlasTurn = async (messages, who) => {
+    let msgs = messages.slice(-20);
+    for (let i = 0; i < 4; i++) {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: MODEL, max_tokens: 700, system: VOICE_SYSTEM, tools: chatTools, messages: msgs })
+      });
+      const body = await r.json();
+      if (!r.ok) throw Object.assign(new Error(`Anthropic ${r.status}: ${JSON.stringify(body).slice(0, 200)}`), { status: 502 });
+      const blocks = Array.isArray(body.content) ? body.content : [];
+      const toolUses = blocks.filter(b => b.type === 'tool_use');
+      if (!toolUses.length) {
+        const reply = blocks.filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
+        return { reply, messages: [...msgs, { role: 'assistant', content: blocks }] };
+      }
+      msgs.push({ role: 'assistant', content: blocks });
+      const results = [];
+      for (const t of toolUses) {
+        let out; try { out = await execTool(t.name, t.input || {}, who); } catch (e) { out = { error: e.message }; }
+        results.push({ type: 'tool_result', tool_use_id: t.id, content: JSON.stringify(out).slice(0, 4000) });
+      }
+      msgs.push({ role: 'user', content: results });
+    }
+    return { reply: "Sorry, I got a bit tangled — say that again?", messages: msgs };
+  };
+
+  // Voice/text conversation (dashboard). The browser does speech<->text; this runs
+  // the reasoning + actions. Pass {briefing:true} on the first turn to open with
+  // the briefing, then send the running {messages} array each turn.
   router.post('/chat', authenticateToken, ownerOrPartner, async (req, res) => {
     try {
       await ensureTables();
@@ -683,31 +738,74 @@ SPEAK like a person: short, natural sentences, no markdown, never read out "bull
       let messages = Array.isArray(req.body && req.body.messages) ? req.body.messages.slice(-20) : [];
       if (req.body && req.body.briefing) messages = [{ role: 'user', content: 'Good morning — give me my briefing.' }];
       if (!messages.length) return res.status(400).json({ error: 'messages[] or briefing required' });
+      const { reply, messages: out } = await atlasTurn(messages, who);
+      res.json({ reply, messages: out });
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
 
-      for (let i = 0; i < 4; i++) {
-        const r = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-          body: JSON.stringify({ model: MODEL, max_tokens: 700, system: VOICE_SYSTEM, tools: chatTools, messages })
-        });
-        const body = await r.json();
-        if (!r.ok) return res.status(502).json({ error: `Anthropic ${r.status}: ${JSON.stringify(body).slice(0, 200)}` });
-        const blocks = Array.isArray(body.content) ? body.content : [];
-        const toolUses = blocks.filter(b => b.type === 'tool_use');
-        if (!toolUses.length) {
-          const reply = blocks.filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
-          return res.json({ reply, messages: [...messages, { role: 'assistant', content: blocks }] });
-        }
-        messages.push({ role: 'assistant', content: blocks });
-        const results = [];
-        for (const t of toolUses) {
-          let out; try { out = await execTool(t.name, t.input || {}, who); } catch (e) { out = { error: e.message }; }
-          results.push({ type: 'tool_result', tool_use_id: t.id, content: JSON.stringify(out).slice(0, 4000) });
-        }
-        messages.push({ role: 'user', content: results });
+  // ---------- ALWAYS-ON ATLAS IN SLACK ----------
+  // Inbound Slack Events endpoint. Jamie messages the Atlas bot from anywhere
+  // (his phone included) and the SAME brain that powers /chat answers + acts —
+  // no Claude app needed, 24/7. Draft/approve rules still apply (nothing sends,
+  // posts, or spends without his tap).
+  //
+  // One-time setup: create a Slack app -> Event Subscriptions Request URL =
+  //   https://<dashboard>/api/cos/slack/events ; subscribe to bot events
+  //   message.im (DMs) and optionally message.channels ; add a bot token scope
+  //   chat:write ; then set on the server: SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN,
+  //   and optional SLACK_OWNER_USER_ID (restrict Atlas to only answer Jamie).
+  const seenEvents = new Set();   // de-dupe Slack's delivery retries (per process)
+  const chanHistory = new Map();  // short rolling context, keyed by Slack channel
+
+  const verifySlack = (req) => {
+    const secret = process.env.SLACK_SIGNING_SECRET;
+    if (!secret || !req.rawBody) return false;
+    const ts = req.get('X-Slack-Request-Timestamp');
+    const sig = req.get('X-Slack-Signature') || '';
+    if (!ts || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false; // replay guard (5 min)
+    const mine = 'v0=' + crypto.createHmac('sha256', secret).update(`v0:${ts}:${req.rawBody.toString('utf8')}`).digest('hex');
+    try { return crypto.timingSafeEqual(Buffer.from(mine), Buffer.from(sig)); } catch { return false; }
+  };
+
+  const slackReply = async (channel, text, thread_ts) => {
+    const token = process.env.SLACK_BOT_TOKEN;
+    if (!token || !channel || !text) return;
+    try {
+      await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ channel, text, thread_ts, mrkdwn: true }),
+      });
+    } catch (e) { /* best-effort */ }
+  };
+
+  router.post('/slack/events', async (req, res) => {
+    const b = req.body || {};
+    if (b.type === 'url_verification') return res.json({ challenge: b.challenge }); // setup handshake
+    if (!verifySlack(req)) return res.status(401).end();
+    // Ack inside Slack's 3s window, THEN run the slow model loop async (Slack
+    // retries on a non-200, which would double-answer).
+    res.status(200).end();
+    try {
+      if (b.type !== 'event_callback' || !b.event) return;
+      const ev = b.event;
+      if (ev.type !== 'message' || ev.bot_id || ev.subtype) return;   // skip bots/edits/joins
+      const owner = process.env.SLACK_OWNER_USER_ID;
+      if (owner && ev.user !== owner) return;                         // only answer Jamie
+      if (b.event_id) {                                               // drop duplicate retries
+        if (seenEvents.has(b.event_id)) return;
+        seenEvents.add(b.event_id); if (seenEvents.size > 1000) seenEvents.clear();
       }
-      res.json({ reply: "Sorry, I got a bit tangled — say that again?", messages });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+      const text = (ev.text || '').trim();
+      if (!text || !ANTHROPIC_KEY) return;
+      await ensureTables();
+      const prior = chanHistory.get(ev.channel) || [];
+      const { reply, messages } = await atlasTurn([...prior, { role: 'user', content: text }], 'slack:' + (ev.user || 'owner'));
+      chanHistory.set(ev.channel, messages.slice(-20));
+      await slackReply(ev.channel, reply, ev.thread_ts || ev.ts);
+    } catch (e) {
+      try { await slackReply(b.event && b.event.channel, `Hit a snag: ${e.message}`); } catch (_) { /* ignore */ }
+    }
   });
 
   return router;
