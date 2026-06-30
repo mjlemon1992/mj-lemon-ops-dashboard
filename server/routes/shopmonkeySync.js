@@ -75,30 +75,34 @@ async function buildCommittedWip(apiKey, locationId) {
   return { total_count: rows.length, total_value: sum(rows), active_count: active.length, active_value: sum(active), aging_count: aging.length, aging_value: sum(aging), aging_days: AGING_DAYS, by_stage: Object.values(byStage).sort((a, b) => b.total - a.total), active: active.sort((a, b) => new Date(b.authorized_date) - new Date(a.authorized_date)), aging: aging.sort((a, b) => new Date(a.authorized_date) - new Date(b.authorized_date)) };
 }
 // ---- end Committed WIP helpers --------------------------------------------
-async function fetchOrdersSince(apiKey, sinceDate, maxPages = 12) {
+async function fetchOrdersSince(apiKey, sinceDate, maxPages = 20) {
   const pageSize = 100;
   const iso = sinceDate.toISOString();
-  let all = [];
+  // Stable sort on an IMMUTABLE field (id). Without it, skip-pagination runs over
+  // Shopmonkey's default (mutable) order, which reshuffles as the shop edits orders
+  // all day — so page windows overlapped (double-count) and gapped (miss), making
+  // revenue swing thousands of dollars between identical calls. Dedupe by id is the
+  // belt-and-suspenders. useSort degrades gracefully if the API rejects the format.
+  const byId = new Map();
+  let useSort = true;
   for (let page = 0; page < maxPages; page++) {
-    const params = new URLSearchParams({
-      where: JSON.stringify({ invoicedDate: { gte: iso } }),
-      limit: String(pageSize),
-      skip: String(page * pageSize)
-    });
-    const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${params}`, {
+    const p = { where: JSON.stringify({ invoicedDate: { gte: iso } }), limit: String(pageSize), skip: String(page * pageSize) };
+    if (useSort) p.sort = JSON.stringify([{ id: 'asc' }]);
+    const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${new URLSearchParams(p)}`, {
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
     });
     if (!res.ok) {
+      if (useSort && res.status === 400) { useSort = false; page--; continue; }   // sort format unsupported → retry unsorted
       const txt = await res.text();
       throw new Error(`Shopmonkey API error ${res.status}: ${txt.slice(0, 200)}`);
     }
     const data = await res.json();
     const batch = (data && data.data && data.data.data) ? data.data.data : (data.data || []);
     if (!batch.length) break;
-    all = all.concat(batch);
+    for (const o of batch) if (o && o.id) byId.set(o.id, o);
     if (batch.length < pageSize) break;
   }
-  return all.filter(o => !o.deleted && o.invoicedDate && o.invoicedDate !== 'empty');
+  return [...byId.values()].filter(o => !o.deleted && o.invoicedDate && o.invoicedDate !== 'empty');
 }
 
 // Technician name map. Roster lives on /v3/user (assignedTechnician===true);
