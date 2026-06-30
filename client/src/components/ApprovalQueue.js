@@ -85,13 +85,30 @@ async function getFontFaceCss() {
 const KICK = { seasonal: 'SEASONAL', educational: 'SHOP TIP', testimonial: 'FROM OUR CUSTOMERS' };
 
 let _logo = null;
+// Crop the transparent margins off the logo PNG so the white badge can hug the
+// actual artwork instead of leaving a big empty box around it.
+function trimTransparent(im) {
+  const w = im.width, h = im.height;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d'); ctx.drawImage(im, 0, 0);
+  let px; try { px = ctx.getImageData(0, 0, w, h).data; } catch { return null; }
+  let minX = w, minY = h, maxX = 0, maxY = 0, found = false;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (px[(y * w + x) * 4 + 3] > 12) { found = true; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+  }
+  if (!found) return null;
+  const cw = maxX - minX + 1, ch = maxY - minY + 1;
+  const o = document.createElement('canvas'); o.width = cw; o.height = ch;
+  o.getContext('2d').drawImage(c, minX, minY, cw, ch, 0, 0, cw, ch);
+  return { data: o.toDataURL('image/png'), aspect: ch / cw };
+}
 async function getLogo() {
   if (_logo) return _logo;
   try {
     const blob = await (await fetch('/mt-logo.png')).blob();
-    const data = await new Promise((r, j) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = j; fr.readAsDataURL(blob); });
-    let aspect = 0.58; try { const im = await loadImg(data); aspect = im.height / im.width; } catch {}
-    _logo = { data, aspect };
+    const raw = await new Promise((r, j) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = j; fr.readAsDataURL(blob); });
+    const im = await loadImg(raw);
+    _logo = trimTransparent(im) || { data: raw, aspect: im.height / im.width };
   } catch { _logo = { data: null, aspect: 0.58 }; }
   return _logo;
 }
@@ -120,7 +137,14 @@ async function renderPoster({ type, headline, subline, locName, bg }) {
   const S = 1080, M = 92;
   const { data: logo, aspect } = await getLogo();
   const img = (x, y, w, op) => logo ? `<image xlink:href="${logo}" x="${x}" y="${y}" width="${w}" height="${w * aspect}"${op != null ? ` opacity="${op}"` : ''}/>` : '';
-  const chip = (x, y, w, p = 18) => logo ? `<rect x="${x - p}" y="${y - p}" width="${w + 2 * p}" height="${w * aspect + 2 * p}" rx="14" fill="#fff"/>${img(x, y, w)}` : '';
+  const chip = (x, y, w, p = 13) => {
+    if (!logo) return '';
+    const cw = w + 2 * p, ch = w * aspect + 2 * p;
+    // soft shadow (offset translucent rect) so the white badge reads as a card
+    // sitting on the photo rather than a flat sticker.
+    return `<rect x="${x - p + 3}" y="${y - p + 5}" width="${cw}" height="${ch}" rx="15" fill="#000" opacity="0.18"/>`
+      + `<rect x="${x - p}" y="${y - p}" width="${cw}" height="${ch}" rx="15" fill="#fff"/>${img(x, y, w)}`;
+  };
   const foot = esc(locName || 'Parkland Transmission · Red Deer, AB');
   const footEl = (x, y, anchor, color) => `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${FF}" font-weight="500" font-size="24" fill="${color}">${foot}</text>`;
   const stars = (x, y, size, fill) => `<text x="${x}" y="${y}" font-family="${FF}" font-weight="700" font-size="${size}" letter-spacing="${size * 0.12}" fill="${fill}">&#9733;&#9733;&#9733;&#9733;&#9733;</text>`;
