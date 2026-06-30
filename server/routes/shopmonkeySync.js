@@ -224,6 +224,50 @@ module.exports = (pool) => {
   };
   const router = express.Router();
 
+  // Read-only reconciliation: the MTD per-component breakdown (parts, labour,
+  // shop supplies, tires, subcontracts) so the dashboard total can be matched
+  // line-by-line against the Shopmonkey Sales Summary, same window the metric uses.
+  router.get('/:locationId/reconcile', authenticateToken, async (req, res) => {
+    const apiKey = process.env.SHOPMONKEY_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
+    try {
+      const locResult = await pool.query('SELECT * FROM locations WHERE id = $1', [req.params.locationId]);
+      if (!locResult.rows.length) return res.status(404).json({ error: 'Location not found' });
+      const loc = locResult.rows[0];
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      let orders;
+      try { orders = await fetchOrdersSince(apiKey, monthStart); }
+      catch (e) { return res.status(502).json({ error: e.message }); }
+
+      const scoped = orders.filter(o => {
+        if (!loc.shopmonkey_location_id) return false;
+        if (o.locationId && o.locationId !== loc.shopmonkey_location_id) return false;
+        const invoiced = parseShopmonkeyDate(o.invoicedDate);
+        return invoiced && invoiced >= monthStart && invoiced <= now;
+      });
+      const counted = scoped.filter(o => !isComeback(o));
+      const comebacks = scoped.filter(isComeback);
+      const sumC = (arr, f) => Math.round(arr.reduce((s, o) => s + (f(o) || 0), 0)) / 100;
+      const comp = {
+        parts: sumC(counted, o => o.partsCents),
+        labour: sumC(counted, o => o.laborCents),
+        shop_supplies: sumC(counted, o => o.shopSuppliesCents),
+        tires: sumC(counted, o => o.tiresCents),
+        subcontracts: sumC(counted, o => o.subcontractsCents),
+      };
+      const revenue = +(comp.parts + comp.labour + comp.shop_supplies + comp.tires + comp.subcontracts).toFixed(2);
+      res.json({
+        window: { from: monthStart.toISOString(), to: now.toISOString(), basis: 'invoicedDate, server-local month-to-date' },
+        counted_orders: counted.length,
+        comebacks_excluded: comebacks.length,
+        components: comp,
+        revenue_mtd: revenue,
+        sample: counted.slice(0, 10).map(o => ({ order: o.number || o.id, invoiced: o.invoicedDate, subtotal: Math.round(orderSubtotalCents(o)) / 100 })),
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   router.post('/:locationId/refresh', syncAuth, async (req, res) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
