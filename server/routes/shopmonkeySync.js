@@ -280,15 +280,21 @@ module.exports = (pool) => {
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const runs = [];
-    for (let i = 0; i < 3; i++) {
-      const o = await fetchOrdersSince(apiKey, monthStart);
-      runs.push(new Set(o.map(x => x.id)));
+    const where = JSON.stringify({ invoicedDate: { gte: monthStart.toISOString() } });
+    const single = async (limit) => {
+      const p = new URLSearchParams({ where, limit: String(limit), skip: '0', sort: JSON.stringify([{ name: 'createdDate', order: 'asc' }]) });
+      const r = await fetch(`https://api.shopmonkey.cloud/v3/order?${p}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+      const b = await r.json();
+      const batch = Array.isArray(b.data) ? b.data : (b.data && b.data.data) || [];
+      return { count: batch.length, hasMore: b.meta && b.meta.hasMore, total: b.meta && b.meta.total };
+    };
+    const out = {};
+    for (const lim of [200, 500, 1000]) {
+      const runs = [];
+      for (let i = 0; i < 3; i++) runs.push(await single(lim));
+      out['limit_' + lim] = { counts: runs.map(r => r.count), hasMore: runs.map(r => r.hasMore), total: runs[0].total };
     }
-    const union = new Set(); runs.forEach(s => s.forEach(x => union.add(x)));
-    const inAll = [...union].filter(x => runs.every(s => s.has(x)));
-    const flapping = [...union].filter(x => !runs.every(s => s.has(x)));
-    res.json({ counts: runs.map(s => s.size), stable: flapping.length === 0, in_all: inAll.length, flapping: flapping.length });
+    res.json(out);
   });
 
   router.post('/:locationId/refresh', syncAuth, async (req, res) => {
