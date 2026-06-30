@@ -273,6 +273,24 @@ module.exports = (pool) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Debug: call the REAL fetchOrdersSince 3x in one request (data can't change in
+  // ms) to isolate function-determinism from real-time data flux.
+  router.get('/:locationId/fos-probe', authenticateToken, async (req, res) => {
+    const apiKey = process.env.SHOPMONKEY_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const runs = [];
+    for (let i = 0; i < 3; i++) {
+      const o = await fetchOrdersSince(apiKey, monthStart);
+      runs.push(new Set(o.map(x => x.id)));
+    }
+    const union = new Set(); runs.forEach(s => s.forEach(x => union.add(x)));
+    const inAll = [...union].filter(x => runs.every(s => s.has(x)));
+    const flapping = [...union].filter(x => !runs.every(s => s.has(x)));
+    res.json({ counts: runs.map(s => s.size), stable: flapping.length === 0, in_all: inAll.length, flapping: flapping.length });
+  });
+
   router.post('/:locationId/refresh', syncAuth, async (req, res) => {
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
