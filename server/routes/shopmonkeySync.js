@@ -78,16 +78,17 @@ async function buildCommittedWip(apiKey, locationId) {
 async function fetchOrdersSince(apiKey, sinceDate, maxPages = 20) {
   const pageSize = 100;
   const iso = sinceDate.toISOString();
-  // Stable sort on an IMMUTABLE field (id). Without it, skip-pagination runs over
-  // Shopmonkey's default (mutable) order, which reshuffles as the shop edits orders
-  // all day — so page windows overlapped (double-count) and gapped (miss), making
-  // revenue swing thousands of dollars between identical calls. Dedupe by id is the
-  // belt-and-suspenders. useSort degrades gracefully if the API rejects the format.
+  // Stable sort on an IMMUTABLE field (createdDate). Without it, skip-pagination
+  // runs over Shopmonkey's default (mutable) order, which reshuffles as the shop
+  // edits orders all day — so page windows overlapped (double-count) and gapped
+  // (miss), making revenue swing thousands of dollars between identical calls.
+  // createdDate-asc is the verified deterministic sort (id/number were ignored).
+  // Dedupe by id is belt-and-suspenders; useSort degrades gracefully on a 400.
   const byId = new Map();
   let useSort = true;
   for (let page = 0; page < maxPages; page++) {
     const p = { where: JSON.stringify({ invoicedDate: { gte: iso } }), limit: String(pageSize), skip: String(page * pageSize) };
-    if (useSort) p.sort = JSON.stringify([{ id: 'asc' }]);
+    if (useSort) p.sort = JSON.stringify([{ name: 'createdDate', order: 'asc' }]);
     const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${new URLSearchParams(p)}`, {
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
     });
@@ -270,74 +271,6 @@ module.exports = (pool) => {
         sample: counted.slice(0, 10).map(o => ({ order: o.number || o.id, invoiced: o.invoicedDate, subtotal: Math.round(orderSubtotalCents(o)) / 100 })),
       });
     } catch (e) { res.status(500).json({ error: e.message }); }
-  });
-
-  // Debug: probe which Shopmonkey sort param format is accepted, so pagination
-  // can be made deterministic. Returns status + first ids for each candidate.
-  router.get('/:locationId/sm-sort-probe', authenticateToken, async (req, res) => {
-    const apiKey = process.env.SHOPMONKEY_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const where = JSON.stringify({ invoicedDate: { gte: monthStart.toISOString() } });
-    const candidates = [
-      { label: 'array-id-asc', extra: { sort: JSON.stringify([{ id: 'asc' }]) } },
-      { label: 'obj-id-asc', extra: { sort: JSON.stringify({ id: 'asc' }) } },
-      { label: 'sort=id+order=asc', extra: { sort: 'id', order: 'asc' } },
-      { label: 'array-name-order', extra: { sort: JSON.stringify([{ name: 'id', order: 'asc' }]) } },
-      { label: 'sortBy+sortOrder', extra: { sortBy: 'id', sortOrder: 'asc' } },
-      { label: 'orderBy-obj', extra: { orderBy: JSON.stringify({ id: 'asc' }) } },
-      { label: 'none', extra: {} },
-    ];
-    const out = [];
-    for (const c of candidates) {
-      try {
-        const p = new URLSearchParams({ where, limit: '5', skip: '0', ...c.extra });
-        const r = await fetch(`https://api.shopmonkey.cloud/v3/order?${p}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
-        const b = await r.json().catch(() => ({}));
-        const batch = (b && b.data && b.data.data) ? b.data.data : (b.data || []);
-        out.push({ label: c.label, status: r.status, ok: r.ok, results: Array.isArray(batch) ? batch.length : null, ids: Array.isArray(batch) ? batch.slice(0, 5).map(o => o.id) : null, meta_keys: b && b.data && !Array.isArray(b.data) ? Object.keys(b.data) : Object.keys(b || {}) });
-      } catch (e) { out.push({ label: c.label, error: String(e.message).slice(0, 80) }); }
-    }
-    res.json({ probes: out });
-  });
-
-  // Debug: for each candidate sort, fetch the FULL set twice and report whether
-  // the two runs return the identical order set (deterministic) + the meta total.
-  router.get('/:locationId/sm-stable-probe', authenticateToken, async (req, res) => {
-    const apiKey = process.env.SHOPMONKEY_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const where = JSON.stringify({ invoicedDate: { gte: monthStart.toISOString() } });
-    const fetchAll = async (extra) => {
-      const ids = []; let meta = null;
-      for (let page = 0; page < 25; page++) {
-        const p = new URLSearchParams({ where, limit: '100', skip: String(page * 100), ...extra });
-        const r = await fetch(`https://api.shopmonkey.cloud/v3/order?${p}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
-        if (!r.ok) return { error: r.status };
-        const b = await r.json();
-        if (meta === null && b && b.meta) meta = b.meta;
-        const batch = Array.isArray(b.data) ? b.data : (b.data && b.data.data) || [];
-        if (!batch.length) break;
-        for (const o of batch) if (o && o.id) ids.push(o.id);
-        if (batch.length < 100) break;
-      }
-      return { count: ids.length, ids, meta };
-    };
-    const candidates = {
-      none: {},
-      createdDate: { sort: JSON.stringify([{ name: 'createdDate', order: 'asc' }]) },
-      number: { sort: JSON.stringify([{ name: 'number', order: 'asc' }]) },
-    };
-    const out = {};
-    for (const [k, extra] of Object.entries(candidates)) {
-      const a = await fetchAll(extra); const b = await fetchAll(extra);
-      const setB = new Set(b.ids || []);
-      const stable = a.ids && b.ids && a.ids.length === b.ids.length && a.ids.every(x => setB.has(x));
-      out[k] = { count1: a.count, count2: b.count, stable, meta: a.meta };
-    }
-    res.json(out);
   });
 
   router.post('/:locationId/refresh', syncAuth, async (req, res) => {
