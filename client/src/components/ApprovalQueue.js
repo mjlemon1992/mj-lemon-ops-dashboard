@@ -215,7 +215,7 @@ async function renderPoster({ type, headline, subline, locName, bg }) {
   // Transparent except a bottom scrim so the photo shows through; logo on a
   // white chip top-left, kicker + headline + subline over the darkened lower band.
   const photo = () => { const hl = wHL(74, S - 2 * M), sl = wSL(32, S - 2 * M), hy = 678;
-    return `<rect width="${S}" height="${S}" fill="url(#scrim)"/>${chip(M, M, 210)}
+    return `<rect width="${S}" height="${S}" fill="url(#scrim)"/>${img(M, M, 220)}
       ${kicker(M, hy - 80, 'start', '#F8703B')}
       <text x="${M}" y="${hy}" font-family="${DISP}" font-weight="800" font-size="74" letter-spacing="-1.5" fill="#fff">${tspans(hl, M, 84)}</text>
       <text x="${M}" y="${hy + hl.length * 84 + 26}" font-family="${FF}" font-weight="400" font-size="32" fill="#E7E9EC">${tspans(sl, M, 46)}</text>
