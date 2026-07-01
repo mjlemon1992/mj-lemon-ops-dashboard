@@ -110,6 +110,11 @@ async function fetchOrdersSince(apiKey, sinceDate, maxSweeps = 5) {
     if (total !== null && byId.size >= total) break;   // collected the whole set
     await _sleep(200);
   }
+  // Empty with no meta = a throttled/failed response (a live shop always has MTD
+  // orders). Throw so the caller keeps its last good cache instead of writing $0.
+  if (byId.size === 0 && total === null) {
+    throw new Error('Shopmonkey returned no orders and no meta (throttled/failed) — refusing to report empty');
+  }
   if (total !== null && byId.size < total) {
     throw new Error(`Shopmonkey incomplete: ${byId.size}/${total} orders after ${maxSweeps} sweeps (throttled?) — not reporting partial data`);
   }
