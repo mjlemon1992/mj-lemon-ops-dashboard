@@ -75,6 +75,18 @@ async function buildCommittedWip(apiKey, locationId) {
   return { total_count: rows.length, total_value: sum(rows), active_count: active.length, active_value: sum(active), aging_count: aging.length, aging_value: sum(aging), aging_days: AGING_DAYS, by_stage: Object.values(byStage).sort((a, b) => b.total - a.total), active: active.sort((a, b) => new Date(b.authorized_date) - new Date(a.authorized_date)), aging: aging.sort((a, b) => new Date(a.authorized_date) - new Date(b.authorized_date)) };
 }
 // ---- end Committed WIP helpers --------------------------------------------
+// MTD must be anchored to the SHOP's timezone (Mountain), not the server's (UTC on
+// Railway). Otherwise, for the ~6-7h between UTC midnight and local midnight at
+// month-end, "month-to-date" flips to next month and the dashboard reads ~$0.
+function monthStartFor(now, tz = 'America/Edmonton') {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'numeric' }).formatToParts(now);
+  const y = +parts.find((p) => p.type === 'year').value;
+  const m = +parts.find((p) => p.type === 'month').value;
+  const guess = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+  const local = new Date(guess.toLocaleString('en-US', { timeZone: tz }));
+  return new Date(guess.getTime() + (guess.getTime() - local.getTime()));
+}
+
 const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function fetchOrdersSince(apiKey, sinceDate, maxSweeps = 5) {
   const iso = sinceDate.toISOString();
@@ -257,7 +269,7 @@ module.exports = (pool) => {
       if (!locResult.rows.length) return res.status(404).json({ error: 'Location not found' });
       const loc = locResult.rows[0];
       const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthStart = monthStartFor(now);
       let orders;
       try { orders = await fetchOrdersSince(apiKey, monthStart); }
       catch (e) { return res.status(502).json({ error: e.message }); }
@@ -280,7 +292,7 @@ module.exports = (pool) => {
       };
       const revenue = +(comp.parts + comp.labour + comp.shop_supplies + comp.tires + comp.subcontracts).toFixed(2);
       res.json({
-        window: { from: monthStart.toISOString(), to: now.toISOString(), basis: 'invoicedDate, server-local month-to-date' },
+        window: { from: monthStart.toISOString(), to: now.toISOString(), basis: 'invoicedDate, shop-timezone (Mountain) month-to-date' },
         counted_orders: counted.length,
         comebacks_excluded: comebacks.length,
         components: comp,
@@ -304,7 +316,7 @@ module.exports = (pool) => {
       const partsMarginTarget = parseFloat(loc.parts_margin_target) || 55;
 
       const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthStart = monthStartFor(now);
 
       let orders;
       try { orders = await fetchOrdersSince(apiKey, monthStart); }
@@ -472,7 +484,7 @@ module.exports = (pool) => {
       const techNames = await fetchTechNames(apiKey);
 
       const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthStart = monthStartFor(now);
       let orders;
       try {
         orders = await fetchOrdersSince(apiKey, monthStart);
@@ -594,7 +606,7 @@ module.exports = (pool) => {
       const techNames = await fetchTechNames(apiKey);
 
       const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthStart = monthStartFor(now);
       let orders;
       try { orders = await fetchOrdersSince(apiKey, monthStart); }
       catch (e) { return res.status(502).json({ error: e.message }); }
