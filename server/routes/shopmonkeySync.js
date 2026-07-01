@@ -75,16 +75,19 @@ async function buildCommittedWip(apiKey, locationId) {
   return { total_count: rows.length, total_value: sum(rows), active_count: active.length, active_value: sum(active), aging_count: aging.length, aging_value: sum(aging), aging_days: AGING_DAYS, by_stage: Object.values(byStage).sort((a, b) => b.total - a.total), active: active.sort((a, b) => new Date(b.authorized_date) - new Date(a.authorized_date)), aging: aging.sort((a, b) => new Date(a.authorized_date) - new Date(b.authorized_date)) };
 }
 // ---- end Committed WIP helpers --------------------------------------------
-async function fetchOrdersSince(apiKey, sinceDate, maxSweeps = 8) {
+const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function fetchOrdersSince(apiKey, sinceDate, maxSweeps = 5) {
   const iso = sinceDate.toISOString();
   const where = JSON.stringify({ invoicedDate: { gte: iso } });
   const sort = JSON.stringify([{ name: 'createdDate', order: 'asc' }]);
   // Shopmonkey's order query is FLAKY: a single sweep returns a varying ~partial
   // subset (probing the same frozen data returned 100-107 of 107 orders), so any
-  // one-shot fetch made revenue swing thousands between identical calls. But the
-  // UNION of repeated sweeps converges to meta.total. So sweep all pages, union by
-  // id, and repeat the whole sweep until we've collected meta.total distinct orders
-  // (or hit maxSweeps). Deterministic output — the complete set — despite the API.
+  // one-shot fetch made revenue swing thousands between identical calls. The UNION
+  // of repeated sweeps converges to meta.total, so we sweep + union until we've
+  // collected the whole set. Gentle (delays between calls, few sweeps) so we don't
+  // trip rate limits. COMPLETE-OR-THROW: if we can't collect meta.total, we throw
+  // rather than return a partial/empty set — the caller then keeps its last good
+  // cache instead of caching a wrong (or $0) number.
   const byId = new Map();
   let total = null;
   for (let sweep = 0; sweep < maxSweeps; sweep++) {
@@ -102,8 +105,13 @@ async function fetchOrdersSince(apiKey, sinceDate, maxSweeps = 8) {
       const batch = Array.isArray(b.data) ? b.data : (b.data && b.data.data) || [];
       for (const o of batch) if (o && o.id) byId.set(o.id, o);
       if (batch.length < 100) break;
+      await _sleep(120);
     }
     if (total !== null && byId.size >= total) break;   // collected the whole set
+    await _sleep(200);
+  }
+  if (total !== null && byId.size < total) {
+    throw new Error(`Shopmonkey incomplete: ${byId.size}/${total} orders after ${maxSweeps} sweeps (throttled?) — not reporting partial data`);
   }
   return [...byId.values()].filter(o => !o.deleted && o.invoicedDate && o.invoicedDate !== 'empty');
 }
@@ -273,23 +281,6 @@ module.exports = (pool) => {
         sample: counted.slice(0, 10).map(o => ({ order: o.number || o.id, invoiced: o.invoicedDate, subtotal: Math.round(orderSubtotalCents(o)) / 100 })),
       });
     } catch (e) { res.status(500).json({ error: e.message }); }
-  });
-
-  // Debug: call the REAL fetchOrdersSince 3x in one request (data can't change in
-  // ms) to isolate function-determinism from real-time data flux.
-  router.get('/:locationId/fos-probe', authenticateToken, async (req, res) => {
-    const apiKey = process.env.SHOPMONKEY_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const runs = [];
-    for (let i = 0; i < 4; i++) {
-      const o = await fetchOrdersSince(apiKey, monthStart);
-      runs.push(new Set(o.map(x => x.id)));
-    }
-    const union = new Set(); runs.forEach(s => s.forEach(x => union.add(x)));
-    const flapping = [...union].filter(x => !runs.every(s => s.has(x)));
-    res.json({ counts: runs.map(s => s.size), stable: flapping.length === 0, union: union.size, flapping: flapping.length });
   });
 
   router.post('/:locationId/refresh', syncAuth, async (req, res) => {
