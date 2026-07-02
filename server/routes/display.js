@@ -168,7 +168,7 @@ module.exports = (pool) => {
       let notices = [];
       try {
         const nRes = await pool.query(
-          `SELECT id, kind, title, body, image_url, priority, created_at
+          `SELECT id, kind, title, body, image_url, image_data, image_mime, priority, created_at
              FROM shop_notices
             WHERE active = true
               AND (location_id IS NULL OR location_id = $1)
@@ -177,7 +177,12 @@ module.exports = (pool) => {
             LIMIT 20`,
           [req.params.locationId]
         );
-        notices = nRes.rows;
+        // Uploaded poster bytes ship inline as data URIs (the board is a plain
+        // <img> behind a PIN — no authed image endpoint to point it at).
+        notices = nRes.rows.map(r => ({
+          id: r.id, kind: r.kind, title: r.title, body: r.body, priority: r.priority, created_at: r.created_at,
+          image: r.image_url || (r.image_data ? `data:${r.image_mime || 'image/jpeg'};base64,${r.image_data.toString('base64')}` : null)
+        }));
       } catch (e) { notices = []; }
 
       // All-locations revenue standings (revenue only — no targets/efficiency for

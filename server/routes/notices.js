@@ -26,8 +26,13 @@ module.exports = (pool) => {
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     )`);
+    // Uploaded poster bytes (same Postgres-bytea pattern as marketing_post).
+    await pool.query('ALTER TABLE shop_notices ADD COLUMN IF NOT EXISTS image_data BYTEA');
+    await pool.query('ALTER TABLE shop_notices ADD COLUMN IF NOT EXISTS image_mime VARCHAR(60)');
     _init = true;
   };
+
+  const OK_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
   const KINDS = ['notice', 'celebration', 'safety', 'poster'];
 
@@ -47,14 +52,52 @@ module.exports = (pool) => {
     return r.rows;
   };
 
-  // Admin list (all notices incl. inactive/expired, newest first).
+  // Admin list (all notices incl. inactive/expired, newest first). Image bytes
+  // stay out of the list; has_image + the /:id/image endpoint cover previews.
   router.get('/', authenticateToken, requireOwnerOrPartner, async (req, res) => {
     try {
       await ensureTable();
       const r = await pool.query(
-        `SELECT * FROM shop_notices ORDER BY active DESC, priority ASC, created_at DESC LIMIT 100`
+        `SELECT id, location_id, kind, title, body, image_url, priority, active,
+                expires_at, created_by, created_at, updated_at,
+                (image_data IS NOT NULL) AS has_image
+           FROM shop_notices ORDER BY active DESC, priority ASC, created_at DESC LIMIT 100`
       );
       res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Upload a poster/graphic for a notice: raw image body (Content-Type: image/*).
+  // Mirrors the marketing intake pattern — no multipart, works from the phone.
+  router.post('/:id/image',
+    syncAuth, requireOwnerOrPartner,
+    express.raw({ type: ['image/*', 'application/octet-stream'], limit: '15mb' }),
+    async (req, res) => {
+      try {
+        await ensureTable();
+        if (!req.body || !req.body.length) return res.status(400).json({ error: 'No image body. POST the file with Content-Type: image/png (or jpeg/webp/gif).' });
+        let mime = (req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        if (mime === 'application/octet-stream') mime = 'image/jpeg';
+        if (!OK_MIME.includes(mime)) return res.status(415).json({ error: `Unsupported image type "${mime}". Use JPEG, PNG, WebP, or GIF.` });
+        const r = await pool.query(
+          'UPDATE shop_notices SET image_data = $2, image_mime = $3, updated_at = NOW() WHERE id = $1 RETURNING id',
+          [req.params.id, req.body, mime]
+        );
+        if (!r.rows.length) return res.status(404).json({ error: 'Notice not found' });
+        res.json({ ok: true, id: r.rows[0].id, bytes: req.body.length, mime });
+      } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+  // Serve a stored image (admin preview). The display board gets images inlined
+  // as data URIs in its own payload, so this stays JWT-only.
+  router.get('/:id/image', authenticateToken, requireOwnerOrPartner, async (req, res) => {
+    try {
+      await ensureTable();
+      const r = await pool.query('SELECT image_data, image_mime FROM shop_notices WHERE id = $1', [req.params.id]);
+      if (!r.rows.length || !r.rows[0].image_data) return res.status(404).json({ error: 'No image' });
+      res.set('Content-Type', r.rows[0].image_mime || 'image/jpeg');
+      res.set('Cache-Control', 'private, max-age=300');
+      res.send(r.rows[0].image_data);
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
