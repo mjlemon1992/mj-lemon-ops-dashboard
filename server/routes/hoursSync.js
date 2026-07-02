@@ -86,6 +86,15 @@ async function fetchInvoicedOrdersBetween(apiKey, startIso, endIso, maxPages = 4
   return all;
 }
 
+// Only this location's orders. Mirrors refresh-tech's guard: the Shopmonkey
+// order list is account-wide, so a location that isn't connected gets nothing
+// (never inherit another shop's orders), and orders carrying a different
+// location id are dropped. Matters once a second location (Hwy 97) connects.
+function ordersForLocation(orders, smLocationId) {
+  if (!smLocationId) return [];
+  return orders.filter(o => !o.locationId || o.locationId === smLocationId);
+}
+
 async function computeTechSold(apiKey, orders, techNames) {
   const byTech = {};
   const ensure = (id, name) => {
@@ -147,8 +156,10 @@ async function runYtdJob(pool, locationId, apiKey) {
     const period_start = `${year}-01-01`;
     const period_end = now.toISOString().slice(0, 10);
     const period_type = 'ytd';
-    const locRes = await pool.query('SELECT province FROM locations WHERE id = $1', [locationId]);
+    const locRes = await pool.query('SELECT province, shopmonkey_location_id FROM locations WHERE id = $1', [locationId]);
     const province = (locRes.rows[0] && locRes.rows[0].province) || 'ab';
+    const smLocId = locRes.rows[0] && locRes.rows[0].shopmonkey_location_id;
+    if (!smLocId) throw new Error('Location not connected to Shopmonkey');
     const workedHours = workingDaysInRange(province, period_start, period_end) * 8;
     const techNames = await fetchTechNames(pool, locationId);
     const acc = {};
@@ -157,7 +168,7 @@ async function runYtdJob(pool, locationId, apiKey) {
       const mStartIso = new Date(Date.UTC(year, m, 1)).toISOString();
       const mEndDay = (m === thisMonth) ? now.getUTCDate() : new Date(Date.UTC(year, m + 1, 0)).getUTCDate();
       const mEndIso = new Date(Date.UTC(year, m, mEndDay, 23, 59, 59, 999)).toISOString();
-      const orders = await fetchInvoicedOrdersBetween(apiKey, mStartIso, mEndIso);
+      const orders = ordersForLocation(await fetchInvoicedOrdersBetween(apiKey, mStartIso, mEndIso), smLocId);
       const sold = await computeTechSold(apiKey, orders, techNames);
       for (const t of sold) {
         const key = t.tech_id || ('name:' + t.tech_name);
@@ -221,8 +232,11 @@ module.exports = (pool) => {
       if (!start || !end) return res.status(400).json({ error: 'start & end (YYYY-MM-DD) required' });
       const startIso = new Date(start + 'T00:00:00.000Z').toISOString();
       const endIso = new Date(end + 'T23:59:59.999Z').toISOString();
+      const locRes = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id = $1', [req.params.locationId]);
+      const smLocId = locRes.rows[0] && locRes.rows[0].shopmonkey_location_id;
+      if (!smLocId) return res.status(400).json({ error: 'Location not connected to Shopmonkey' });
       const techNames = await fetchTechNames(pool, req.params.locationId);
-      const orders = await fetchInvoicedOrdersBetween(apiKey, startIso, endIso);
+      const orders = ordersForLocation(await fetchInvoicedOrdersBetween(apiKey, startIso, endIso), smLocId);
       const sold = await computeTechSold(apiKey, orders, techNames);
       const totalSold = Math.round(sold.reduce((s, t) => s + t.hours_sold, 0) * 100) / 100;
       res.json({ start, end, orders: orders.length, totalSold, techs: sold.sort((a, b) => b.hours_sold - a.hours_sold) });
@@ -241,8 +255,11 @@ module.exports = (pool) => {
       const startIso = new Date(period_start + 'T00:00:00.000Z').toISOString();
       const endIso = new Date(period_end + 'T23:59:59.999Z').toISOString();
 
+      const impLocRes = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id = $1', [req.params.locationId]);
+      const impSmLocId = impLocRes.rows[0] && impLocRes.rows[0].shopmonkey_location_id;
+      if (!impSmLocId) return res.status(400).json({ error: 'Location not connected to Shopmonkey' });
       const techNames = await fetchTechNames(pool, req.params.locationId);
-      const orders = await fetchInvoicedOrdersBetween(apiKey, startIso, endIso);
+      const orders = ordersForLocation(await fetchInvoicedOrdersBetween(apiKey, startIso, endIso), impSmLocId);
       const sold = await computeTechSold(apiKey, orders, techNames);
       const soldByName = {};
       for (const t of sold) soldByName[norm(t.tech_name)] = t;
@@ -305,12 +322,14 @@ module.exports = (pool) => {
       const endIso = new Date(period_end + 'T23:59:59.999Z').toISOString();
 
       // Worked hours = working days elapsed in [start..end] x 8 (holiday + province aware, uniform per tech).
-      const locRes = await pool.query('SELECT province FROM locations WHERE id = $1', [req.params.locationId]);
+      const locRes = await pool.query('SELECT province, shopmonkey_location_id FROM locations WHERE id = $1', [req.params.locationId]);
       const province = (locRes.rows[0] && locRes.rows[0].province) || 'ab';
+      const smLocId = locRes.rows[0] && locRes.rows[0].shopmonkey_location_id;
+      if (!smLocId) return res.status(400).json({ error: 'Location not connected to Shopmonkey' });
       const workedHours = workingDaysInRange(province, period_start, period_end) * 8;
 
       const techNames = await fetchTechNames(pool, req.params.locationId);
-      const orders = await fetchInvoicedOrdersBetween(apiKey, startIso, endIso);
+      const orders = ordersForLocation(await fetchInvoicedOrdersBetween(apiKey, startIso, endIso), smLocId);
       const sold = await computeTechSold(apiKey, orders, techNames);
 
       const written = [];
