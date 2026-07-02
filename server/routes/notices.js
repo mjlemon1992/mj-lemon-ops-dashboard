@@ -106,9 +106,11 @@ module.exports = (pool) => {
   router.post('/', syncAuth, requireOwnerOrPartner, async (req, res) => {
     try {
       await ensureTable();
-      const { id, location_id, kind, title, body, image_url, priority, active, expires_at } = req.body || {};
+      const { id, location_id, kind, title, body, image_url, priority, active, expires_at, pending_image } = req.body || {};
       const k = KINDS.includes(kind) ? kind : 'notice';
-      if (!id && !title && !body && !image_url) {
+      // pending_image: the client creates first, then uploads the file to
+      // /:id/image — an image-only poster has no title/body/url at this point.
+      if (!id && !title && !body && !image_url && !pending_image) {
         return res.status(400).json({ error: 'title, body or image_url required' });
       }
       if (id) {
