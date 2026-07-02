@@ -55,16 +55,23 @@ export default function Notices() {
           title: form.title || null,
           body: form.body || null,
           image_url: form.image_url || null,
+          pending_image: !!file,
           expires_at
         })
       });
       // Poster file uploads as a raw image body (same pattern as marketing intake).
       if (file && created && created.id) {
-        await api(`/notices/${created.id}/image`, {
-          method: 'POST',
-          headers: { 'Content-Type': file.type || 'image/jpeg' },
-          body: file
-        });
+        try {
+          await api(`/notices/${created.id}/image`, {
+            method: 'POST',
+            headers: { 'Content-Type': file.type || 'image/jpeg' },
+            body: file
+          });
+        } catch (upErr) {
+          // Don't leave an empty notice on the board if the file didn't make it.
+          try { await api(`/notices/${created.id}`, { method: 'DELETE' }); } catch (e3) {}
+          throw upErr;
+        }
       }
       setForm({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '' });
       setFile(null);
