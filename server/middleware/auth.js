@@ -19,6 +19,20 @@ function authenticateToken(req, res, next) {
   }
 }
 
+// Machine-to-machine auth: a valid X-Sync-Key header matching SYNC_SECRET
+// stands in for a JWT (same pattern as the Shopmonkey refresh routes). The
+// sync-key caller acts as the owner. Fails closed: if SYNC_SECRET is unset,
+// the key path is disabled and JWT is required.
+function syncAuth(req, res, next) {
+  const secret = process.env.SYNC_SECRET;
+  const provided = req.get('X-Sync-Key');
+  if (secret && provided && provided === secret) {
+    req.user = { role: 'owner', via: 'sync-key' };
+    return next();
+  }
+  return authenticateToken(req, res, next);
+}
+
 function requireOwner(req, res, next) {
   if (req.user.role !== 'owner') return res.status(403).json({ error: 'Owner access required' });
   next();
@@ -29,4 +43,4 @@ function requireOwnerOrPartner(req, res, next) {
   next();
 }
 
-module.exports = { authenticateToken, requireOwner, requireOwnerOrPartner, JWT_SECRET };
+module.exports = { authenticateToken, syncAuth, requireOwner, requireOwnerOrPartner, JWT_SECRET };

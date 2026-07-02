@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, syncAuth } = require('../middleware/auth');
 
 module.exports = (pool) => {
   const router = express.Router();
@@ -7,7 +7,8 @@ module.exports = (pool) => {
   // Specific routes must precede the parameterized '/:locationId/summary' below,
   // or Express matches '/group/summary' as locationId="group" and the UUID
   // query throws "invalid input syntax for type uuid".
-  router.get('/group/summary', authenticateToken, async (req, res) => {
+  // syncAuth: the scheduled Chief-of-Staff agent reads these with X-Sync-Key.
+  router.get('/group/summary', syncAuth, async (req, res) => {
     if (req.user.role === 'manager') return res.status(403).json({ error: 'Access denied' });
     try {
       const result = await pool.query(
@@ -20,7 +21,7 @@ module.exports = (pool) => {
     }
   });
 
-  router.get('/:locationId/summary', authenticateToken, async (req, res) => {
+  router.get('/:locationId/summary', syncAuth, async (req, res) => {
     try {
       if (req.user.role === 'manager' && req.user.location_id !== req.params.locationId) {
         return res.status(403).json({ error: 'Access denied' });

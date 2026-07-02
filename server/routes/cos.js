@@ -133,8 +133,9 @@ module.exports = (pool) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // Latest brief for the dashboard tab.
-  router.get('/brief/latest', authenticateToken, ownerOrPartner, async (req, res) => {
+  // Latest brief for the dashboard tab; the agent also reads it (syncAuth)
+  // for the observe step of the daily loop.
+  router.get('/brief/latest', syncAuth, ownerOrPartner, async (req, res) => {
     try {
       await ensureTables();
       const r = await pool.query(
@@ -158,7 +159,8 @@ module.exports = (pool) => {
 
   // ---------- LEARNINGS (self-tuning memory) ----------
 
-  router.get('/learnings', authenticateToken, ownerOrPartner, async (req, res) => {
+  // Agent loads its memory of Jamie at the start of each run (syncAuth).
+  router.get('/learnings', syncAuth, ownerOrPartner, async (req, res) => {
     try {
       await ensureTables();
       const r = await pool.query(
