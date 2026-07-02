@@ -24,44 +24,83 @@ function isComeback(o) {
   return orderSubtotalCents(o) === 0;
 }
 
-// ---- Committed WIP helpers (added) ----------------------------------------
-let _wfCache = { at: 0, map: {} };
+const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Shopmonkey's /v3/order query is FLAKY: a single sweep returns a varying PARTIAL
+// subset (probing frozen data returned 100-107 of 107), caps pages at 100, and its
+// skip-pagination overlaps/gaps as orders are edited. The UNION of repeated sweeps
+// converges to meta.total, so we sweep + union by id until we've collected the whole
+// set, then complete-or-throw. Returns { orders, total }. Throws on incomplete
+// (partial) or empty+no-meta (throttle) so callers never cache wrong/partial data.
+async function sweepOrders(apiKey, { where, locationId, maxSweeps = 5 }) {
+  const whereStr = JSON.stringify(where);
+  const sort = JSON.stringify([{ name: 'createdDate', order: 'asc' }]);
+  const byId = new Map();
+  let total = null;
+  for (let sweep = 0; sweep < maxSweeps; sweep++) {
+    for (let skip = 0; skip < 5000; skip += 100) {
+      const params = { where: whereStr, limit: '100', skip: String(skip), sort };
+      if (locationId) params.locationId = locationId;
+      const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${new URLSearchParams(params)}`, {
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+      });
+      if (!res.ok) { const txt = await res.text(); throw new Error(`Shopmonkey API error ${res.status}: ${txt.slice(0, 200)}`); }
+      const b = await res.json();
+      const meta = b.meta || (b.data && b.data.meta) || null;   // meta may sit top-level OR nested
+      if (meta && typeof meta.total === 'number') total = meta.total;
+      const batch = Array.isArray(b.data) ? b.data : (b.data && b.data.data) || [];
+      for (const o of batch) if (o && o.id) byId.set(o.id, o);
+      if (batch.length < 100) break;
+      await _sleep(120);
+    }
+    if (total !== null && byId.size >= total) break;
+    await _sleep(200);
+  }
+  if (total === null && byId.size === 0) {
+    throw new Error('Shopmonkey returned no orders and no meta (throttled/failed) — refusing to report empty');
+  }
+  if (total !== null && byId.size < total) {
+    throw new Error(`Shopmonkey incomplete: ${byId.size}/${total} orders after ${maxSweeps} sweeps (throttled?) — not reporting partial data`);
+  }
+  return { orders: [...byId.values()], total };
+}
+
+// ---- Committed WIP helpers -------------------------------------------------
+// Workflow-status name map, cached 10 min PER LOCATION (a global cache handed one
+// location another's stage names).
+const _wfCache = {};
 async function fetchWorkflowStatusMap(apiKey, locationId) {
-  if (Date.now() - _wfCache.at < 10 * 60 * 1000 && Object.keys(_wfCache.map).length) return _wfCache.map;
+  const c = _wfCache[locationId];
+  if (c && Date.now() - c.at < 10 * 60 * 1000 && Object.keys(c.map).length) return c.map;
   const params = new URLSearchParams({ locationId, limit: '50' });
   const res = await fetch(`https://api.shopmonkey.cloud/v3/workflow_status?${params}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
-  if (!res.ok) return _wfCache.map;
+  if (!res.ok) return (c && c.map) || {};
   const data = await res.json();
   const rows = (data && data.data && data.data.data) ? data.data.data : (data.data || []);
   const map = {};
   rows.forEach((w) => { map[w.id] = w.name; });
-  _wfCache = { at: Date.now(), map };
+  _wfCache[locationId] = { at: Date.now(), map };
   return map;
 }
 async function fetchCommittedOrders(apiKey, locationId) {
-  const pageSize = 100;
-  let all = [];
-  for (let page = 0; page < 12; page++) {
-    const params = new URLSearchParams({ locationId, where: JSON.stringify({ authorized: true, invoicedDate: null, archived: false }), limit: String(pageSize), skip: String(page * pageSize) });
-    const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${params}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
-    if (!res.ok) { const txt = await res.text(); throw new Error(`Shopmonkey API error ${res.status}: ${txt.slice(0, 200)}`); }
-    const data = await res.json();
-    const batch = (data && data.data && data.data.data) ? data.data.data : (data.data || []);
-    if (!batch.length) break;
-    all = all.concat(batch);
-    if (batch.length < pageSize) break;
-  }
+  const { orders } = await sweepOrders(apiKey, { where: { authorized: true, invoicedDate: null, archived: false }, locationId });
   const seen = new Map();
-  for (const o of all) { const key = o.number || o.id; if (!seen.has(key)) seen.set(key, o); }
+  for (const o of orders) { if (o.deleted) continue; const key = o.number || o.id; if (!seen.has(key)) seen.set(key, o); }
   return [...seen.values()];
 }
-async function buildCommittedWip(apiKey, locationId) {
+// Takes the DASHBOARD location id and resolves the Shopmonkey location id itself
+// (callers previously passed the DB id straight to Shopmonkey → wrong/empty WIP).
+async function buildCommittedWip(pool, apiKey, dbLocationId) {
   const AGING_DAYS = 14;
+  const empty = { total_count: 0, total_value: 0, active_count: 0, active_value: 0, aging_count: 0, aging_value: 0, aging_days: AGING_DAYS, by_stage: [], active: [], aging: [] };
+  const { rows: lr } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id = $1', [dbLocationId]);
+  const smId = lr[0] && lr[0].shopmonkey_location_id;
+  if (!smId) return empty;   // not connected to Shopmonkey
   const now = Date.now();
   const DAY = 86400000;
-  const wf = await fetchWorkflowStatusMap(apiKey, locationId);
+  const wf = await fetchWorkflowStatusMap(apiKey, smId);
   const stageOf = (o) => wf[o.workflowStatusId] || o.status || 'Unknown';
-  const committed = await fetchCommittedOrders(apiKey, locationId);
+  const committed = await fetchCommittedOrders(apiKey, smId);
   const rows = committed.map((o) => {
     const authMs = o.authorizedDate ? new Date(o.authorizedDate).getTime() : now;
     const ageDays = Math.floor((now - authMs) / DAY);
@@ -87,52 +126,16 @@ function monthStartFor(now, tz = 'America/Edmonton') {
   return new Date(guess.getTime() + (guess.getTime() - local.getTime()));
 }
 
-const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function fetchOrdersSince(apiKey, sinceDate, maxSweeps = 5) {
-  const iso = sinceDate.toISOString();
-  const where = JSON.stringify({ invoicedDate: { gte: iso } });
-  const sort = JSON.stringify([{ name: 'createdDate', order: 'asc' }]);
-  // Shopmonkey's order query is FLAKY: a single sweep returns a varying ~partial
-  // subset (probing the same frozen data returned 100-107 of 107 orders), so any
-  // one-shot fetch made revenue swing thousands between identical calls. The UNION
-  // of repeated sweeps converges to meta.total, so we sweep + union until we've
-  // collected the whole set. Gentle (delays between calls, few sweeps) so we don't
-  // trip rate limits. COMPLETE-OR-THROW: if we can't collect meta.total, we throw
-  // rather than return a partial/empty set — the caller then keeps its last good
-  // cache instead of caching a wrong (or $0) number.
-  const byId = new Map();
-  let total = null;
-  for (let sweep = 0; sweep < maxSweeps; sweep++) {
-    for (let skip = 0; skip < 5000; skip += 100) {
-      const p = new URLSearchParams({ where, limit: '100', skip: String(skip), sort });
-      const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${p}`, {
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`Shopmonkey API error ${res.status}: ${txt.slice(0, 200)}`);
-      }
-      const b = await res.json();
-      if (b.meta && typeof b.meta.total === 'number') total = b.meta.total;
-      const batch = Array.isArray(b.data) ? b.data : (b.data && b.data.data) || [];
-      for (const o of batch) if (o && o.id) byId.set(o.id, o);
-      if (batch.length < 100) break;
-      await _sleep(120);
-    }
-    if (total !== null && byId.size >= total) break;   // collected the whole set
-    await _sleep(200);
+async function fetchOrdersSince(apiKey, sinceDate) {
+  const { orders, total } = await sweepOrders(apiKey, { where: { invoicedDate: { gte: sinceDate.toISOString() } } });
+  const filtered = orders.filter(o => !o.deleted && o.invoicedDate && o.invoicedDate !== 'empty');
+  // Empty is legit ONLY if Shopmonkey explicitly reports 0 (e.g. the 1st of a new
+  // month before the first invoice). Otherwise it's a throttle/failure — throw so
+  // the caller keeps its last good cache instead of caching $0.
+  if (filtered.length === 0 && total !== 0) {
+    throw new Error(`Shopmonkey returned no invoiced orders (total=${total}) — refusing to report empty`);
   }
-  // An empty fetch is ALWAYS a failure for a live, connected shop (it has MTD
-  // orders and a revenue target). Throw unconditionally so a throttled/empty
-  // response — whatever meta it carries (null, or total:0) — can never overwrite
-  // the cache with $0. The caller keeps its last good value.
-  if (byId.size === 0) {
-    throw new Error('Shopmonkey returned no orders (throttled/failed) — refusing to report empty');
-  }
-  if (total !== null && byId.size < total) {
-    throw new Error(`Shopmonkey incomplete: ${byId.size}/${total} orders after ${maxSweeps} sweeps (throttled?) — not reporting partial data`);
-  }
-  return [...byId.values()].filter(o => !o.deleted && o.invoicedDate && o.invoicedDate !== 'empty');
+  return filtered;
 }
 
 // Technician name map. Roster lives on /v3/user (assignedTechnician===true);
@@ -159,19 +162,8 @@ async function fetchTechNames(apiKey) {
 // ---- Live alerts: stale vehicles + per-RO margin flags ---------------------
 // Open orders = not invoiced, not archived (i.e. cars still in the shop).
 async function fetchOpenOrders(apiKey, locationId) {
-  const pageSize = 100;
-  let all = [];
-  for (let page = 0; page < 12; page++) {
-    const params = new URLSearchParams({ locationId, where: JSON.stringify({ invoicedDate: null, archived: false }), limit: String(pageSize), skip: String(page * pageSize) });
-    const res = await fetch(`https://api.shopmonkey.cloud/v3/order?${params}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
-    if (!res.ok) { const txt = await res.text(); throw new Error(`Shopmonkey API error ${res.status}: ${txt.slice(0, 200)}`); }
-    const data = await res.json();
-    const batch = (data && data.data && data.data.data) ? data.data.data : (data.data || []);
-    if (!batch.length) break;
-    all = all.concat(batch);
-    if (batch.length < pageSize) break;
-  }
-  return all.filter(o => !o.deleted);
+  const { orders } = await sweepOrders(apiKey, { where: { invoicedDate: null, archived: false }, locationId });
+  return orders.filter(o => !o.deleted);
 }
 
 // Builds the alert list stored in metrics_cache.alerts and rendered by the
@@ -307,7 +299,7 @@ module.exports = (pool) => {
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     try {
       // Fire-and-forget: refresh Committed WIP cache alongside metrics (non-blocking; never affects this response).
-      buildCommittedWip(apiKey, req.params.locationId).then(w => pool.query(`INSERT INTO committed_wip_cache (location_id, payload, created_at) VALUES ($1,$2,NOW()) ON CONFLICT (location_id) DO UPDATE SET payload=EXCLUDED.payload, created_at=NOW()`, [req.params.locationId, JSON.stringify(w)])).catch(e => console.error('wip refresh (via /refresh) failed:', e.message));
+      buildCommittedWip(pool, apiKey, req.params.locationId).then(w => pool.query(`INSERT INTO committed_wip_cache (location_id, payload, created_at) VALUES ($1,$2,NOW()) ON CONFLICT (location_id) DO UPDATE SET payload=EXCLUDED.payload, created_at=NOW()`, [req.params.locationId, JSON.stringify(w)])).catch(e => console.error('wip refresh (via /refresh) failed:', e.message));
       const locResult = await pool.query('SELECT * FROM locations WHERE id = $1', [req.params.locationId]);
       if (!locResult.rows.length) return res.status(404).json({ error: 'Location not found' });
       const loc = locResult.rows[0];
@@ -359,17 +351,17 @@ module.exports = (pool) => {
       // vehicles, and comped $0 lines). Billed hours = hours on revenue-generating
       // lines (calculatedLaborCents > 0); worked hours = all labour-line hours.
       // PPH uses billed hours so comped/give-away time doesn't depress the metric.
-      let labourHoursBilled = 0, labourHoursWorked = 0;
+      let labourHoursBilled = 0, labourHoursWorked = 0, svcFail = 0;
       for (const o of mtdOrders) {
         let lines = [];
         try {
           const sr = await fetch(`https://api.shopmonkey.cloud/v3/order/${o.id}/service?limit=100`, {
             headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
           });
-          if (!sr.ok) continue;
+          if (!sr.ok) { svcFail++; continue; }
           const sj = await sr.json();
           lines = (sj && sj.data && sj.data.data) ? sj.data.data : (sj.data || []);
-        } catch (e) { continue; }
+        } catch (e) { svcFail++; continue; }
         for (const ln of (lines || [])) {
           const lineGeneratedRevenue = (ln.calculatedLaborCents || 0) > 0;
           for (const lab of (ln.labors || [])) {
@@ -379,6 +371,13 @@ module.exports = (pool) => {
             if (lineGeneratedRevenue) labourHoursBilled += hrs;
           }
         }
+      }
+      // If ANY per-order hours fetch failed (esp. a 429), the hours aggregate is
+      // incomplete — writing it would poison labour_margin/pph/effective_rate (this
+      // is what silently blanked efficiency). Bail so the cache keeps its last good
+      // row instead of persisting a half-updated one.
+      if (svcFail > 0) {
+        return res.status(502).json({ error: `Labour-hours fetch incomplete (${svcFail}/${mtdOrders.length} orders failed, likely rate-limited) — kept last good metrics` });
       }
       const labourHoursComped = labourHoursWorked - labourHoursBilled;
 
@@ -513,6 +512,7 @@ module.exports = (pool) => {
       };
 
       const monthVehicles = new Set();
+      let svcFail = 0;
       for (const o of monthOrders) {
         if (o.vehicleId) monthVehicles.add(o.vehicleId);
         let lines = [];
@@ -520,10 +520,10 @@ module.exports = (pool) => {
           const sr = await fetch(`https://api.shopmonkey.cloud/v3/order/${o.id}/service?limit=100`, {
             headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
           });
-          if (!sr.ok) continue;
+          if (!sr.ok) { svcFail++; continue; }
           const sj = await sr.json();
           lines = (sj && sj.data && sj.data.data) ? sj.data.data : (sj.data || []);
-        } catch (e) { continue; }
+        } catch (e) { svcFail++; continue; }
 
         for (const ln of (lines || [])) {
           const labs = (ln.labors || []).filter(l => l.technicianId);
@@ -543,6 +543,11 @@ module.exports = (pool) => {
             if (o.vehicleId) b._vehicles.add(o.vehicleId);
           }
         }
+      }
+
+      // Incomplete hours -> don't wipe good per-tech rows with partial ones.
+      if (svcFail > 0) {
+        return res.status(502).json({ error: `Tech hours fetch incomplete (${svcFail}/${monthOrders.length} orders failed, likely rate-limited) — kept last good tech efficiency` });
       }
 
       const techs = Object.values(byTech)
@@ -697,7 +702,7 @@ module.exports = (pool) => {
         if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
         const { locationId } = req.params;
         try {
-          const wip = await buildCommittedWip(apiKey, locationId);
+          const wip = await buildCommittedWip(pool, apiKey, locationId);
           await pool.query(`INSERT INTO committed_wip_cache (location_id, payload, created_at) VALUES ($1, $2, NOW()) ON CONFLICT (location_id) DO UPDATE SET payload = EXCLUDED.payload, created_at = NOW()`, [locationId, JSON.stringify(wip)]);
           res.json({ ok: true, ...wip });
         } catch (err) {
