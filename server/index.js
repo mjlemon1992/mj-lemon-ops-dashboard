@@ -34,6 +34,7 @@ const marketingShotsRoutes = require('./routes/marketingShots');
 const marketingReviewsRoutes = require('./routes/marketingReviews');
 const marketingDriveRoutes = require('./routes/marketingDrive');
 const cosRoutes = require('./routes/cos');
+const noticesRoutes = require('./routes/notices');
 const mcpRoutes = require('./routes/mcp');
 const { startScheduler } = require('./scheduler');
 
@@ -54,6 +55,7 @@ app.use('/api/marketing/shots', marketingShotsRoutes(pool));
 app.use('/api/marketing/reviews', marketingReviewsRoutes(pool));
 app.use('/api/marketing/drive', marketingDriveRoutes(pool));
 app.use('/api/cos', cosRoutes(pool));
+app.use('/api/notices', noticesRoutes(pool));
 app.use('/mcp', mcpRoutes(pool));
 app.use('/report', require('./report')(pool));
 

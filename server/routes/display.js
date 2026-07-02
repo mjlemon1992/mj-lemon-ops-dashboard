@@ -135,6 +135,51 @@ module.exports = (pool) => {
       const totalSold = techs.reduce((s, t) => s + (t.hours_sold || 0), 0);
       const totalBilled = techs.reduce((s, t) => s + (t.hours_billed || 0), 0);
 
+      // YTD tech snapshot — same shape as the mtd list so the board can cycle
+      // between the two periods. Uses the stored efficiency (uniform working
+      // days x 8, written by the YTD recompute) rather than re-deriving here.
+      let techsYtd = [];
+      try {
+        const ySnapRes = await pool.query(
+          "SELECT MAX(snapshot_date) AS d FROM tech_efficiency WHERE location_id = $1 AND period_type = 'ytd' AND snapshot_date <= CURRENT_DATE",
+          [req.params.locationId]
+        );
+        const ySnap = ySnapRes.rows[0] && ySnapRes.rows[0].d ? ySnapRes.rows[0].d : null;
+        if (ySnap) {
+          const yRes = await pool.query(
+            "SELECT tech_id, tech_name, hours_sold, hours_billed, efficiency FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2 AND period_type = 'ytd'",
+            [req.params.locationId, ySnap]
+          );
+          techsYtd = yRes.rows
+            .filter(r => !hidden.has(r.tech_id))
+            .map(r => ({
+              tech_id: r.tech_id,
+              tech_name: r.tech_name,
+              hours_sold: num(r.hours_sold),
+              hours_billed: num(r.hours_billed),
+              efficiency: num(r.efficiency)
+            }))
+            .sort((a, b) => (b.efficiency || 0) - (a.efficiency || 0));
+        }
+      } catch (e) { techsYtd = []; }
+
+      // Active shop notices for this board (all-location notices included).
+      // Table is created by routes/notices.js on first write; tolerate absence.
+      let notices = [];
+      try {
+        const nRes = await pool.query(
+          `SELECT id, kind, title, body, image_url, priority, created_at
+             FROM shop_notices
+            WHERE active = true
+              AND (location_id IS NULL OR location_id = $1)
+              AND (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY priority ASC, created_at DESC
+            LIMIT 20`,
+          [req.params.locationId]
+        );
+        notices = nRes.rows;
+      } catch (e) { notices = []; }
+
       // All-locations revenue standings (revenue only — no targets/efficiency for
       // the others), ranked highest revenue-to-date first. Lets each shop's board
       // show where it sits against the rest of the group.
@@ -176,6 +221,8 @@ module.exports = (pool) => {
         pct_to_target: pctToTarget,
         parts_margin: num(m.parts_margin),
         techs,
+        techs_ytd: techsYtd,
+        notices,
         leaderboard,
         reviews,
         totals: {

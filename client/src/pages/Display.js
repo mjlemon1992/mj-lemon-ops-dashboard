@@ -1,9 +1,18 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 
-const TWO_HOURS = 2 * 60 * 60 * 1000;
+const REFRESH_MS = 5 * 60 * 1000;      // data is DB-only server-side — cheap to poll
+const PERIOD_FLIP_MS = 12 * 1000;      // tech panel cycles MTD <-> YTD
+const NOTICE_FLIP_MS = 10 * 1000;      // notice rotation
 const money = n => '$' + Math.round(Number(n) || 0).toLocaleString('en-CA');
 const hrs = n => (n == null ? '—' : `${Math.round(Number(n) * 10) / 10}`);
+
+const NOTICE_STYLE = {
+  notice:      { icon: 'ℹ', color: 'var(--accent)',  label: 'NOTICE' },
+  celebration: { icon: '🎉', color: 'var(--success)', label: 'SHOUT-OUT' },
+  safety:      { icon: '⚠', color: 'var(--danger)',  label: 'SAFETY' },
+  poster:      { icon: '', color: 'var(--accent)',    label: '' }
+};
 
 export default function Display() {
   const { locationId } = useParams();
@@ -14,6 +23,9 @@ export default function Display() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [updatedAt, setUpdatedAt] = useState(null);
+  const [period, setPeriod] = useState('mtd');   // flips mtd <-> ytd when ytd data exists
+  const [fade, setFade] = useState(true);        // fade the tech panel through the flip
+  const [noticeIdx, setNoticeIdx] = useState(0);
   const timer = useRef(null);
 
   const load = useCallback(async (thePin) => {
@@ -31,13 +43,33 @@ export default function Display() {
     setLoading(false);
   }, [locationId, pinKey]);
 
-  // Initial load + 2-hour auto-refresh while unlocked.
+  // Initial load + auto-refresh while unlocked.
   useEffect(() => {
     if (!entered || !pin) return undefined;
     load(pin);
-    timer.current = setInterval(() => load(pin), TWO_HOURS);
+    timer.current = setInterval(() => load(pin), REFRESH_MS);
     return () => timer.current && clearInterval(timer.current);
   }, [entered, pin, load]);
+
+  // Cycle the tech panel between this-month and year-to-date. Only flip when
+  // there is YTD data to show; fade out, swap, fade back in.
+  const hasYtd = !!(data && data.techs_ytd && data.techs_ytd.length);
+  useEffect(() => {
+    if (!hasYtd) { setPeriod('mtd'); return undefined; }
+    const t = setInterval(() => {
+      setFade(false);
+      setTimeout(() => { setPeriod(p => (p === 'mtd' ? 'ytd' : 'mtd')); setFade(true); }, 400);
+    }, PERIOD_FLIP_MS);
+    return () => clearInterval(t);
+  }, [hasYtd]);
+
+  // Rotate notices.
+  const notices = (data && data.notices) || [];
+  useEffect(() => {
+    if (notices.length < 2) { setNoticeIdx(0); return undefined; }
+    const t = setInterval(() => setNoticeIdx(i => (i + 1) % notices.length), NOTICE_FLIP_MS);
+    return () => clearInterval(t);
+  }, [notices.length]);
 
   // PIN entry screen
   if (!entered) {
@@ -71,6 +103,11 @@ export default function Display() {
   const barColor = over ? 'var(--success)' : (onPace ? 'var(--success)' : (data.pace_pct != null && data.pace_pct >= 90 ? 'var(--warning)' : 'var(--danger)'));
   const effTarget = data.efficiency_target || 80;
 
+  const showYtd = period === 'ytd' && hasYtd;
+  const techRows = showYtd ? data.techs_ytd : data.techs;
+  const notice = notices.length ? notices[Math.min(noticeIdx, notices.length - 1)] : null;
+  const nStyle = notice ? (NOTICE_STYLE[notice.kind] || NOTICE_STYLE.notice) : null;
+
   return (
     <div style={{ ...wrap, alignItems: 'stretch', justifyContent: 'flex-start', padding: '32px 40px' }}>
       {/* Header */}
@@ -80,9 +117,31 @@ export default function Display() {
           <span style={{ fontSize: '24px', fontWeight: 600, color: 'var(--text)' }}>{data.location.name}</span>
         </div>
         <div style={{ fontSize: '13px', color: 'var(--text3)' }}>
-          {loading ? 'Refreshing…' : `Updated ${updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : ''}`} · auto-refresh 2h
+          {loading ? 'Refreshing…' : `Updated ${updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : ''}`} · auto-refresh 5 min
         </div>
       </div>
+
+      {/* Shop notices — rotate; posters go full-bleed */}
+      {notice && notice.kind === 'poster' && notice.image_url ? (
+        <div key={notice.id} style={{ marginBottom: '28px', borderRadius: '16px', overflow: 'hidden', border: '0.5px solid var(--border)', background: 'var(--bg2)', textAlign: 'center' }}>
+          <img src={notice.image_url} alt={notice.title || 'Poster'} style={{ maxWidth: '100%', maxHeight: '52vh', objectFit: 'contain', display: 'block', margin: '0 auto' }} />
+          {(notice.title || notice.body) && (
+            <div style={{ padding: '14px 24px', fontSize: '20px', fontWeight: 600 }}>{notice.title}{notice.body ? ` — ${notice.body}` : ''}</div>
+          )}
+          {notices.length > 1 && <NoticeDots count={notices.length} idx={noticeIdx} />}
+        </div>
+      ) : notice ? (
+        <div key={notice.id} style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', marginBottom: '28px', background: 'var(--bg2)', border: `1px solid ${nStyle.color}`, borderLeft: `8px solid ${nStyle.color}`, borderRadius: '16px', padding: '20px 28px' }}>
+          <div style={{ fontSize: '40px', lineHeight: 1 }}>{nStyle.icon}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '12px', fontWeight: 800, letterSpacing: '0.12em', color: nStyle.color, marginBottom: '4px' }}>{nStyle.label}</div>
+            {notice.title && <div style={{ fontSize: '26px', fontWeight: 700, color: 'var(--text)' }}>{notice.title}</div>}
+            {notice.body && <div style={{ fontSize: '19px', color: 'var(--text2)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{notice.body}</div>}
+          </div>
+          {notice.image_url && <img src={notice.image_url} alt="" style={{ maxHeight: '120px', maxWidth: '200px', objectFit: 'contain', borderRadius: '10px' }} />}
+          {notices.length > 1 && <NoticeDots count={notices.length} idx={noticeIdx} vertical />}
+        </div>
+      ) : null}
 
       {/* Revenue vs target bar */}
       <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '28px 32px', marginBottom: '28px' }}>
@@ -139,21 +198,27 @@ export default function Display() {
         </div>
       )}
 
-      {/* Tech leaderboard */}
-      <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
-        Technicians · hours sold {data.totals && `(${hrs(data.totals.hours_sold)} sold / ${hrs(data.totals.hours_billed)} billed)`}
+      {/* Tech leaderboard — cycles between this month and year-to-date */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+        <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          Technicians · hours sold {!showYtd && data.totals && `(${hrs(data.totals.hours_sold)} sold / ${hrs(data.totals.hours_billed)} billed)`}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.1em', padding: '4px 14px', borderRadius: '12px', background: !showYtd ? 'var(--accent)' : 'var(--bg3)', color: !showYtd ? '#1a1a1a' : 'var(--text3)', transition: 'all 0.3s' }}>THIS MONTH</span>
+          {hasYtd && <span style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.1em', padding: '4px 14px', borderRadius: '12px', background: showYtd ? 'var(--accent)' : 'var(--bg3)', color: showYtd ? '#1a1a1a' : 'var(--text3)', transition: 'all 0.3s' }}>YEAR TO DATE</span>}
+        </div>
       </div>
-      <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', overflow: 'hidden', opacity: fade ? 1 : 0, transition: 'opacity 0.4s ease' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1.2fr', padding: '12px 24px', borderBottom: '0.5px solid var(--border)', fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           <div>Technician</div>
           <div style={{ textAlign: 'right' }}>Billed</div>
           <div style={{ textAlign: 'right' }}>Sold</div>
           <div style={{ textAlign: 'right' }}>Efficiency</div>
         </div>
-        {data.techs.length === 0 && (
-          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text3)' }}>No tech hours yet this month.</div>
+        {techRows.length === 0 && (
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text3)' }}>{showYtd ? 'No YTD tech hours yet.' : 'No tech hours yet this month.'}</div>
         )}
-        {data.techs.map(t => {
+        {techRows.map(t => {
           const eff = t.efficiency;
           const effColor = eff == null ? 'var(--text3)' : (eff >= effTarget ? 'var(--success)' : (eff >= effTarget - 10 ? 'var(--warning)' : 'var(--danger)'));
           return (
@@ -190,6 +255,16 @@ export default function Display() {
       <div style={{ marginTop: 'auto', paddingTop: '20px', fontSize: '12px', color: 'var(--text3)', textAlign: 'center' }}>
         Efficiency = hours sold ÷ available hours ({data.location.weekly_hours || 40}h/wk base, minus {data.location.province?.toUpperCase()} stat holidays) · target {effTarget}%
       </div>
+    </div>
+  );
+}
+
+function NoticeDots({ count, idx, vertical }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: vertical ? 'column' : 'row', gap: '6px', justifyContent: 'center', padding: vertical ? 0 : '0 0 12px' }}>
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} style={{ width: '8px', height: '8px', borderRadius: '50%', background: i === idx ? 'var(--accent)' : 'var(--bg3)' }} />
+      ))}
     </div>
   );
 }

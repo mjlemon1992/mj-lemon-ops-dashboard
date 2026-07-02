@@ -20,6 +20,7 @@ import Marketing from './pages/Marketing';
 import ApprovalsPage from './pages/ApprovalsPage';
 import Locations from './pages/Locations';
 import Targets from './pages/Targets';
+import Notices from './pages/Notices';
 import Users from './pages/Users';
 import Wip from './pages/Wip';
 
@@ -56,6 +57,7 @@ export default function App() {
   <Route path="wip" element={<Wip />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />
             <Route path="targets" element={<ProtectedRoute ownerOrPartner><Targets /></ProtectedRoute>} />
+            <Route path="notices" element={<ProtectedRoute ownerOrPartner><Notices /></ProtectedRoute>} />
             <Route path="users" element={<ProtectedRoute ownerOnly><Users /></ProtectedRoute>} />
           </Route>
         </Routes>
