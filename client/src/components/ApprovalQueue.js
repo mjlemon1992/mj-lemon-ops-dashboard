@@ -16,6 +16,15 @@ function AutoTextarea({ value, onChange, minRows = 3, style, ...rest }) {
     el.style.height = `${el.scrollHeight}px`;
   };
   useLayoutEffect(fit, [value]);
+  // Refit when the box width changes (window resize / layout shift), else a rewrap
+  // clips the caption because overflow is hidden.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
     <textarea
       ref={ref}
@@ -76,7 +85,7 @@ async function getFontFaceCss() {
       out.push(`@font-face{font-family:'ArchivoP';font-style:normal;font-weight:${f.w};src:url(${data}) format('woff2')}`);
     }
     _fontCss = out.join('');
-  } catch { _fontCss = ''; }
+  } catch { return ''; }   // transient failure: don't cache, retry next poster
   return _fontCss;
 }
 
@@ -109,7 +118,7 @@ async function getLogo() {
     const raw = await new Promise((r, j) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = j; fr.readAsDataURL(blob); });
     const im = await loadImg(raw);
     _logo = trimTransparent(im) || { data: raw, aspect: im.height / im.width };
-  } catch { _logo = { data: null, aspect: 0.58 }; }
+  } catch { return { data: null, aspect: 0.58 }; }   // transient failure: don't cache, retry next poster
   return _logo;
 }
 
@@ -129,11 +138,16 @@ async function svgToBlob(svg, S, bg) {
   } else { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, S, S); }
   const img = await loadImg('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
   ctx.drawImage(img, 0, 0, S, S);
-  return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+  if (!blob) throw new Error('Poster render failed (canvas returned no blob)');
+  return blob;
 }
 
 // A rotating library of distinct layouts so output isn't repetitive. No CTAs.
 async function renderPoster({ type, headline, subline, locName, bg }) {
+  // Ensure Archivo is loaded before we MEASURE wraps with it; otherwise lines are
+  // measured at fallback (Helvetica) widths but render in wider Archivo and overflow.
+  try { await document.fonts.load('800 76px Archivo'); await document.fonts.ready; } catch {}
   const S = 1080, M = 92;
   const { data: logo, aspect } = await getLogo();
   const img = (x, y, w, op) => logo ? `<image xlink:href="${logo}" x="${x}" y="${y}" width="${w}" height="${w * aspect}"${op != null ? ` opacity="${op}"` : ''}/>` : '';
@@ -155,7 +169,7 @@ async function renderPoster({ type, headline, subline, locName, bg }) {
   // embedded display font, not the old Arial fallback.
   const wHL = (px, w) => wrapFor(headline, `800 ${px}px Archivo, ${FF}`, w);
   const wSL = (px, w) => wrapFor(subline, `400 ${px}px ${FF}`, w);
-  const head = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${S} ${S}"><defs>
+  const head = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}"><defs>
     <style type="text/css"><![CDATA[${fontCss}]]></style>
     <linearGradient id="dk" x1="0" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#23262B"/><stop offset="1" stop-color="#0A0B0D"/></linearGradient>
     <linearGradient id="or" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8703B"/><stop offset="1" stop-color="#E14313"/></linearGradient>
@@ -257,14 +271,19 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
   useEffect(() => { api('/marketing/posts/status').then(s => { setConfigured(!!s.configured); setImageGen(!!s.imageGen); }).catch(() => {}); }, [api]);
   useEffect(() => { api('/marketing/drive/status').then(s => setDriveOn(!!s.configured)).catch(() => {}); }, [api]);
 
+  const reqRef = useRef(0);
   const refresh = useCallback(() => {
     if (!locId) return;
+    const rid = ++reqRef.current;              // ignore this result if a newer refresh/location-switch supersedes it
     setLoading(true); setErr(null);
-    Promise.all([
-      api(`/marketing/posts/${locId}/queue?status=draft`).catch(() => []),
-      api(`/marketing/posts/${locId}/queue?status=approved`).catch(() => []),
-      api(`/marketing/posts/${locId}/queue?status=deleted`).catch(() => []),
-    ]).then(([d, a, x]) => { setPosts(d || []); setApproved(a || []); setDeleted(x || []); setLoading(false); if (onCount) onCount({ drafts: (d || []).length, approved: (a || []).length }); });
+    let failed = false;
+    const grab = (s) => api(`/marketing/posts/${locId}/queue?status=${s}`).catch(() => { failed = true; return []; });
+    Promise.all([grab('draft'), grab('approved'), grab('deleted')]).then(([d, a, x]) => {
+      if (rid !== reqRef.current) return;
+      setPosts(d || []); setApproved(a || []); setDeleted(x || []); setLoading(false);
+      if (failed) setErr('Could not load the marketing queue — check your connection.');
+      if (onCount) onCount({ drafts: (d || []).length, approved: (a || []).length });
+    });
   }, [locId, api, onCount]);
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -390,7 +409,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       setPosterTopic('');
       setNotice(data.captionError ? 'Poster created — captions failed; write them in or hit Regenerate.' : 'Poster created — it’s in the queue below.');
       refresh();
-    } catch (e) { setErr(String(e.message || e)); }
+    } catch (e) { setErr(String(e.message || e)); setNotice(null); }
     finally { setGenPoster(false); }
   };
 

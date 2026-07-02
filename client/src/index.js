@@ -25,8 +25,10 @@ if (process.env.NODE_ENV === 'production') {
     return m ? m[0] : null;
   })();
   let shown = false;
+  let poll = null;
   const showBanner = () => {
     if (shown) return; shown = true;
+    if (poll) clearInterval(poll);   // stop polling once the banner is up
     const bar = document.createElement('div');
     bar.setAttribute('role', 'status');
     bar.style.cssText = 'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:99999;display:flex;align-items:center;gap:14px;background:#16181B;color:#fff;border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:11px 14px 11px 16px;font:500 13px -apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,0.4)';
@@ -45,6 +47,6 @@ if (process.env.NODE_ENV === 'production') {
       if (m && running && m[0] !== running) showBanner();
     } catch (_) { /* offline / transient — ignore */ }
   };
-  setInterval(check, 120000);
+  poll = setInterval(check, 120000);
   window.addEventListener('focus', check);
 }

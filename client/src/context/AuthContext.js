@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const AuthContext = createContext(null);
 
@@ -38,7 +38,7 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
-  const api = async (path, options = {}) => {
+  const api = useCallback(async (path, options = {}) => {
     const res = await fetch(`/api${path}`, {
       ...options,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers }
@@ -46,7 +46,7 @@ export function AuthProvider({ children }) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Request failed');
     return data;
-  };
+  }, [token]);
 
   return (
     <AuthContext.Provider value={{ user, token, login, logout, api, loading }}>
