@@ -122,9 +122,9 @@ export default function Display() {
       </div>
 
       {/* Shop notices — rotate; posters go full-bleed */}
-      {notice && notice.kind === 'poster' && notice.image_url ? (
+      {notice && notice.kind === 'poster' && (notice.image || notice.image_url) ? (
         <div key={notice.id} style={{ marginBottom: '28px', borderRadius: '16px', overflow: 'hidden', border: '0.5px solid var(--border)', background: 'var(--bg2)', textAlign: 'center' }}>
-          <img src={notice.image_url} alt={notice.title || 'Poster'} style={{ maxWidth: '100%', maxHeight: '52vh', objectFit: 'contain', display: 'block', margin: '0 auto' }} />
+          <img src={notice.image || notice.image_url} alt={notice.title || 'Poster'} style={{ maxWidth: '100%', maxHeight: '52vh', objectFit: 'contain', display: 'block', margin: '0 auto' }} />
           {(notice.title || notice.body) && (
             <div style={{ padding: '14px 24px', fontSize: '20px', fontWeight: 600 }}>{notice.title}{notice.body ? ` — ${notice.body}` : ''}</div>
           )}
@@ -138,7 +138,7 @@ export default function Display() {
             {notice.title && <div style={{ fontSize: '26px', fontWeight: 700, color: 'var(--text)' }}>{notice.title}</div>}
             {notice.body && <div style={{ fontSize: '19px', color: 'var(--text2)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{notice.body}</div>}
           </div>
-          {notice.image_url && <img src={notice.image_url} alt="" style={{ maxHeight: '120px', maxWidth: '200px', objectFit: 'contain', borderRadius: '10px' }} />}
+          {(notice.image || notice.image_url) && <img src={notice.image || notice.image_url} alt="" style={{ maxHeight: '120px', maxWidth: '200px', objectFit: 'contain', borderRadius: '10px' }} />}
           {notices.length > 1 && <NoticeDots count={notices.length} idx={noticeIdx} vertical />}
         </div>
       ) : null}

@@ -25,6 +25,7 @@ export default function Notices() {
   const [items, setItems] = useState([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [file, setFile] = useState(null);
   const [form, setForm] = useState({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '' });
 
   const load = useCallback(() => {
@@ -40,13 +41,13 @@ export default function Notices() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.title && !form.body && !form.image_url) { setError('Add a title, message or image URL'); return; }
+    if (!form.title && !form.body && !form.image_url && !file) { setError('Add a title, message, image URL or upload a poster'); return; }
     setSaving(true); setError('');
     try {
       const expires_at = form.expires_days
         ? new Date(Date.now() + Number(form.expires_days) * 86400000).toISOString()
         : null;
-      await api('/notices', {
+      const created = await api('/notices', {
         method: 'POST',
         body: JSON.stringify({
           location_id: form.location_id || null,
@@ -57,7 +58,16 @@ export default function Notices() {
           expires_at
         })
       });
+      // Poster file uploads as a raw image body (same pattern as marketing intake).
+      if (file && created && created.id) {
+        await api(`/notices/${created.id}/image`, {
+          method: 'POST',
+          headers: { 'Content-Type': file.type || 'image/jpeg' },
+          body: file
+        });
+      }
       setForm({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '' });
+      setFile(null);
       load();
     } catch (e2) { setError(e2.message || 'Failed to save'); }
     setSaving(false);
@@ -108,9 +118,18 @@ export default function Notices() {
           <span style={label}>Message</span>
           <textarea value={form.body} onChange={e => set('body', e.target.value)} rows={3} placeholder="Optional detail shown under the title" style={{ ...input, resize: 'vertical' }} />
         </div>
-        <div>
-          <span style={label}>Image URL {form.kind === 'poster' ? '(shown full size)' : '(optional, shown small)'}</span>
-          <input value={form.image_url} onChange={e => set('image_url', e.target.value)} placeholder="https://…" style={input} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+          <div>
+            <span style={label}>Upload poster {form.kind === 'poster' ? '(shown full size)' : '(optional, shown small)'}</span>
+            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif"
+              onChange={e => setFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+              style={{ ...input, padding: '8px 12px' }} />
+            {file && <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '4px' }}>{file.name} · {Math.round(file.size / 1024)} KB</div>}
+          </div>
+          <div>
+            <span style={label}>…or image URL</span>
+            <input value={form.image_url} onChange={e => set('image_url', e.target.value)} placeholder="https://…" style={input} />
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <button className="primary" type="submit" disabled={saving} style={{ padding: '10px 28px', fontSize: '15px' }}>
@@ -136,7 +155,7 @@ export default function Notices() {
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {kind.label} · {n.title || n.body || (n.image_url ? 'Image poster' : '(empty)')}
+                  {kind.label} · {n.title || n.body || (n.image_url || n.has_image ? 'Image poster' : '(empty)')}{n.has_image ? ' · 🖼' : ''}
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '2px' }}>
                   {n.location_id ? locName(n.location_id) : 'All locations'} · by {n.created_by || '—'} · {new Date(n.created_at).toLocaleDateString('en-CA')}

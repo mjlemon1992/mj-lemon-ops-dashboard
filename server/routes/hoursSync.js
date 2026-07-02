@@ -51,6 +51,7 @@ async function smFetch(url, opts, tries = 6) {
 
 async function fetchTechNames(pool, locationId) {
   const map = {};
+  // Snapshot history first (works even if the user API call fails)...
   try {
     const { rows } = await pool.query(
       `SELECT DISTINCT ON (tech_id) tech_id, tech_name
@@ -61,6 +62,25 @@ async function fetchTechNames(pool, locationId) {
     );
     for (const r of rows) if (r.tech_id && r.tech_name) map[r.tech_id] = r.tech_name;
   } catch (e) { /* fall back to ids */ }
+  // ...then live Shopmonkey names win. Without this, a tech's FIRST-ever
+  // snapshot row gets a "Tech 8c03af"-style placeholder (history has no name
+  // for them yet) and that placeholder shows on the display board.
+  try {
+    const apiKey = process.env.SHOPMONKEY_API_KEY;
+    if (apiKey) {
+      const res = await smFetch('https://api.shopmonkey.cloud/v3/user?limit=200', {
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+      });
+      if (res.ok) {
+        const td = await res.json();
+        const list = (td && td.data && td.data.data) ? td.data.data : (td.data || []);
+        for (const t of list) {
+          const name = t.name || [t.firstName, t.lastName].filter(Boolean).join(' ');
+          if (t.id && name) map[t.id] = name;
+        }
+      }
+    }
+  } catch (e) { /* keep DB names */ }
   return map;
 }
 
