@@ -3,7 +3,9 @@ import { useParams } from 'react-router-dom';
 
 const REFRESH_MS = 5 * 60 * 1000;      // data is DB-only server-side — cheap to poll
 const PERIOD_FLIP_MS = 12 * 1000;      // tech panel cycles MTD <-> YTD
-const NOTICE_FLIP_MS = 10 * 1000;      // notice rotation
+const NOTICE_FLIP_MS = 10 * 1000;      // text-banner rotation on the board page
+const BOARD_MS = 40 * 1000;            // revenue/tech page holds this long...
+const POSTER_MS = 15 * 1000;           // ...then each poster takes the full screen
 const money = n => '$' + Math.round(Number(n) || 0).toLocaleString('en-CA');
 const hrs = n => (n == null ? '—' : `${Math.round(Number(n) * 10) / 10}`);
 
@@ -26,6 +28,8 @@ export default function Display() {
   const [period, setPeriod] = useState('mtd');   // flips mtd <-> ytd when ytd data exists
   const [fade, setFade] = useState(true);        // fade the tech panel through the flip
   const [noticeIdx, setNoticeIdx] = useState(0);
+  const [posterIdx, setPosterIdx] = useState(0);
+  const [showPoster, setShowPoster] = useState(false);
   const timer = useRef(null);
 
   const load = useCallback(async (thePin) => {
@@ -63,13 +67,40 @@ export default function Display() {
     return () => clearInterval(t);
   }, [hasYtd]);
 
-  // Rotate notices.
+  // Posters (image posts) take over the FULL screen on a page-flip cycle so
+  // they never bury the numbers: board page for BOARD_MS, then each poster
+  // for POSTER_MS, then back. Text notices stay as a slim banner on the board.
   const notices = (data && data.notices) || [];
+  const posters = notices.filter(n => n.kind === 'poster' && (n.image || n.image_url));
+  const banners = notices.filter(n => !(n.kind === 'poster' && (n.image || n.image_url)));
+
+  // Rotate text banners on the board page.
   useEffect(() => {
-    if (notices.length < 2) { setNoticeIdx(0); return undefined; }
-    const t = setInterval(() => setNoticeIdx(i => (i + 1) % notices.length), NOTICE_FLIP_MS);
+    if (banners.length < 2) { setNoticeIdx(0); return undefined; }
+    const t = setInterval(() => setNoticeIdx(i => (i + 1) % banners.length), NOTICE_FLIP_MS);
     return () => clearInterval(t);
-  }, [notices.length]);
+  }, [banners.length]);
+
+  // Page-flip: board <-> full-screen poster(s).
+  useEffect(() => {
+    if (!posters.length) { setShowPoster(false); return undefined; }
+    let t;
+    let cancelled = false;
+    const showBoard = () => {
+      t = setTimeout(() => {
+        if (cancelled) return;
+        setShowPoster(true);
+        t = setTimeout(() => {
+          if (cancelled) return;
+          setShowPoster(false);
+          setPosterIdx(i => (i + 1) % posters.length);
+          showBoard();
+        }, POSTER_MS);
+      }, BOARD_MS);
+    };
+    showBoard();
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [posters.length]);
 
   // PIN entry screen
   if (!entered) {
@@ -105,8 +136,33 @@ export default function Display() {
 
   const showYtd = period === 'ytd' && hasYtd;
   const techRows = showYtd ? data.techs_ytd : data.techs;
-  const notice = notices.length ? notices[Math.min(noticeIdx, notices.length - 1)] : null;
+  const notice = banners.length ? banners[Math.min(noticeIdx, banners.length - 1)] : null;
   const nStyle = notice ? (NOTICE_STYLE[notice.kind] || NOTICE_STYLE.notice) : null;
+  const poster = posters.length ? posters[posterIdx % posters.length] : null;
+
+  // Full-screen poster page — flips back to the board automatically.
+  if (showPoster && poster) {
+    return (
+      <div style={{ ...wrap, alignItems: 'stretch', justifyContent: 'flex-start', padding: '24px 40px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px' }}>
+            <span style={{ fontSize: '26px', fontWeight: 800, color: 'var(--accent)', letterSpacing: '-1px' }}>OPS</span>
+            <span style={{ fontSize: '24px', fontWeight: 600, color: 'var(--text)' }}>{data.location.name}</span>
+          </div>
+          {posters.length > 1 && <NoticeDots count={posters.length} idx={posterIdx % posters.length} />}
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 0 }}>
+          <img src={poster.image || poster.image_url} alt={poster.title || 'Poster'}
+            style={{ maxWidth: '96%', maxHeight: (poster.title || poster.body) ? '76vh' : '84vh', objectFit: 'contain', borderRadius: '14px' }} />
+          {(poster.title || poster.body) && (
+            <div style={{ marginTop: '18px', fontSize: '28px', fontWeight: 700, color: 'var(--text)', textAlign: 'center' }}>
+              {poster.title}{poster.body ? <span style={{ fontWeight: 400, color: 'var(--text2)' }}> — {poster.body}</span> : null}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ ...wrap, alignItems: 'stretch', justifyContent: 'flex-start', padding: '32px 40px' }}>
@@ -121,16 +177,9 @@ export default function Display() {
         </div>
       </div>
 
-      {/* Shop notices — rotate; posters go full-bleed */}
-      {notice && notice.kind === 'poster' && (notice.image || notice.image_url) ? (
-        <div key={notice.id} style={{ marginBottom: '28px', borderRadius: '16px', overflow: 'hidden', border: '0.5px solid var(--border)', background: 'var(--bg2)', textAlign: 'center' }}>
-          <img src={notice.image || notice.image_url} alt={notice.title || 'Poster'} style={{ maxWidth: '100%', maxHeight: '52vh', objectFit: 'contain', display: 'block', margin: '0 auto' }} />
-          {(notice.title || notice.body) && (
-            <div style={{ padding: '14px 24px', fontSize: '20px', fontWeight: 600 }}>{notice.title}{notice.body ? ` — ${notice.body}` : ''}</div>
-          )}
-          {notices.length > 1 && <NoticeDots count={notices.length} idx={noticeIdx} />}
-        </div>
-      ) : notice ? (
+      {/* Text notices — slim banner above the numbers; posters get their own
+          full-screen page on the flip cycle instead of living here. */}
+      {notice ? (
         <div key={notice.id} style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', marginBottom: '28px', background: 'var(--bg2)', border: `1px solid ${nStyle.color}`, borderLeft: `8px solid ${nStyle.color}`, borderRadius: '16px', padding: '20px 28px' }}>
           <div style={{ fontSize: '40px', lineHeight: 1 }}>{nStyle.icon}</div>
           <div style={{ flex: 1 }}>
@@ -139,7 +188,7 @@ export default function Display() {
             {notice.body && <div style={{ fontSize: '19px', color: 'var(--text2)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{notice.body}</div>}
           </div>
           {(notice.image || notice.image_url) && <img src={notice.image || notice.image_url} alt="" style={{ maxHeight: '120px', maxWidth: '200px', objectFit: 'contain', borderRadius: '10px' }} />}
-          {notices.length > 1 && <NoticeDots count={notices.length} idx={noticeIdx} vertical />}
+          {banners.length > 1 && <NoticeDots count={banners.length} idx={noticeIdx} vertical />}
         </div>
       ) : null}
 
