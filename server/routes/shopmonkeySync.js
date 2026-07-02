@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { workingDaysElapsed } = require('../lib/workdays');
 
 function parseShopmonkeyDate(str) {
   if (!str || str === 'empty') return null;
@@ -550,16 +551,23 @@ module.exports = (pool) => {
         return res.status(502).json({ error: `Tech hours fetch incomplete (${svcFail}/${monthOrders.length} orders failed, likely rate-limited) — kept last good tech efficiency` });
       }
 
+      // Worked hours = working days elapsed this month x 8 (holiday + province
+      // aware), matching /hours/:loc/recompute-from-weekly so the 2h auto-refresh
+      // and the manual recompute produce the same efficiency definition.
+      const province = loc.province || 'ab';
+      const workedHours = workingDaysElapsed(province, now) * 8;
+
       const techs = Object.values(byTech)
         .filter(t => t.hours_sold > 0)
         .map(t => ({
           tech_id: t.tech_id,
           tech_name: t.tech_name,
           hours_available: null,
-          hours_worked: null,
+          hours_worked: workedHours,
           hours_sold: Math.round(t.hours_sold * 10) / 10,
           hours_billed: Math.round(t.hours_billed * 10) / 10,
           vehicle_count: t._vehicles.size,
+          efficiency: workedHours > 0 ? Math.round((t.hours_sold / workedHours) * 100) : null,
           labour_revenue: Math.round(t.labour_revenue * 100) / 100,
           parts_gp: null
         }));
@@ -569,14 +577,20 @@ module.exports = (pool) => {
       try {
         await client.query('BEGIN');
         await client.query('ALTER TABLE tech_efficiency ADD COLUMN IF NOT EXISTS period_type VARCHAR(8)');
-        await client.query('DELETE FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2 AND period_type IS NULL', [req.params.locationId, date]);
+        // Write rows as period_type='mtd' so the Technicians tab (which reads
+        // only mtd rows) sees the 2h auto-refresh. Previously these were written
+        // with period_type NULL — rows the reader could never see, so the tab
+        // stayed frozen at the last manual recompute (and new techs never
+        // appeared until someone pressed the button). Also sweep legacy NULL
+        // rows for the same date.
+        await client.query("DELETE FROM tech_efficiency WHERE location_id = $1 AND snapshot_date = $2 AND (period_type IS NULL OR period_type = 'mtd')", [req.params.locationId, date]);
         await client.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS distinct_vehicles_mtd INTEGER');
         await client.query('UPDATE locations SET distinct_vehicles_mtd = $1, updated_at = NOW() WHERE id = $2', [monthVehicles.size, req.params.locationId]);
         for (const t of techs) {
           await client.query(
-            `INSERT INTO tech_efficiency (location_id, snapshot_date, tech_id, tech_name, hours_available, hours_worked, hours_sold, hours_billed, vehicle_count, efficiency, labour_revenue, parts_gp)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-            [req.params.locationId, date, t.tech_id, t.tech_name, t.hours_available, t.hours_worked, t.hours_sold, t.hours_billed, t.vehicle_count, null, t.labour_revenue, t.parts_gp]
+            `INSERT INTO tech_efficiency (location_id, snapshot_date, period_type, tech_id, tech_name, hours_available, hours_worked, hours_sold, hours_billed, vehicle_count, efficiency, labour_revenue, parts_gp)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            [req.params.locationId, date, 'mtd', t.tech_id, t.tech_name, t.hours_available, t.hours_worked, t.hours_sold, t.hours_billed, t.vehicle_count, t.efficiency, t.labour_revenue, t.parts_gp]
           );
         }
         await client.query('COMMIT');
