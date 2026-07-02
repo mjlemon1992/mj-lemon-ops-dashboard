@@ -52,7 +52,7 @@ let _gemModel;
 async function geminiModelId() {
   if (_gemModel) return _gemModel;
   if (GEMINI_IMAGE_MODEL && GEMINI_IMAGE_MODEL !== 'auto') { _gemModel = GEMINI_IMAGE_MODEL; return _gemModel; }
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`);
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${GEMINI_KEY}`);
   const b = await r.json();
   if (!r.ok) throw Object.assign(new Error(`Gemini list-models ${r.status}: ${JSON.stringify(b).slice(0, 200)}`), { status: 502 });
   const models = (b.models || []).map(m => ({ id: String(m.name || '').replace(/^models\//, ''), methods: m.supportedGenerationMethods || [] }));
@@ -65,7 +65,7 @@ async function geminiModelId() {
 }
 
 // Returns a data: URI for a generated background image, or throws with .status.
-async function geminiImage(prompt) {
+async function geminiImage(prompt, _retried = false) {
   const model = await geminiModelId();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
   const r = await fetch(url, {
@@ -77,7 +77,15 @@ async function geminiImage(prompt) {
     }),
   });
   const body = await r.json();
-  if (!r.ok) throw Object.assign(new Error(`Gemini ${r.status}: ${JSON.stringify(body).slice(0, 280)}`), { status: 502 });
+  if (!r.ok) {
+    // A cached auto-discovered model that Google later renamed/decommissioned 404s
+    // forever — clear the cache and re-discover once.
+    if (r.status === 404 && !_retried && (!GEMINI_IMAGE_MODEL || GEMINI_IMAGE_MODEL === 'auto')) {
+      _gemModel = undefined;
+      return geminiImage(prompt, true);
+    }
+    throw Object.assign(new Error(`Gemini ${r.status}: ${JSON.stringify(body).slice(0, 280)}`), { status: 502 });
+  }
   const parts = ((((body.candidates || [])[0] || {}).content || {}).parts) || [];
   const part = parts.find(p => p.inlineData && p.inlineData.data);
   if (!part) throw Object.assign(new Error(`Gemini returned no image: ${JSON.stringify(body).slice(0, 200)}`), { status: 502 });
@@ -132,9 +140,10 @@ const CAPTION_TOOL = {
 module.exports = (pool) => {
   const router = express.Router();
 
-  let _init = false;
-  const ensureTables = async () => {
-    if (_init) return;
+  // Memoize the DDL PROMISE (not a bool) so N concurrent first-requests after a
+  // deploy don't all run CREATE TABLE and collide on pg_type.
+  let _init;
+  const ensureTables = () => _init || (_init = (async () => {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS marketing_post (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -168,8 +177,7 @@ module.exports = (pool) => {
         at TIMESTAMPTZ DEFAULT NOW()
       )`);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_mpa_post ON marketing_post_audit(post_id, at DESC)');
-    _init = true;
-  };
+  })());
 
   // Audit is best-effort: a logging failure must never break the request that
   // triggered it. actorOf derives a stable label from the authed user.
@@ -192,19 +200,24 @@ module.exports = (pool) => {
   const purge = async () => {
     // Un-actioned drafts past PURGE_DAYS are SOFT-deleted (recoverable + logged),
     // not dropped — so an "expired" draft can still be explained and restored.
+    // Age is measured from the LAST touch (created or actioned), so a just-restored
+    // or just-unapproved draft isn't instantly re-purged (restore/unapprove bump
+    // actioned_at).
     const { rows } = await pool.query(
       `UPDATE marketing_post SET deleted_at = NOW(), deleted_via = 'purge'
-         WHERE status='draft' AND deleted_at IS NULL AND created_at < NOW() - ($1 || ' days')::interval
+         WHERE status='draft' AND deleted_at IS NULL
+           AND GREATEST(created_at, COALESCE(actioned_at, created_at)) < NOW() - ($1 || ' days')::interval
          RETURNING id, location_id`,
       [String(PURGE_DAYS)]
     );
     for (const r of rows) await audit(r.id, r.location_id, 'purge', 'system', `auto-expired after ${PURGE_DAYS}d`);
     // Reclaim storage: rows soft-deleted longer than PURGE_DAYS are gone for good
-    // (their image bytea would otherwise accumulate forever).
-    await pool.query(
-      `DELETE FROM marketing_post WHERE deleted_at IS NOT NULL AND deleted_at < NOW() - ($1 || ' days')::interval`,
+    // (their image bytea would otherwise accumulate forever). Audited before removal.
+    const { rows: hard } = await pool.query(
+      `DELETE FROM marketing_post WHERE deleted_at IS NOT NULL AND deleted_at < NOW() - ($1 || ' days')::interval RETURNING id, location_id`,
       [String(PURGE_DAYS)]
     );
+    for (const r of hard) await audit(r.id, r.location_id, 'hard-purge', 'system', `permanently removed after ${PURGE_DAYS}d soft-deleted`);
   };
 
   const locName = async (id) => {
@@ -273,7 +286,7 @@ module.exports = (pool) => {
   router.get('/poster-image/models', ...gate, async (req, res) => {
     try {
       if (!GEMINI_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY not set' });
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`);
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${GEMINI_KEY}`);
       const b = await r.json();
       if (!r.ok) return res.status(502).json({ error: `Gemini ${r.status}: ${JSON.stringify(b).slice(0, 200)}` });
       const models = (b.models || []).map(m => ({ id: String(m.name || '').replace(/^models\//, ''), methods: m.supportedGenerationMethods || [] }));
@@ -390,7 +403,7 @@ module.exports = (pool) => {
     try {
       await ensureTables();
       const { rows } = await pool.query(
-        `UPDATE marketing_post SET deleted_at = NULL, deleted_via = NULL, deleted_by = NULL
+        `UPDATE marketing_post SET deleted_at = NULL, deleted_via = NULL, deleted_by = NULL, actioned_at = NOW()
            WHERE id=$1 AND deleted_at IS NOT NULL RETURNING id, location_id`,
         [req.params.postId]
       );
