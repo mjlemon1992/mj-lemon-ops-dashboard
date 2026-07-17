@@ -152,13 +152,10 @@ export default function Display() {
           {posters.length > 1 && <NoticeDots count={posters.length} idx={posterIdx % posters.length} />}
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 0 }}>
+          {/* No title/body caption here: the poster IS the message (AI posters bake
+              the words into the design), so a caption just echoed the same text. */}
           <img src={poster.image || poster.image_url} alt={poster.title || 'Poster'}
-            style={{ maxWidth: '96%', maxHeight: (poster.title || poster.body) ? '76vh' : '84vh', objectFit: 'contain', borderRadius: '14px' }} />
-          {(poster.title || poster.body) && (
-            <div style={{ marginTop: '18px', fontSize: '28px', fontWeight: 700, color: 'var(--text)', textAlign: 'center' }}>
-              {poster.title}{poster.body ? <span style={{ fontWeight: 400, color: 'var(--text2)' }}> — {poster.body}</span> : null}
-            </div>
-          )}
+            style={{ maxWidth: '96%', maxHeight: '84vh', objectFit: 'contain', borderRadius: '14px' }} />
         </div>
       </div>
     );
