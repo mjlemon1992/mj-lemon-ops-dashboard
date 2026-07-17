@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth');
+const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
 const { JWT } = require('google-auth-library');
 const heicConvert = require('heic-convert');
 
@@ -137,12 +137,19 @@ module.exports = (pool) => {
   };
 
   const fail = (res, e) => res.status(e.status || 500).json({ error: String(e.message || e) });
-  const gate = [authenticateToken, requireOwnerOrPartner];
+  // Shop operators (managers) may use this for THEIR location; asserted below.
+  const gate = [authenticateToken, requireRole('owner', 'partner', 'manager')];
+  const assertLoc = (req, res) => {
+    if (canAccessLocation(req.user, req.params.locationId)) return true;
+    res.status(403).json({ error: 'Access denied for this location' });
+    return false;
+  };
 
   router.get('/status', ...gate, (req, res) => res.json({ configured: SA_OK, hasDefaultFolder: !!FOLDER_ENV }));
 
   // List images in the location's Drive folder.
   router.get('/:locationId/list', ...gate, async (req, res) => {
+    if (!assertLoc(req, res)) return;
     try {
       await ensure();
       if (!SA_OK) return res.status(503).json({ error: 'GOOGLE_SERVICE_ACCOUNT_JSON not set' });
@@ -157,6 +164,7 @@ module.exports = (pool) => {
   // this via authenticated fetch -> blob). Prefers Drive's thumbnail; falls back to the
   // full file (converted if HEIC).
   router.get('/:locationId/thumb/:fileId', ...gate, async (req, res) => {
+    if (!assertLoc(req, res)) return;
     try {
       if (!SA_OK) return res.status(503).end();
       const size = Math.min(1600, Math.max(100, parseInt(req.query.size, 10) || 400));
@@ -180,6 +188,7 @@ module.exports = (pool) => {
 
   // Import a chosen Drive image -> draft + captions in the approval queue.
   router.post('/:locationId/import', ...gate, async (req, res) => {
+    if (!assertLoc(req, res)) return;
     try {
       await ensure();
       if (!SA_OK) return res.status(503).json({ error: 'GOOGLE_SERVICE_ACCOUNT_JSON not set' });

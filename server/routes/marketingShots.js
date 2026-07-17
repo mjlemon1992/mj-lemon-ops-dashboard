@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth');
+const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
 
 // Marketing: "This week's shots" — turn today's OPEN repair orders (from Shopmonkey)
 // into a short AI shoot list (what to photograph/film for social). Read-only; cached
@@ -68,12 +68,19 @@ module.exports = (pool) => {
   };
 
   const fail = (res, e) => res.status(e.status || 500).json({ error: String(e.message || e) });
-  const gate = [authenticateToken, requireOwnerOrPartner];
+  // Shop operators (managers) may use this for THEIR location; asserted below.
+  const gate = [authenticateToken, requireRole('owner', 'partner', 'manager')];
+  const assertLoc = (req, res) => {
+    if (canAccessLocation(req.user, req.params.locationId)) return true;
+    res.status(403).json({ error: 'Access denied for this location' });
+    return false;
+  };
 
   router.get('/status', ...gate, (req, res) => res.json({ configured: !!(ANTHROPIC_KEY && SHOPMONKEY_KEY) }));
 
   // Cached 12h; ?force=1 regenerates from live open orders.
   router.get('/:locationId/shots', ...gate, async (req, res) => {
+    if (!assertLoc(req, res)) return;
     try {
       await ensure();
       const id = req.params.locationId, force = req.query.force === '1';
