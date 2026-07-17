@@ -3,7 +3,7 @@ const { authenticateToken, requireRole, requireOwner, canAccessLocation } = requ
 const { ensureBonusFuelTables } = require('../lib/bonusFuelSchema');
 const { computeRun, round2 } = require('../lib/bonusCalc');
 const { workingPaceFrac, workingDaysInMonth } = require('../lib/workdays');
-const { paidHoursByMonth } = require('../lib/timeClockSchema');
+const { ensureTimeClockTables, paidHoursByMonth, approvedOffDaysByMonth } = require('../lib/timeClockSchema');
 
 // Bonus module (spec: lemonops-bonus-fuelcard-spec-FULL.md). Owner-only
 // mutations; owner+partner reads. Everything location-scoped; managers have no
@@ -412,8 +412,12 @@ module.exports = (pool) => {
       const crew = await activePeople(req.params.locationId);
       // Real clocked hours from the shop-floor time clock, when the tech actually
       // punched that month — those beat the schedule formula. Formula stays the
-      // fallback for anyone without punches (or before the clock rolls out).
+      // fallback for anyone without punches (or before the clock rolls out),
+      // reduced by any APPROVED time off so holidays never count against a tech.
+      await ensureTimeClockTables(pool);
       const clockHours = await paidHoursByMonth(pool, req.params.locationId, month);
+      const offDays = await approvedOffDaysByMonth(pool, req.params.locationId, month);
+      const perDay = weekly / 5;
       // Match crew first names against tech names (case/whitespace/accents folded).
       // Anything unmatched is surfaced with its hours, never guessed.
       const matched = [], unmatched = [];
@@ -424,8 +428,9 @@ module.exports = (pool) => {
         const person = crew.find((p) => p.role === 'tech' && nm && nm.startsWith(normName(p.name).split(' ')[0]));
         if (person && !claimed.has(person.id)) {
           claimed.add(person.id);
-          const clocked = clockHours[person.id] != null ? clockHours[person.id] : e.scheduled;
-          matched.push({ person_id: person.id, person_name: person.name, tech_name: e.name, billed_hours: e.hours, clocked_hours: clocked, clocked_source: clockHours[person.id] != null ? 'clock' : 'schedule' });
+          const holidayAdj = round2((offDays[person.id] || 0) * perDay);
+          const clocked = clockHours[person.id] != null ? clockHours[person.id] : Math.max(0, round2(e.scheduled - holidayAdj));
+          matched.push({ person_id: person.id, person_name: person.name, tech_name: e.name, billed_hours: e.hours, clocked_hours: clocked, clocked_source: clockHours[person.id] != null ? 'clock' : 'schedule', holiday_days_off: offDays[person.id] || 0 });
         } else {
           unmatched.push({ tech_name: e.name, billed_hours: e.hours });
         }

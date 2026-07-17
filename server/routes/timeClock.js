@@ -1,7 +1,8 @@
 const express = require('express');
 const crypto = require('crypto');
 const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
-const { ensureTimeClockTables, paidHoursByMonth } = require('../lib/timeClockSchema');
+const { ensureTimeClockTables, paidHoursByMonth, paidHoursByRange } = require('../lib/timeClockSchema');
+const { workingDaysBetween } = require('../lib/workdays');
 
 // Shop-floor Time Clock. Two surfaces:
 //   • KIOSK (public, PIN-gated like the display boards) — a shared tablet in the
@@ -113,25 +114,210 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
+  // ══ TIME OFF — kiosk side (PIN-gated) ═════════════════════════════════
+  const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+  const OFF_TYPES = ['vacation', 'sick', 'unpaid', 'other'];
+
+  // Who's-off board for the kiosk: approved (and pending, flagged) requests
+  // from a week back to ~10 weeks out.
+  router.get('/:locationId/timeoff-board', async (req, res) => {
+    try {
+      await ensure();
+      if (!(await checkLocPin(req, res))) return;
+      const { rows } = await pool.query(
+        `SELECT r.id, r.person_id, p.name AS person_name, r.start_date::text AS start_date, r.end_date::text AS end_date, r.type, r.status, r.working_days
+           FROM time_off_request r JOIN bonus_person p ON p.id = r.person_id
+          WHERE r.location_id = $1 AND r.status IN ('approved','pending')
+            AND r.end_date >= (now() AT TIME ZONE 'America/Edmonton')::date - 7
+            AND r.start_date <= (now() AT TIME ZONE 'America/Edmonton')::date + 70
+          ORDER BY r.start_date`, [req.params.locationId]);
+      res.json({ requests: rows });
+    } catch (e) { fail(res, e); }
+  });
+
+  // A tech requests time off from the kiosk (their own PIN required).
+  router.post('/:locationId/timeoff', async (req, res) => {
+    try {
+      await ensure();
+      if (!(await checkLocPin(req, res))) return;
+      const { person_id, pin, start_date, end_date, type, note } = req.body || {};
+      if (!person_id || !isDate(start_date) || !isDate(end_date)) return fail(res, 'person_id + start_date + end_date required', 400);
+      if (end_date < start_date) return fail(res, 'End date is before start date', 400);
+      if (!OFF_TYPES.includes(type || 'vacation')) return fail(res, 'Invalid type', 400);
+      const { rows: pr } = await pool.query('SELECT id, name, clock_pin FROM bonus_person WHERE id=$1 AND location_id=$2 AND active=true', [person_id, req.params.locationId]);
+      if (!pr.length) return fail(res, 'Person not found', 404);
+      if (!pr[0].clock_pin) return fail(res, 'No clock PIN set — ask the owner to set one.', 400);
+      const rk = rlKey(req, req.params.locationId) + '|' + person_id;
+      if (isLocked(rk)) return fail(res, 'Too many incorrect PINs. Try again later.', 429);
+      if (!pinEqual(pin, pr[0].clock_pin)) { recordFail(rk); return fail(res, 'Incorrect PIN', 401); }
+      fails.delete(rk);
+      const { rows: overlap } = await pool.query(
+        `SELECT 1 FROM time_off_request WHERE person_id=$1 AND status IN ('pending','approved') AND start_date <= $3 AND end_date >= $2 LIMIT 1`,
+        [person_id, start_date, end_date]);
+      if (overlap.length) return fail(res, 'You already have a request covering those dates', 409);
+      const { rows: locRows } = await pool.query('SELECT province FROM locations WHERE id=$1', [req.params.locationId]);
+      const days = workingDaysBetween((locRows[0] || {}).province || 'ab', start_date, end_date);
+      const { rows } = await pool.query(
+        `INSERT INTO time_off_request (location_id, person_id, start_date, end_date, type, note, working_days)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        [req.params.locationId, person_id, start_date, end_date, type || 'vacation', String(note || '').slice(0, 300), days]);
+      res.json({ ok: true, id: rows[0].id, working_days: days, name: pr[0].name });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ══ TIME OFF — admin side ═════════════════════════════════════════════
+  // Mirror an approved request onto the Shopmonkey calendar (all-day block, no
+  // customer). Best-effort: approval stands even if the push fails.
+  const smPush = async (locationId, personName, r) => {
+    const apiKey = process.env.SHOPMONKEY_API_KEY;
+    const { rows } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [locationId]);
+    const smLoc = rows[0] && rows[0].shopmonkey_location_id;
+    if (!apiKey || !smLoc) return { ok: false, error: 'Shopmonkey not configured' };
+    const label = { vacation: 'Holiday', sick: 'Sick', unpaid: 'Unpaid leave', other: 'Time off' }[r.type] || 'Time off';
+    try {
+      const resp = await fetch('https://api.shopmonkey.cloud/v3/appointment', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          locationId: smLoc,
+          name: `🏖 ${personName} — ${label}`,
+          note: `${personName} off ${r.start_date} to ${r.end_date} (${r.working_days} working day${r.working_days === 1 ? '' : 's'}). Approved in the ops dashboard.`,
+          allDay: true,
+          startDate: `${r.start_date}T15:00:00.000Z`,
+          endDate: `${r.end_date}T23:00:00.000Z`,
+          color: 'purple',
+          sendConfirmation: false,
+          sendReminder: false,
+        }),
+      });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) return { ok: false, error: body.message || `HTTP ${resp.status}` };
+      const id = (body.data && body.data.id) || body.id;
+      return { ok: true, id };
+    } catch (e) { return { ok: false, error: e.message }; }
+  };
+  const smDelete = async (smAppointmentId) => {
+    const apiKey = process.env.SHOPMONKEY_API_KEY;
+    if (!apiKey || !smAppointmentId) return;
+    try {
+      await fetch(`https://api.shopmonkey.cloud/v3/appointment/${smAppointmentId}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${apiKey}` },
+      });
+    } catch { /* best-effort */ }
+  };
+
   // ══ CORRECTIONS + PINs (owner + that location's manager) ══════════════
   const authed = [authenticateToken, requireRole('owner', 'partner', 'manager')];
   const scoped = (req, res, next) => canAccessLocation(req.user, req.params.locationId) ? next() : res.status(403).json({ error: 'Access denied for this location' });
   const paidExpr = "ROUND((EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2)";
 
-  // Month of entries for review + correction, with computed paid hours.
+  // Entries for review + correction, with computed paid hours. Accepts either
+  // ?from=YYYY-MM-DD&to=YYYY-MM-DD (payroll periods) or ?month=YYYY-MM.
   router.get('/:locationId/entries', ...authed, scoped, async (req, res) => {
     try {
       await ensure();
-      const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : null;
-      if (!month) return fail(res, 'month=YYYY-MM required', 400);
+      const { month, from, to } = req.query;
+      let range;
+      if (isDate(from) && isDate(to)) range = [from, to];
+      else if (/^\d{4}-\d{2}$/.test(month || '')) range = null;
+      else return fail(res, 'month=YYYY-MM or from+to=YYYY-MM-DD required', 400);
+      const where = range
+        ? `(e.clock_in AT TIME ZONE 'America/Edmonton')::date BETWEEN $2::date AND $3::date`
+        : `to_char(e.clock_in AT TIME ZONE 'America/Edmonton','YYYY-MM')=$2`;
+      const params = range ? [req.params.locationId, range[0], range[1]] : [req.params.locationId, month];
       const { rows } = await pool.query(
         `SELECT e.*, p.name AS person_name,
                 CASE WHEN e.clock_out IS NULL THEN NULL ELSE ${paidExpr} END AS paid_hours
            FROM time_clock_entry e JOIN bonus_person p ON p.id = e.person_id
-          WHERE e.location_id=$1 AND to_char(e.clock_in AT TIME ZONE 'America/Edmonton','YYYY-MM')=$2
-          ORDER BY e.clock_in DESC`, [req.params.locationId, month]);
-      const summary = await paidHoursByMonth(pool, req.params.locationId, month);
-      res.json({ month, entries: rows, summary });
+          WHERE e.location_id=$1 AND ${where}
+          ORDER BY e.clock_in DESC`, params);
+      const summary = range
+        ? await paidHoursByRange(pool, req.params.locationId, range[0], range[1])
+        : await paidHoursByMonth(pool, req.params.locationId, month);
+      res.json({ month: month || null, from: range ? range[0] : null, to: range ? range[1] : null, entries: rows, summary });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Biweekly pay periods, anchored at locations.pay_period_anchor (a period
+  // start date; default 2026-01-04). Returns the current + previous N periods.
+  router.get('/:locationId/pay-periods', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { rows } = await pool.query('SELECT pay_period_anchor::text AS anchor FROM locations WHERE id=$1', [req.params.locationId]);
+      const anchor = (rows[0] && rows[0].anchor) || '2026-01-04';
+      const DAY = 86400e3;
+      const a = new Date(anchor + 'T12:00:00Z').getTime();
+      const today = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' }) + 'T12:00:00Z').getTime();
+      const idx = Math.floor((today - a) / (14 * DAY));
+      const periods = [];
+      const iso = (t) => new Date(t).toISOString().slice(0, 10);
+      for (let i = idx; i > idx - 9 && i >= 0; i--) {
+        const start = a + i * 14 * DAY;
+        periods.push({ from: iso(start), to: iso(start + 13 * DAY), current: i === idx });
+      }
+      res.json({ anchor, periods });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Owner sets the biweekly anchor (any past period-START date, e.g. a payday-cycle start).
+  router.put('/:locationId/pay-anchor', authenticateToken, requireRole('owner'), async (req, res) => {
+    try {
+      await ensure();
+      const { anchor } = req.body || {};
+      if (!isDate(anchor)) return fail(res, 'anchor must be YYYY-MM-DD', 400);
+      await pool.query('UPDATE locations SET pay_period_anchor=$2 WHERE id=$1', [req.params.locationId, anchor]);
+      res.json({ ok: true, anchor });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Year's requests + per-person approved totals (working days).
+  router.get('/:locationId/timeoff', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : String(new Date().getFullYear());
+      const { rows: requests } = await pool.query(
+        `SELECT r.*, r.start_date::text AS start_date, r.end_date::text AS end_date, p.name AS person_name
+           FROM time_off_request r JOIN bonus_person p ON p.id = r.person_id
+          WHERE r.location_id=$1 AND (to_char(r.start_date,'YYYY')=$2 OR to_char(r.end_date,'YYYY')=$2)
+          ORDER BY r.status='pending' DESC, r.start_date DESC`, [req.params.locationId, year]);
+      const totals = {};
+      for (const r of requests) if (r.status === 'approved') totals[r.person_id] = (totals[r.person_id] || 0) + (r.working_days || 0);
+      res.json({ year, requests, totals });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Approve / deny. Approval mirrors to the Shopmonkey calendar (best-effort).
+  router.put('/timeoff/:id/decide', ...authed, async (req, res) => {
+    try {
+      await ensure();
+      const action = (req.body || {}).action;
+      if (!['approve', 'deny'].includes(action)) return fail(res, 'action must be approve|deny', 400);
+      const { rows: rr } = await pool.query(
+        `SELECT r.*, r.start_date::text AS start_date, r.end_date::text AS end_date, p.name AS person_name
+           FROM time_off_request r JOIN bonus_person p ON p.id=r.person_id WHERE r.id=$1`, [req.params.id]);
+      if (!rr.length) return fail(res, 'Request not found', 404);
+      const r = rr[0];
+      if (!canAccessLocation(req.user, r.location_id)) return fail(res, 'Access denied for this location', 403);
+      if (r.status !== 'pending') return fail(res, `Already ${r.status}`, 409);
+      let sm = null;
+      if (action === 'approve') sm = await smPush(r.location_id, r.person_name, r);
+      await pool.query(
+        `UPDATE time_off_request SET status=$2, decided_by=$3, decided_at=now(), sm_appointment_id=$4 WHERE id=$1`,
+        [r.id, action === 'approve' ? 'approved' : 'denied', who(req), sm && sm.ok ? sm.id : null]);
+      res.json({ ok: true, status: action === 'approve' ? 'approved' : 'denied', shopmonkey: sm ? (sm.ok ? 'calendar entry created' : `push failed: ${sm.error}`) : null });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Cancel a request (pending or approved). Removes the Shopmonkey entry too.
+  router.delete('/timeoff/:id', ...authed, async (req, res) => {
+    try {
+      await ensure();
+      const { rows: rr } = await pool.query('SELECT * FROM time_off_request WHERE id=$1', [req.params.id]);
+      if (!rr.length) return fail(res, 'Request not found', 404);
+      if (!canAccessLocation(req.user, rr[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      if (rr[0].sm_appointment_id) await smDelete(rr[0].sm_appointment_id);
+      await pool.query("UPDATE time_off_request SET status='cancelled', decided_by=$2, decided_at=now() WHERE id=$1", [req.params.id, who(req)]);
+      res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
 
