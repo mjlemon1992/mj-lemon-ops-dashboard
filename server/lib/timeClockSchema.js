@@ -45,6 +45,9 @@ function ensureTimeClockTables(pool) {
     // on the request card). Paid days pay the contractual daily hours in the
     // period totals; NULL = not chosen yet.
     await pool.query('ALTER TABLE time_off_request ADD COLUMN IF NOT EXISTS paid BOOLEAN');
+    // Annual holiday allowance in working days (stat holidays excluded — they
+    // never count against it). NULL = no allowance set, no warnings.
+    await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS vacation_days_per_year INTEGER');
     await pool.query(`CREATE TABLE IF NOT EXISTS time_clock_entry (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       location_id UUID NOT NULL,
