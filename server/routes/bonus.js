@@ -453,6 +453,20 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
+  // Discard a DRAFT run entirely — the month returns to its initial (no-run)
+  // state so inputs can be fixed and recalculated fresh. Approved runs can
+  // never be deleted (supersede is the only path — §6.2).
+  router.delete('/run/:runId', ...write, async (req, res) => {
+    try {
+      await ensure();
+      const { rows } = await pool.query('SELECT status FROM bonus_run WHERE id=$1', [req.params.runId]);
+      if (!rows.length) return fail(res, 'Run not found', 404);
+      if (rows[0].status !== 'draft') return fail(res, 'Approved runs are locked — supersede instead of deleting', 409);
+      await pool.query('DELETE FROM bonus_run WHERE id=$1', [req.params.runId]);   // lines cascade
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+
   // Supersede an approved run: new draft pointing back at it (§3.1).
   router.post('/run/:runId/supersede', ...write, async (req, res) => {
     try {
