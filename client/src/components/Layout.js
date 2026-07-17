@@ -16,6 +16,7 @@ const NAV = [
   { path: '/marketing', label: 'Marketing', icon: '◆', section: null, roles: ['owner', 'partner', 'manager'] },
   { path: '/bonus', label: 'Bonus', icon: '◆', section: null, roles: ['owner', 'partner', 'manager'] },
   { path: '/fuel-card', label: 'Fuel Card', icon: '⛽', section: null, roles: ['owner', 'partner', 'manager'] },
+  { path: '/time-clock', label: 'Time Clock', icon: '🕐', section: null, roles: ['owner', 'partner', 'manager'] },
   { path: '/comebacks', label: 'Comebacks', icon: '↩', section: null, roles: ['owner', 'partner', 'manager'] },
   { path: '/wip', label: 'Committed WIP', icon: '📋', section: null, roles: ['owner', 'partner', 'manager'] },
   { path: '/notices', label: 'Shop Notices', icon: '📢', section: null, roles: ['owner', 'partner', 'manager'] },
