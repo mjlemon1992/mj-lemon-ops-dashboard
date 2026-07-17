@@ -105,6 +105,26 @@ function BonusView({ locId }) {
     setBusy(false);
   };
 
+  const [pulling, setPulling] = useState(false);
+  const [pullNote, setPullNote] = useState(null);
+  // Auto-fill the BILLED side from Shopmonkey (flagged hours on revenue lines).
+  // Clocked stays manual — payroll is the honest denominator.
+  const pullBilled = async () => {
+    setPulling(true); setErr(null); setPullNote(null);
+    try {
+      const d = await api(`/bonus/${locId}/billed-hours/${month}`);
+      setEffEdits((s) => {
+        const next = { ...s };
+        for (const m of d.matched) next[m.person_id] = { ...next[m.person_id], billed_hours: m.billed_hours };
+        return next;
+      });
+      const note = `Filled ${d.matched.length} tech${d.matched.length === 1 ? '' : 's'} from ${d.orders_scanned} orders` +
+        (d.unmatched.length ? ` · unmatched: ${d.unmatched.map((u) => `${u.tech_name} (${u.billed_hours}h)`).join(', ')}` : '');
+      setPullNote(note);
+    } catch (e) { setErr(e.message); }
+    setPulling(false);
+  };
+
   const saveEfficiency = async () => {
     const entries = techs
       .map((t) => ({ person_id: t.id, ...((efficiency || {})[t.id] || {}), ...(effEdits[t.id] || {}) }))
@@ -287,7 +307,8 @@ function BonusView({ locId }) {
             )}
             {targetRow && (
               <>
-                <EfficiencyEditor techs={techs} month={month} efficiency={efficiency} effEdits={effEdits} setEffEdits={setEffEdits} onSave={saveEfficiency} busy={busy} />
+                <EfficiencyEditor techs={techs} month={month} efficiency={efficiency} effEdits={effEdits} setEffEdits={setEffEdits} onSave={saveEfficiency} busy={busy}
+                  onPullBilled={pullBilled} pulling={pulling} pullNote={pullNote} />
                 <CalcForm netProfit={netProfit} setNetProfit={setNetProfit} needsConfirm={needsConfirm} missing={missing}
                   busy={busy} onSubmit={(extra) => doCalculate(extra)} buttonLabel={`Calculate ${monthLabel(month)}`} />
               </>
@@ -351,12 +372,20 @@ function CalcForm({ netProfit, setNetProfit, needsConfirm, missing, busy, onSubm
   );
 }
 
-function EfficiencyEditor({ techs, month, efficiency, effEdits, setEffEdits, onSave, busy }) {
+function EfficiencyEditor({ techs, month, efficiency, effEdits, setEffEdits, onSave, busy, onPullBilled, pulling, pullNote }) {
   const val = (t, k) => (effEdits[t.id] && effEdits[t.id][k] !== undefined) ? effEdits[t.id][k] : ((efficiency || {})[t.id] || {})[k] ?? '';
   const set = (t, k, v) => setEffEdits((s) => ({ ...s, [t.id]: { ...s[t.id], [k]: v } }));
   return (
     <div style={{ marginBottom: '14px', padding: '12px 14px', background: 'var(--bg3)', borderRadius: '10px' }}>
-      <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px' }}>Efficiency inputs — {monthLabel(month)} <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(billed ÷ clocked; comeback hours in clocked only)</span></div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
+        <span style={{ fontSize: '12px', fontWeight: 600 }}>Efficiency inputs — {monthLabel(month)} <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(billed ÷ clocked; comeback hours in clocked only)</span></span>
+        {onPullBilled && (
+          <button type="button" onClick={onPullBilled} disabled={pulling} style={{ fontSize: '12px', padding: '5px 12px', marginLeft: 'auto' }}>
+            {pulling ? 'Pulling… (~15s)' : '⚡ Pull billed from Shopmonkey'}
+          </button>
+        )}
+      </div>
+      {pullNote && <div style={{ fontSize: '11px', color: 'var(--success)', marginBottom: '8px' }}>{pullNote} — now add clocked hours from payroll.</div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px' }}>
         {techs.map((t) => (
           <div key={t.id} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
