@@ -83,6 +83,10 @@ function BonusView({ locId }) {
 
   const { run, lines, formula, versions, people, efficiency, targets, pace, history, stretch_needed } = data;
   const locked = run && run.status === 'approved';
+  const isOwner = user?.role === 'owner';
+  // The shop operator can IMPORT hours (Shopmonkey pull + clocked entry) for
+  // their location; only the owner enters net profit / calculates / approves.
+  const canImport = ['owner', 'partner', 'manager'].includes(user?.role);
   const targetRow = (targets || []).find((t) => t.month === month);
   const techs = (people || []).filter((p) => p.active && p.role === 'tech');
   const overrides = (lines || []).filter((l) => Number(l.paid) !== Number(l.calculated));
@@ -339,6 +343,17 @@ function BonusView({ locId }) {
             )}
           </div>
         )
+      )}
+
+      {canImport && !isOwner && !locked && (
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <div style={{ fontWeight: 600, marginBottom: '4px' }}>Import hours for {monthLabel(month)}</div>
+          <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '10px' }}>
+            Pull each tech's billed hours from Shopmonkey and enter their clocked hours from payroll. This saves the data ready for the owner to run the bonus — you're not setting anyone's pay here.
+          </div>
+          <EfficiencyEditor techs={techs} month={month} efficiency={efficiency} effEdits={effEdits} setEffEdits={setEffEdits} onSave={saveEfficiency} busy={busy}
+            onPullBilled={pullBilled} pulling={pulling} pullNote={pullNote} />
+        </div>
       )}
 
       {pace && (

@@ -161,6 +161,11 @@ module.exports = (pool) => {
   const write = [authenticateToken, requireOwner];
   const scoped = (req, res, next) => canAccessLocation(req.user, req.params.locationId)
     ? next() : res.status(403).json({ error: 'Access denied for this location' });
+  // Data IMPORT (Jamie, 2026-07-17): the shop operator gets the operational
+  // numbers in — pull billed hours from Shopmonkey, enter clocked hours from
+  // payroll — for their own location. This is data entry, NOT a payout
+  // decision: net profit, calculate, override, approve all stay owner-only.
+  const importer = [authenticateToken, requireRole('owner', 'partner', 'manager'), scoped];
   const fail = (res, e, code = 500) => res.status(code).json({ error: String(e.message || e) });
 
   const formulaFor = async (locationId, month) => {
@@ -338,7 +343,7 @@ module.exports = (pool) => {
   });
 
   // ── Efficiency inputs (manual entry; POS import later) ──
-  router.put('/:locationId/efficiency/:month', ...write, async (req, res) => {
+  router.put('/:locationId/efficiency/:month', ...importer, async (req, res) => {
     try {
       await ensure();
       const { month } = req.params;
@@ -361,7 +366,7 @@ module.exports = (pool) => {
   // ── Billed-hours prefill: pull each tech's flagged hours for the month from
   // Shopmonkey and match them to the bonus crew by name. Clocked hours stay
   // manual (payroll is the only honest source — see program rules).
-  router.get('/:locationId/billed-hours/:month', ...write, async (req, res) => {
+  router.get('/:locationId/billed-hours/:month', ...importer, async (req, res) => {
     try {
       await ensure();
       const { month } = req.params;
