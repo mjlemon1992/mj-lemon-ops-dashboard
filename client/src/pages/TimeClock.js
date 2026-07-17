@@ -52,6 +52,7 @@ function ClockAdmin({ locId }) {
 
   const [allPeople, setAllPeople] = useState([]);   // incl. removed — for re-add
   const [editReqs, setEditReqs] = useState([]);     // pending timesheet-alteration requests
+  const [live, setLive] = useState([]);             // who's on the clock right now (summary strip)
   const load = useCallback(() => {
     if (!sel) return;
     Promise.all([
@@ -59,7 +60,8 @@ function ClockAdmin({ locId }) {
       api(`/bonus/${locId}/overview`).catch(() => ({ people: [] })),
       api(`/clock/${locId}/timeoff`).catch(() => null),
       api(`/clock/${locId}/edit-requests`).catch(() => ({ requests: [] })),
-    ]).then(([e, ov, toff, er]) => { setData(e); setAllPeople(ov.people || []); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setEditReqs(er.requests || []); setErr(null); })
+      api(`/clock/${locId}/status`).catch(() => ({ people: [] })),
+    ]).then(([e, ov, toff, er, st]) => { setData(e); setAllPeople(ov.people || []); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setEditReqs(er.requests || []); setLive(st.people || []); setErr(null); })
       .catch((ex) => setErr(ex.message));
   }, [api, locId, sel]);
   useEffect(() => { load(); }, [load]);
@@ -290,6 +292,26 @@ function ClockAdmin({ locId }) {
       {err && <div className="alert-strip" style={{ marginBottom: '12px' }}><span style={{ color: 'var(--danger)' }}>{err}</span></div>}
       {holNote && <div style={{ fontSize: '12px', color: 'var(--success)', marginBottom: '12px' }}>🎌 {holNote}</div>}
 
+      {/* The period at a glance — one compact strip, always visible up top */}
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
+        {(() => {
+          const clockedAll = Object.values(summary).reduce((s, v) => s + Number(v || 0), 0);
+          const statAll = Number(data.stat_pay_hours || 0) * people.length;
+          const holAll = Object.values(data.paid_timeoff_hours || {}).reduce((s, v) => s + Number(v || 0), 0);
+          const crewPaid = Math.round((clockedAll + statAll + holAll) * 100) / 100;
+          const breaksH = Math.round((data.entries || []).reduce((s, e) => s + (e.break_seconds || 0), 0) / 36) / 100;
+          const onNow = live.filter((p) => p.status !== 'off').length;
+          const mini = { minWidth: '128px', padding: '10px 14px' };
+          return (<>
+            <div className="metric-card" style={mini}><div className="metric-label">Crew paid</div><div className="metric-value" style={{ fontSize: '20px' }}>{crewPaid} h</div></div>
+            <div className="metric-card" style={mini}><div className="metric-label">Breaks</div><div className="metric-value" style={{ fontSize: '20px' }}>{breaksH} h</div></div>
+            <div className="metric-card" style={mini}><div className="metric-label">Stat pay</div><div className="metric-value" style={{ fontSize: '20px' }}>{Number(data.stat_pay_hours || 0)} h</div></div>
+            <div className="metric-card" style={mini}><div className="metric-label">Paid holiday</div><div className="metric-value" style={{ fontSize: '20px' }}>{Math.round(holAll * 100) / 100} h</div></div>
+            <div className="metric-card" style={mini}><div className="metric-label">On the clock</div><div className="metric-value" style={{ fontSize: '20px', color: onNow ? 'var(--success)' : undefined }}>{onNow} <span style={{ fontSize: '12px', color: 'var(--text2)', fontWeight: 500 }}>of {live.length || people.length}</span></div></div>
+          </>);
+        })()}
+      </div>
+
       {/* Closure booking — calendar pickers, one booking covers the whole crew */}
       {closure && (
         <div className="card" style={{ marginBottom: '16px', border: '1px solid var(--danger)' }}>
@@ -316,10 +338,10 @@ function ClockAdmin({ locId }) {
         </div>
       )}
 
-      {/* Time-off approvals */}
-      {pending.length > 0 && (
+      {/* Needs attention — holiday approvals + timesheet change requests, one card */}
+      {(pending.length > 0 || editReqs.length > 0) && (
         <div className="card" style={{ marginBottom: '16px', border: '1px solid var(--warning)' }}>
-          <div style={{ fontWeight: 600, marginBottom: '10px' }}>🏖 Time-off requests awaiting your decision</div>
+          <div style={{ fontWeight: 600, marginBottom: '10px' }}>Needs attention <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>· {pending.length + editReqs.length} item{pending.length + editReqs.length === 1 ? '' : 's'}</span></div>
           {pending.map((r) => {
             // Allowance check: what would approving this vacation leave them at?
             const person = people.find((p) => p.id === r.person_id);
@@ -349,13 +371,7 @@ function ClockAdmin({ locId }) {
             </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Timesheet alteration requests from the kiosk */}
-      {editReqs.length > 0 && (
-        <div className="card" style={{ marginBottom: '16px', border: '1px solid var(--accent)' }}>
-          <div style={{ fontWeight: 600, marginBottom: '10px' }}>✋ Timesheet change requests</div>
+          {/* change requests flow in the same card, under the holiday items */}
           {editReqs.map((r) => {
             const hasProposal = r.proposed_clock_in || r.proposed_clock_out || r.proposed_break_minutes != null;
             return (

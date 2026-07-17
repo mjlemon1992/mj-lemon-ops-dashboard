@@ -156,6 +156,17 @@ td.strong { font-weight: 500; color: var(--text); }
 /* Aliases so pages that reference --surface render correctly. */
 :root { --surface: #111111; --surface2: #1a1a1a; --surface-2: #1a1a1a; }
 
+/* ── Light mode ("office mode"): paper-and-ink, same brand orange. Toggled by
+   the ☀/🌙 switch in the header via data-theme on <html>; dark stays default so
+   the shop-floor board and kiosk devices are unaffected unless switched. ── */
+:root[data-theme="light"] {
+  --bg: #f7f5f1; --bg2: #ffffff; --bg3: #f1ede4;
+  --border: #e3ded5; --border2: #d8d2c6;
+  --text: #26221d; --text2: #6c6459; --text3: #a39a8c;
+  --success: #17854a; --warning: #a87500; --danger: #cc2f2f; --info: #2470b3;
+  --surface: #ffffff; --surface2: #f1ede4; --surface-2: #f1ede4;
+}
+
 /* Type scale — applies to semantic headings; inline styles still win where set. */
 h1 { font-family: 'Archivo', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.2; }
 h2 { font-family: 'Archivo', sans-serif; font-size: 16px; font-weight: 700; line-height: 1.3; }

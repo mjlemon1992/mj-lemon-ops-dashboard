@@ -4,30 +4,41 @@ import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
 import { parseAlerts, alertId } from '../utils/alerts';
 
+// Grouped nav (2026-07-17 refresh): same items, same roles — organized into five
+// sections so the sidebar reads in blocks instead of a flat list. Every item
+// carries its section so labels survive role filtering (showSection compares
+// against the previous VISIBLE item).
 const NAV = [
   { path: '/', label: 'Home', icon: '⌂', section: 'Overview' },
-  { path: '/chief-of-staff', label: 'Automations', icon: '⏱', section: null, roles: ['owner', 'partner'] },
-  { path: '/scorecard', label: 'Scorecard', icon: '✦', section: null, roles: ['owner', 'partner'] },
-  { path: '/performance', label: 'Performance', icon: '◈', section: null },
-  { path: '/technicians', label: 'Technicians', icon: '⚒', section: null },
-  { path: '/alerts', label: 'Alerts', icon: '◉', section: null },
-  { path: '/reports', label: 'Reports', icon: '▤', section: 'Reports', roles: ['owner', 'partner', 'manager'] },
-  { path: '/finance', label: 'Finance', icon: '$', section: null, roles: ['owner', 'partner', 'manager'] },
-  { path: '/marketing', label: 'Marketing', icon: '◆', section: null, roles: ['owner', 'partner', 'manager'] },
-  { path: '/bonus', label: 'Bonus', icon: '◆', section: null, roles: ['owner', 'partner', 'manager'] },
-  { path: '/fuel-card', label: 'Fuel Card', icon: '⛽', section: null, roles: ['owner', 'partner', 'manager'] },
-  { path: '/time-clock', label: 'Time Clock', icon: '🕐', section: null, roles: ['owner', 'partner', 'manager'] },
-  { path: '/comebacks', label: 'Comebacks', icon: '↩', section: null, roles: ['owner', 'partner', 'manager'] },
-  { path: '/wip', label: 'Committed WIP', icon: '📋', section: null, roles: ['owner', 'partner', 'manager'] },
-  { path: '/notices', label: 'Shop Notices', icon: '📢', section: null, roles: ['owner', 'partner', 'manager'] },
+  { path: '/scorecard', label: 'Scorecard', icon: '✦', section: 'Overview', roles: ['owner', 'partner'] },
+  { path: '/performance', label: 'Performance', icon: '◈', section: 'Overview' },
+  { path: '/alerts', label: 'Alerts', icon: '◉', section: 'Overview' },
+  { path: '/technicians', label: 'Technicians', icon: '⚒', section: 'Shop' },
+  { path: '/comebacks', label: 'Comebacks', icon: '↩', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
+  { path: '/wip', label: 'Committed WIP', icon: '📋', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
+  { path: '/notices', label: 'Shop Notices', icon: '📢', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
+  { path: '/finance', label: 'Finance', icon: '$', section: 'Money', roles: ['owner', 'partner', 'manager'] },
+  { path: '/reports', label: 'Reports', icon: '▤', section: 'Money', roles: ['owner', 'partner', 'manager'] },
+  { path: '/bonus', label: 'Bonus', icon: '◆', section: 'Money', roles: ['owner', 'partner', 'manager'] },
+  { path: '/fuel-card', label: 'Fuel Card', icon: '⛽', section: 'Money', roles: ['owner', 'partner', 'manager'] },
+  { path: '/time-clock', label: 'Time Clock', icon: '🕐', section: 'Money', roles: ['owner', 'partner', 'manager'] },
+  { path: '/marketing', label: 'Marketing', icon: '◆', section: 'Marketing', roles: ['owner', 'partner', 'manager'] },
   { path: '/locations', label: 'Locations', icon: '◎', section: 'Settings', roles: ['owner'] },
-  { path: '/targets', label: 'Targets', icon: '◎', section: null, roles: ['owner', 'partner', 'manager'] },
-  { path: '/users', label: 'Users', icon: '◈', section: null, roles: ['owner'] },
+  { path: '/targets', label: 'Targets', icon: '◎', section: 'Settings', roles: ['owner', 'partner', 'manager'] },
+  { path: '/users', label: 'Users', icon: '◈', section: 'Settings', roles: ['owner'] },
+  { path: '/chief-of-staff', label: 'Automations', icon: '⏱', section: 'Settings', roles: ['owner', 'partner'] },
 ];
 
 export default function Layout() {
   const { user, logout, api } = useAuth();
   const { locations, selectedId, isAll, canSwitch, select } = useLocations();
+  // Light/dark mode — per device, dark by default (shop-floor boards and the
+  // kiosk keep their own default; this only follows the toggle on THIS device).
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('theme', theme);
+  }, [theme]);
   const navigate = useNavigate();
   const location = useLocation();
   const [alertCount, setAlertCount] = useState(0);
@@ -183,6 +194,12 @@ export default function Layout() {
                 ⚠ {alertCount}{isMobile ? '' : ' active alerts'}
               </div>
             )}
+            <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label="Toggle light/dark mode"
+              style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '8px', padding: '4px 10px', fontSize: '14px', cursor: 'pointer', lineHeight: 1.3 }}>
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 14px' : '20px 24px' }}>
