@@ -25,6 +25,8 @@ import Users from './pages/Users';
 import Wip from './pages/Wip';
 import Bonus from './pages/Bonus';
 import FuelCard from './pages/FuelCard';
+import ClockKiosk from './pages/ClockKiosk';
+import TimeClock from './pages/TimeClock';
 
 function ProtectedRoute({ children, ownerOnly, ownerOrPartner }) {
   const { user, loading } = useAuth();
@@ -42,6 +44,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/display/:locationId" element={<Display />} />
+          <Route path="/clock/:locationId" element={<ClockKiosk />} />
           <Route path="/" element={<ProtectedRoute><LocationProvider><Layout /></LocationProvider></ProtectedRoute>}>
             <Route index element={<Home />} />
             <Route path="chief-of-staff" element={<ProtectedRoute ownerOrPartner><ChiefOfStaff /></ProtectedRoute>} />
@@ -58,6 +61,7 @@ export default function App() {
             <Route path="comebacks" element={<Comebacks />} />
             <Route path="bonus" element={<Bonus />} />
             <Route path="fuel-card" element={<FuelCard />} />
+            <Route path="time-clock" element={<TimeClock />} />
   <Route path="wip" element={<Wip />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />
             <Route path="targets" element={<Targets />} />

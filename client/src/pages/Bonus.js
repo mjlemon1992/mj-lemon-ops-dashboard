@@ -139,8 +139,10 @@ function BonusView({ locId }) {
       });
       const src = d.source && d.source.kind === 'snapshot'
         ? `the ${d.source.date} tech snapshot` : `${(d.source && d.source.orders_scanned) || '?'} orders`;
-      const note = `Filled ${d.matched.length} tech${d.matched.length === 1 ? '' : 's'} from ${src}` +
-        (d.scheduled_hours ? ` · clocked set to the ${d.scheduled_hours}h monthly schedule (40h/wk less stat holidays) — adjust anyone part-time or on leave` : '') +
+      const clockNote = d.used_clock
+        ? ' · clocked hours from real time-clock punches where techs clocked in, else the monthly schedule'
+        : (d.scheduled_hours ? ` · clocked set to the ${d.scheduled_hours}h monthly schedule (40h/wk less stat holidays) — adjust anyone part-time or on leave` : '');
+      const note = `Filled ${d.matched.length} tech${d.matched.length === 1 ? '' : 's'} from ${src}` + clockNote +
         (d.unmatched.length ? ` · unmatched: ${d.unmatched.map((u) => `${u.tech_name} (${u.billed_hours}h)`).join(', ')}` : '');
       setPullNote(note);
     } catch (e) { setErr(e.message); }

@@ -37,6 +37,7 @@ const cosRoutes = require('./routes/cos');
 const noticesRoutes = require('./routes/notices');
 const bonusRoutes = require('./routes/bonus');
 const fuelRoutes = require('./routes/fuel');
+const timeClockRoutes = require('./routes/timeClock');
 const mcpRoutes = require('./routes/mcp');
 const { startScheduler } = require('./scheduler');
 
@@ -60,6 +61,7 @@ app.use('/api/cos', cosRoutes(pool));
 app.use('/api/notices', noticesRoutes(pool));
 app.use('/api/bonus', bonusRoutes(pool));
 app.use('/api/fuel', fuelRoutes(pool));
+app.use('/api/clock', timeClockRoutes(pool));
 app.use('/mcp', mcpRoutes(pool));
 app.use('/report', require('./report')(pool));
 

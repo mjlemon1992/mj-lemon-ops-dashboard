@@ -3,6 +3,7 @@ const { authenticateToken, requireRole, requireOwner, canAccessLocation } = requ
 const { ensureBonusFuelTables } = require('../lib/bonusFuelSchema');
 const { computeRun, round2 } = require('../lib/bonusCalc');
 const { workingPaceFrac, workingDaysInMonth } = require('../lib/workdays');
+const { paidHoursByMonth } = require('../lib/timeClockSchema');
 
 // Bonus module (spec: lemonops-bonus-fuelcard-spec-FULL.md). Owner-only
 // mutations; owner+partner reads. Everything location-scoped; managers have no
@@ -409,6 +410,10 @@ module.exports = (pool) => {
         source = { kind: 'live', orders_scanned };
       }
       const crew = await activePeople(req.params.locationId);
+      // Real clocked hours from the shop-floor time clock, when the tech actually
+      // punched that month — those beat the schedule formula. Formula stays the
+      // fallback for anyone without punches (or before the clock rolls out).
+      const clockHours = await paidHoursByMonth(pool, req.params.locationId, month);
       // Match crew first names against tech names (case/whitespace/accents folded).
       // Anything unmatched is surfaced with its hours, never guessed.
       const matched = [], unmatched = [];
@@ -419,12 +424,14 @@ module.exports = (pool) => {
         const person = crew.find((p) => p.role === 'tech' && nm && nm.startsWith(normName(p.name).split(' ')[0]));
         if (person && !claimed.has(person.id)) {
           claimed.add(person.id);
-          matched.push({ person_id: person.id, person_name: person.name, tech_name: e.name, billed_hours: e.hours, clocked_hours: e.scheduled });
+          const clocked = clockHours[person.id] != null ? clockHours[person.id] : e.scheduled;
+          matched.push({ person_id: person.id, person_name: person.name, tech_name: e.name, billed_hours: e.hours, clocked_hours: clocked, clocked_source: clockHours[person.id] != null ? 'clock' : 'schedule' });
         } else {
           unmatched.push({ tech_name: e.name, billed_hours: e.hours });
         }
       }
-      res.json({ month, matched, unmatched, source, scheduled_hours: scheduledMonth });
+      const usedClock = matched.some((m) => m.clocked_source === 'clock');
+      res.json({ month, matched, unmatched, source, scheduled_hours: scheduledMonth, used_clock: usedClock });
     } catch (e) { fail(res, e, /incomplete|rate-limit/i.test(String(e.message)) ? 502 : 500); }
   });
 
