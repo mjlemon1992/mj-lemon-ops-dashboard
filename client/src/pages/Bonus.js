@@ -107,6 +107,9 @@ function BonusView({ locId }) {
   const doCalculate = async (extra = {}, supersedeRunId = null) => {
     setBusy(true); setErr(null);
     try {
+      // Flush any on-screen hours (pulled or typed) to the server first, so the
+      // calc sees them — otherwise a Pull-then-Calculate reports "missing".
+      await persistEfficiency();
       const body = { month, net_profit: Number(netProfit), ...extra };
       const path = supersedeRunId ? `/bonus/run/${supersedeRunId}/supersede` : `/bonus/${locId}/calculate`;
       await api(path, { method: 'POST', body: JSON.stringify(body) });
@@ -144,15 +147,24 @@ function BonusView({ locId }) {
     setPulling(false);
   };
 
-  const saveEfficiency = async () => {
+  // Persist whatever hours are on screen (pulled or typed) to the server.
+  // Returns the number of complete rows saved. No reload — callers decide.
+  const persistEfficiency = async () => {
     const entries = techs
       .map((t) => ({ person_id: t.id, ...((efficiency || {})[t.id] || {}), ...(effEdits[t.id] || {}) }))
       .filter((e) => e.billed_hours != null && e.clocked_hours != null && e.billed_hours !== '' && e.clocked_hours !== '')
       .map((e) => ({ person_id: e.person_id, billed_hours: Number(e.billed_hours), clocked_hours: Number(e.clocked_hours) }));
-    if (!entries.length) { setErr('Enter billed + clocked hours first'); return; }
+    if (entries.length) await api(`/bonus/${locId}/efficiency/${month}`, { method: 'PUT', body: JSON.stringify({ entries }) });
+    return entries.length;
+  };
+
+  const saveEfficiency = async () => {
     setBusy(true); setErr(null);
-    try { await api(`/bonus/${locId}/efficiency/${month}`, { method: 'PUT', body: JSON.stringify({ entries }) }); setEffEdits({}); load(month); }
-    catch (e) { setErr(e.message); }
+    try {
+      const n = await persistEfficiency();
+      if (!n) { setErr('Enter billed + clocked hours first'); setBusy(false); return; }
+      setEffEdits({}); load(month);
+    } catch (e) { setErr(e.message); }
     setBusy(false);
   };
 
