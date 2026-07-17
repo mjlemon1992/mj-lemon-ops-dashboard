@@ -58,6 +58,8 @@ function BonusView({ locId }) {
   const [missing, setMissing] = useState(null);
   const [effEdits, setEffEdits] = useState({});
   const [targetEdit, setTargetEdit] = useState('');
+  const [pulling, setPulling] = useState(false);
+  const [pullNote, setPullNote] = useState(null);
 
   const load = useCallback((m) => {
     api(`/bonus/${locId}/overview${m ? `?month=${m}` : ''}`)
@@ -105,8 +107,6 @@ function BonusView({ locId }) {
     setBusy(false);
   };
 
-  const [pulling, setPulling] = useState(false);
-  const [pullNote, setPullNote] = useState(null);
   // Auto-fill the BILLED side from Shopmonkey (flagged hours on revenue lines).
   // Clocked stays manual — payroll is the honest denominator.
   const pullBilled = async () => {
