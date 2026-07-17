@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, requireRole, requireOwner } = require('../middleware/auth');
+const { authenticateToken, requireRole, requireOwner, canAccessLocation } = require('../middleware/auth');
 const { ensureBonusFuelTables } = require('../lib/bonusFuelSchema');
 const { computeRun, round2 } = require('../lib/bonusCalc');
 const { workingPaceFrac } = require('../lib/workdays');
@@ -155,8 +155,12 @@ module.exports = (pool) => {
   const router = express.Router();
   const ensure = () => ensureBonusFuelTables(pool);
   const who = (req) => req.user.email || req.user.name || req.user.role;
-  const read = [authenticateToken, requireRole('owner', 'partner')];
+  // Managers may VIEW the program for their own location (Jamie, 2026-07-17);
+  // every money decision (calculate, approve, formula, people, targets) stays owner-only.
+  const read = [authenticateToken, requireRole('owner', 'partner', 'manager')];
   const write = [authenticateToken, requireOwner];
+  const scoped = (req, res, next) => canAccessLocation(req.user, req.params.locationId)
+    ? next() : res.status(403).json({ error: 'Access denied for this location' });
   const fail = (res, e, code = 500) => res.status(code).json({ error: String(e.message || e) });
 
   const formulaFor = async (locationId, month) => {
@@ -243,7 +247,7 @@ module.exports = (pool) => {
   }
 
   // ── Overview: everything the tab needs in one call ──
-  router.get('/:locationId/overview', ...read, async (req, res) => {
+  router.get('/:locationId/overview', ...read, scoped, async (req, res) => {
     try {
       await ensure();
       const locationId = req.params.locationId;
@@ -540,6 +544,7 @@ module.exports = (pool) => {
       const { rows: rr } = await pool.query('SELECT * FROM bonus_run WHERE id=$1', [req.params.runId]);
       if (!rr.length) return fail(res, 'Run not found', 404);
       const run = rr[0];
+      if (!canAccessLocation(req.user, run.location_id)) return fail(res, 'Access denied for this location', 403);
       const { rows: fv } = await pool.query('SELECT * FROM formula_version WHERE id=$1', [run.formula_version_id]);
       const { rows: lines } = await pool.query('SELECT * FROM bonus_line WHERE bonus_run_id=$1 ORDER BY role_at_calc, person_name', [run.id]);
       const { rows: locRows } = await pool.query('SELECT name FROM locations WHERE id=$1', [run.location_id]);
