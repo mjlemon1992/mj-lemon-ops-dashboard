@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, canAccessLocation } = require('../middleware/auth');
 
 const centsToDollars = (c) => (Number(c) || 0) / 100;
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -245,6 +245,7 @@ module.exports = (pool) => {
   };
 
   router.get('/:locationId/sold-probe', syncAuth, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     try {
@@ -266,6 +267,7 @@ module.exports = (pool) => {
   });
 
   router.post('/:locationId/import', syncAuth, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     try {
@@ -326,6 +328,7 @@ module.exports = (pool) => {
   // worked = weekly_hours x weeks_in_period; sold/billed/vehicles computed over
   // the same window; joined to weekly hours by tech_id. Defaults to current month.
   router.post('/:locationId/recompute-from-weekly', syncAuth, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     try {
@@ -387,6 +390,7 @@ module.exports = (pool) => {
   // the full Jan1..today range x 8 (holiday + province aware).
   // YTD: kick off the background job and return immediately.
   router.post('/:locationId/recompute-ytd', syncAuth, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     const lid = req.params.locationId;
@@ -399,6 +403,7 @@ module.exports = (pool) => {
 
   // YTD job status (poll this after kicking off recompute-ytd).
   router.get('/:locationId/ytd-status', syncAuth, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     res.json({ ok: true, job: ytdJobs[req.params.locationId] || null });
   });
 

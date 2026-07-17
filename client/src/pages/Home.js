@@ -153,7 +153,9 @@ export default function Home() {
         </div>
       )}
 
-      {(user?.role === 'owner' || user?.role === 'partner') && (
+      {/* Full metric block for every role — a manager's "group" is just their own
+          location (the locations list is already server-filtered to it). */}
+      {(
         <div className="stat-grid" style={{ marginBottom: '20px' }}>
           <div className="metric-card">
             <div className="metric-label">{isAll ? 'Group revenue MTD' : 'Revenue MTD'}</div>

@@ -47,17 +47,17 @@ export default function App() {
             <Route path="performance" element={<Performance />} />
             <Route path="technicians" element={<Technicians />} />
             <Route path="alerts" element={<Alerts />} />
-            <Route path="reports" element={<ProtectedRoute ownerOrPartner><Reports /></ProtectedRoute>} />
-            <Route path="reports/tech-efficiency" element={<ProtectedRoute ownerOrPartner><ReportTechEfficiency /></ProtectedRoute>} />
-            <Route path="reports/summary/:kind" element={<ProtectedRoute ownerOrPartner><ReportSummary /></ProtectedRoute>} />
-            <Route path="finance" element={<ProtectedRoute ownerOrPartner><Finance /></ProtectedRoute>} />
-            <Route path="marketing" element={<ProtectedRoute ownerOrPartner><Marketing /></ProtectedRoute>} />
-            <Route path="marketing/approvals" element={<ProtectedRoute ownerOrPartner><ApprovalsPage /></ProtectedRoute>} />
+            <Route path="reports" element={<Reports />} />
+            <Route path="reports/tech-efficiency" element={<ReportTechEfficiency />} />
+            <Route path="reports/summary/:kind" element={<ReportSummary />} />
+            <Route path="finance" element={<Finance />} />
+            <Route path="marketing" element={<Marketing />} />
+            <Route path="marketing/approvals" element={<ApprovalsPage />} />
             <Route path="comebacks" element={<Comebacks />} />
   <Route path="wip" element={<Wip />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />
-            <Route path="targets" element={<ProtectedRoute ownerOrPartner><Targets /></ProtectedRoute>} />
-            <Route path="notices" element={<ProtectedRoute ownerOrPartner><Notices /></ProtectedRoute>} />
+            <Route path="targets" element={<Targets />} />
+            <Route path="notices" element={<Notices />} />
             <Route path="users" element={<ProtectedRoute ownerOnly><Users /></ProtectedRoute>} />
           </Route>
         </Routes>
