@@ -13,6 +13,26 @@ function ensureTimeClockTables(pool) {
     // only in_bonus people participate in the profit-share (probation hires and
     // owner-techs can clock without joining the program).
     await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS in_bonus BOOLEAN DEFAULT true');
+    // Personalization: each tech picks a name colour and a profile photo from
+    // the kiosk (iPad camera) — shown on the kiosk, Technicians page, and the
+    // shop-floor board. Photos stored small (client resizes before upload).
+    await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS color VARCHAR(20)');
+    await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS photo BYTEA');
+    await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS photo_mime VARCHAR(40)');
+    // Timesheet alteration requests: a tech flags a punch (or a missing one)
+    // from the kiosk; owner/manager fixes the entry and resolves the request.
+    await pool.query(`CREATE TABLE IF NOT EXISTS time_edit_request (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      location_id UUID NOT NULL,
+      person_id UUID NOT NULL,
+      entry_id UUID,                          -- NULL = "a punch is missing"
+      note TEXT NOT NULL,
+      status VARCHAR(10) NOT NULL DEFAULT 'pending',   -- pending | resolved | dismissed
+      requested_at TIMESTAMPTZ DEFAULT now(),
+      resolved_by VARCHAR(200),
+      resolved_at TIMESTAMPTZ
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_ter_loc_status ON time_edit_request (location_id, status)');
     await pool.query(`CREATE TABLE IF NOT EXISTS time_clock_entry (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       location_id UUID NOT NULL,

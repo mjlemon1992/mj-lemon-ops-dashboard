@@ -51,13 +51,15 @@ function ClockAdmin({ locId }) {
   useEffect(() => { loadPeriods(); }, [loadPeriods]);
 
   const [allPeople, setAllPeople] = useState([]);   // incl. removed — for re-add
+  const [editReqs, setEditReqs] = useState([]);     // pending timesheet-alteration requests
   const load = useCallback(() => {
     if (!sel) return;
     Promise.all([
       api(`/clock/${locId}/entries?from=${sel.from}&to=${sel.to}`),
       api(`/bonus/${locId}/overview`).catch(() => ({ people: [] })),
       api(`/clock/${locId}/timeoff`).catch(() => null),
-    ]).then(([e, ov, toff]) => { setData(e); setAllPeople(ov.people || []); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setErr(null); })
+      api(`/clock/${locId}/edit-requests`).catch(() => ({ requests: [] })),
+    ]).then(([e, ov, toff, er]) => { setData(e); setAllPeople(ov.people || []); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setEditReqs(er.requests || []); setErr(null); })
       .catch((ex) => setErr(ex.message));
   }, [api, locId, sel]);
   useEffect(() => { load(); }, [load]);
@@ -146,6 +148,41 @@ function ClockAdmin({ locId }) {
     if (!active && !window.confirm(`Remove ${p.name} from the time clock? Their punch history stays; they just can't clock in.`)) return;
     setBusy(true); setErr(null);
     try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ active }) }); load(); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  // Photo fallback: owner/manager uploads a picture when the kiosk camera
+  // isn't an option. Client shrinks to 256px JPEG first (same as the kiosk).
+  const uploadPhoto = (p) => new Promise(() => {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = async () => {
+      const f = inp.files && inp.files[0];
+      if (!f) return;
+      try {
+        const img = new Image();
+        img.onload = async () => {
+          const s = Math.min(img.width, img.height);
+          const canvas = document.createElement('canvas');
+          canvas.width = 256; canvas.height = 256;
+          canvas.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 256, 256);
+          URL.revokeObjectURL(img.src);
+          const b64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+          setBusy(true); setErr(null);
+          try { await api(`/clock/${locId}/person/${p.id}/photo`, { method: 'PUT', body: JSON.stringify({ photo_base64: b64, photo_mime: 'image/jpeg' }) }); load(); }
+          catch (e) { setErr(e.message); }
+          setBusy(false);
+        };
+        img.src = URL.createObjectURL(f);
+      } catch { setErr('Could not read that image'); }
+    };
+    inp.click();
+  });
+
+  const resolveEditReq = async (r, action) => {
+    setBusy(true); setErr(null);
+    try { await api(`/clock/edit-requests/${r.id}`, { method: 'PUT', body: JSON.stringify({ action }) }); load(); }
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -246,6 +283,27 @@ function ClockAdmin({ locId }) {
         </div>
       )}
 
+      {/* Timesheet alteration requests from the kiosk */}
+      {editReqs.length > 0 && (
+        <div className="card" style={{ marginBottom: '16px', border: '1px solid var(--accent)' }}>
+          <div style={{ fontWeight: 600, marginBottom: '10px' }}>✋ Timesheet change requests</div>
+          {editReqs.map((r) => (
+            <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px', marginBottom: '6px' }}>
+              <span style={{ fontWeight: 700 }}>{r.person_name}</span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>
+                {r.entry_id ? `Punch ${fmtDT(r.clock_in)}${r.clock_out ? ` → ${fmtDT(r.clock_out)}` : ''}` : 'Missing punch'}
+              </span>
+              <span style={{ fontSize: '13px', fontStyle: 'italic', color: 'var(--text2)' }}>"{r.note}"</span>
+              <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+                <button className="primary" disabled={busy} onClick={() => resolveEditReq(r, 'resolved')} title="Mark done after fixing the punch below" style={{ fontSize: '12px', padding: '5px 12px' }}>✓ Resolved</button>
+                <button disabled={busy} onClick={() => resolveEditReq(r, 'dismissed')} style={{ fontSize: '12px', padding: '5px 12px', color: 'var(--danger)' }}>Dismiss</button>
+              </span>
+            </div>
+          ))}
+          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Fix the punch in the list below (edit/add), then mark the request resolved.</div>
+        </div>
+      )}
+
       {/* Per-person paid hours (this pay period) + PIN + time off taken this year */}
       <div className="card" style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
@@ -287,6 +345,7 @@ function ClockAdmin({ locId }) {
                 </div>
               </div>
               <button onClick={() => setPin(p)} disabled={busy} style={{ fontSize: '11px', padding: '4px 10px' }}>Set PIN</button>
+              <button onClick={() => uploadPhoto(p)} disabled={busy} title="Upload a profile photo" style={{ fontSize: '11px', padding: '4px 8px' }}>📷</button>
               <button onClick={() => setPersonActive(p, false)} disabled={busy} title="Remove from the time clock" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)' }}>✕</button>
             </div>
           ))}

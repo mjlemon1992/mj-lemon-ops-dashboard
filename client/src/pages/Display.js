@@ -280,9 +280,10 @@ export default function Display() {
             : { txt: '⚫ Clocked out', col: 'var(--text3)' };
           return (
             <div key={t.tech_id || t.tech_name} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1.2fr', padding: '16px 24px', borderBottom: '0.5px solid var(--border)', alignItems: 'center' }}>
-              <div style={{ fontSize: '22px', fontWeight: 600, color: 'var(--text)' }}>
+              <div style={{ fontSize: '22px', fontWeight: 600, color: (c && c.color) || 'var(--text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {c && c.photo && <img src={c.photo} alt="" style={{ width: '34px', height: '34px', borderRadius: '50%', objectFit: 'cover', border: c.color ? `2px solid ${c.color}` : 'none' }} />}
                 {t.tech_name}
-                {chip && <span style={{ fontSize: '13px', fontWeight: 600, color: chip.col, marginLeft: '12px', whiteSpace: 'nowrap' }}>{chip.txt}</span>}
+                {chip && <span style={{ fontSize: '13px', fontWeight: 600, color: chip.col, whiteSpace: 'nowrap' }}>{chip.txt}</span>}
               </div>
               <div style={{ textAlign: 'right', fontSize: '22px', color: 'var(--text2)' }}>{hrs(t.hours_billed)}</div>
               <div style={{ textAlign: 'right', fontSize: '22px', color: 'var(--text2)' }}>{hrs(t.hours_sold)}</div>

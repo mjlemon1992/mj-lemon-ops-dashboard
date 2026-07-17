@@ -199,7 +199,13 @@ function TechniciansView({ locId }) {
                   <tr><td colSpan={cols} style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)' }}>No technicians returned from Shopmonkey.</td></tr>
                 ) : techs.map(t => (
                   <tr key={t.tech_id || t.tech_name} onClick={() => toggleHide(t, true)} title="Click to hide from board" style={{ borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
-                    <td style={{ padding: '8px 12px', color: 'var(--text)' }} className="strong">{t.tech_name}<ClockChip c={clockFor(t.tech_name)} /></td>
+                    <td style={{ padding: '8px 12px', color: 'var(--text)' }} className="strong">
+                      {(() => { const c = clockFor(t.tech_name); return (<>
+                        {c && c.photo && <img src={c.photo} alt="" style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', verticalAlign: 'middle', marginRight: '7px', border: c.color ? `2px solid ${c.color}` : 'none' }} />}
+                        <span style={{ color: (c && c.color) || 'var(--text)' }}>{t.tech_name}</span>
+                        <ClockChip c={c} />
+                      </>); })()}
+                    </td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.hours_sold != null ? 'var(--text)' : 'var(--text3)' }}>{t.hours_sold != null ? hrsNum(t.hours_sold) : '\u2014'}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.hours_billed != null ? 'var(--text)' : 'var(--text3)' }}>{t.hours_billed != null ? hrsNum(t.hours_billed) : '\u2014'}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.vehicle_count != null ? 'var(--text)' : 'var(--text3)' }}>{t.vehicle_count != null ? t.vehicle_count : '\u2014'}</td>
