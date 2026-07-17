@@ -250,6 +250,15 @@ function ClockAdmin({ locId }) {
   const totBreakMin = Math.round(shown.reduce((s, e) => s + (e.break_seconds || 0), 0) / 60);
   const totPaid = Math.round(shown.reduce((s, e) => s + (e.paid_hours != null ? Number(e.paid_hours) : 0), 0) * 100) / 100;
   const openShifts = shown.filter((e) => !e.clock_out).length;
+  // Holidays and stat days appear as rows in the punch list too — payroll reads
+  // one table. Both respect the tech filter; the footer adds them in.
+  const nameOf = (pid) => (people.find((p) => p.id === pid) || {}).name || '—';
+  const holidayRows = (data.paid_timeoff_rows || []).filter((r) => personFilter === 'all' || r.person_id === personFilter);
+  const statRows = data.stat_pay_days || [];
+  const statPer = Number(data.stat_pay_hours || 0);
+  const holidayTot = Math.round(holidayRows.reduce((s, r) => s + Number(r.hours), 0) * 100) / 100;
+  const statTot = Math.round(statPer * (personFilter === 'all' ? people.length : 1) * 100) / 100;
+  const grandPaid = Math.round((totPaid + holidayTot + statTot) * 100) / 100;
 
   const pending = ((timeoff || {}).requests || []).filter((r) => r.status === 'pending');
   const upcoming = ((timeoff || {}).requests || []).filter((r) => r.status === 'approved' && r.end_date >= new Date().toISOString().slice(0, 10));
@@ -446,10 +455,32 @@ function ClockAdmin({ locId }) {
             </tr></thead>
             <tbody>
               {shown.map((e) => <EntryRow key={e.id} e={e} onSave={saveEntry} onDelete={delEntry} busy={busy} />)}
-              {!shown.length &&
+              {/* Paid holidays in this period — read-only pay rows */}
+              {holidayRows.map((r, i) => (
+                <tr key={'hol' + i} style={{ background: 'rgba(255,184,0,0.06)' }}>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', fontWeight: 600 }}>{nameOf(r.person_id)}</td>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', color: 'var(--warning)' }}>🏖 Paid holiday</td>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', color: 'var(--text2)' }}>{fmtD(r.from)} – {fmtD(r.to)} ({r.days} day{r.days === 1 ? '' : 's'})</td>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', color: 'var(--text3)' }}>—</td>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>{r.hours} h</td>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', fontSize: '11px', color: 'var(--text3)' }}>from approved request</td>
+                </tr>
+              ))}
+              {/* Stat holidays — paid to the whole crew (or the filtered tech) */}
+              {statRows.map((h, i) => (
+                <tr key={'stat' + i} style={{ background: 'rgba(10,132,255,0.06)' }}>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', fontWeight: 600 }}>{personFilter === 'all' ? 'Everyone' : nameOf(personFilter)}</td>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', color: 'var(--accent)' }}>🎌 {h.name}</td>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', color: 'var(--text2)' }}>{fmtD(h.date)}</td>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', color: 'var(--text3)' }}>—</td>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>{statPer} h{personFilter === 'all' ? ' each' : ''}</td>
+                  <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', fontSize: '11px', color: 'var(--text3)' }}>stat holiday pay</td>
+                </tr>
+              ))}
+              {!shown.length && !holidayRows.length && !statRows.length &&
                 <tr><td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)' }}>No punches {personFilter === 'all' ? 'this pay period' : 'for this technician in this pay period'} yet.</td></tr>}
             </tbody>
-            {shown.length > 0 && (
+            {(shown.length > 0 || holidayRows.length > 0 || statRows.length > 0) && (
               <tfoot>
                 <tr style={{ fontWeight: 700, background: 'var(--bg3)' }}>
                   <td style={{ padding: '10px 12px' }}>
@@ -458,7 +489,10 @@ function ClockAdmin({ locId }) {
                   </td>
                   <td /><td />
                   <td style={{ padding: '10px 12px' }}>{totBreakMin} min</td>
-                  <td style={{ padding: '10px 12px', fontVariantNumeric: 'tabular-nums' }}>{totPaid} h</td>
+                  <td style={{ padding: '10px 12px', fontVariantNumeric: 'tabular-nums' }}>
+                    {grandPaid} h
+                    {(holidayTot > 0 || statTot > 0) && <span style={{ fontWeight: 400, color: 'var(--text3)', fontSize: '11px' }}> ({totPaid} clocked{statTot ? ` + ${statTot} stat` : ''}{holidayTot ? ` + ${holidayTot} holiday` : ''})</span>}
+                  </td>
                   <td />
                 </tr>
               </tfoot>
