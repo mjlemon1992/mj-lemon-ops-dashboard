@@ -391,7 +391,16 @@ module.exports = (pool) => {
       const clockIn = b.clock_in || er[0].clock_in;
       const clockOut = b.clock_out === undefined ? er[0].clock_out : b.clock_out;
       if (clockOut && new Date(clockOut) <= new Date(clockIn)) return fail(res, 'clock_out must be after clock_in', 400);
-      const breakSec = b.break_minutes === undefined ? er[0].break_seconds : Math.round(Number(b.break_minutes) * 60);
+      let breakSec = b.break_minutes === undefined ? er[0].break_seconds : Math.round(Number(b.break_minutes) * 60);
+      // Editing PAID hours directly: keep the punch times, back-compute the
+      // break so paid = (out − in) − break stays consistent.
+      if (b.paid_hours != null && clockOut) {
+        const wallSec = (new Date(clockOut) - new Date(clockIn)) / 1000;
+        const paidSec = Number(b.paid_hours) * 3600;
+        if (!(paidSec >= 0)) return fail(res, 'paid_hours must be ≥ 0', 400);
+        if (paidSec > wallSec) return fail(res, 'Paid hours exceed the shift length — adjust the clock times instead', 400);
+        breakSec = Math.round(wallSec - paidSec);
+      }
       const { rows } = await pool.query(
         `UPDATE time_clock_entry SET clock_in=$2, clock_out=$3, break_seconds=$4, note=COALESCE($5,note),
                 break_started_at=NULL, corrected_by=$6, corrected_at=now() WHERE id=$1 RETURNING *`,
