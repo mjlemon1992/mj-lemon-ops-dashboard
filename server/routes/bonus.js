@@ -32,7 +32,9 @@ function nextMonth(month) {
 // like lib does for MTD; window filtered locally (lt operator support varies).
 const subtotalCents = (o) => (o.partsCents || 0) + (o.laborCents || 0) + (o.shopSuppliesCents || 0) + (o.subcontractsCents || 0) + (o.tiresCents || 0);
 const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function monthRevenue(smLocationId, month) {
+
+// All of a location's orders invoiced inside the shop-tz month (complete-or-throw).
+async function monthOrders(smLocationId, month) {
   const key = SHOPMONKEY_KEY();
   if (!key) throw new Error('SHOPMONKEY_API_KEY not configured');
   const start = monthStartUtc(month), end = monthStartUtc(nextMonth(month));
@@ -56,18 +58,70 @@ async function monthRevenue(smLocationId, month) {
     if (total !== null && byId.size >= total) break;
     await _sleep(200);
   }
-  if (total !== null && byId.size < total) throw new Error(`Shopmonkey incomplete (${byId.size}/${total}) — try again or enter revenue manually`);
-  let cents = 0;
+  if (total !== null && byId.size < total) throw new Error(`Shopmonkey incomplete (${byId.size}/${total}) — try again shortly`);
+  const out = [];
   for (const o of byId.values()) {
     if (o.deleted || !o.invoicedDate || o.invoicedDate === 'empty') continue;
     if (o.locationId !== smLocationId) continue;
     const inv = new Date(o.invoicedDate);
     if (isNaN(inv) || inv < start || inv >= end) continue;
+    out.push(o);
+  }
+  return out;
+}
+
+async function monthRevenue(smLocationId, month) {
+  const orders = await monthOrders(smLocationId, month);
+  let cents = 0;
+  for (const o of orders) {
     const sub = subtotalCents(o);
-    if (sub === 0) continue;                       // comebacks excluded
+    if (sub === 0) continue;                       // comebacks excluded from sales
     cents += sub;
   }
   return round2(cents / 100);
+}
+
+// Per-tech BILLED (flagged) hours for the month: hours on revenue-generating
+// service lines, attributed by labors[].technicianId — the same line-level
+// definition as the Technicians page. Comeback ($0) lines contribute nothing,
+// which matches the program: comeback time hits clocked, never billed.
+// Complete-or-throw: this feeds payroll, so a partial pull refuses.
+async function monthBilledHours(smLocationId, month) {
+  const key = SHOPMONKEY_KEY();
+  const orders = await monthOrders(smLocationId, month);
+  const byTech = {};
+  let failed = 0;
+  for (const o of orders) {
+    try {
+      const sr = await fetch(`https://api.shopmonkey.cloud/v3/order/${o.id}/service?limit=100`, {
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      });
+      if (!sr.ok) { failed++; continue; }
+      const sj = await sr.json();
+      const lines = (sj && sj.data && sj.data.data) ? sj.data.data : (sj.data || []);
+      for (const ln of (lines || [])) {
+        if (!((ln.calculatedLaborCents || 0) > 0)) continue;   // billed = revenue-generating lines only
+        for (const lab of (ln.labors || [])) {
+          if (!lab.technicianId) continue;
+          const hrs = Number(lab.hours) || 0;
+          if (hrs > 0) byTech[lab.technicianId] = round2((byTech[lab.technicianId] || 0) + hrs);
+        }
+      }
+      await _sleep(100);
+    } catch (e) { failed++; }
+  }
+  if (failed > 0) throw new Error(`Billed-hours pull incomplete (${failed}/${orders.length} orders failed, likely rate-limited) — try again in a few minutes`);
+  // Names for matching to the bonus crew (roster lives on /v3/user).
+  const names = {};
+  try {
+    const res = await fetch('https://api.shopmonkey.cloud/v3/user?limit=200', { headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' } });
+    if (res.ok) {
+      const td = await res.json();
+      const list = (td && td.data && td.data.data) ? td.data.data : (td.data || []);
+      for (const t of list) names[t.id] = t.name || [t.firstName, t.lastName].filter(Boolean).join(' ') || 'Unknown';
+    }
+  } catch (e) { /* names optional */ }
+  return { byTech, names, orders_scanned: orders.length };
 }
 
 module.exports = (pool) => {
@@ -267,6 +321,37 @@ module.exports = (pool) => {
       }
       res.json({ ok: true, saved: entries.length });
     } catch (e) { fail(res, e); }
+  });
+
+  // ── Billed-hours prefill: pull each tech's flagged hours for the month from
+  // Shopmonkey and match them to the bonus crew by name. Clocked hours stay
+  // manual (payroll is the only honest source — see program rules).
+  router.get('/:locationId/billed-hours/:month', ...write, async (req, res) => {
+    try {
+      await ensure();
+      const { month } = req.params;
+      if (!validMonth(month)) return fail(res, 'month must be YYYY-MM', 400);
+      const { rows: locRows } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [req.params.locationId]);
+      const smId = locRows[0] && locRows[0].shopmonkey_location_id;
+      if (!smId) return fail(res, 'Location not connected to Shopmonkey', 400);
+      const { byTech, names, orders_scanned } = await monthBilledHours(smId, month);
+      const crew = await activePeople(req.params.locationId);
+      // Match: crew first name against the Shopmonkey display name (prefix,
+      // case-insensitive). Anything unmatched is surfaced, never guessed.
+      const matched = [], unmatched = [];
+      const claimed = new Set();
+      for (const [techId, hours] of Object.entries(byTech)) {
+        const smName = (names[techId] || '').trim();
+        const person = crew.find((p) => p.role === 'tech' && smName.toLowerCase().startsWith(p.name.trim().toLowerCase().split(/\s+/)[0]));
+        if (person && !claimed.has(person.id)) {
+          claimed.add(person.id);
+          matched.push({ person_id: person.id, person_name: person.name, tech_name: smName, billed_hours: hours });
+        } else {
+          unmatched.push({ tech_name: smName || techId, billed_hours: hours });
+        }
+      }
+      res.json({ month, matched, unmatched, orders_scanned });
+    } catch (e) { fail(res, e, /incomplete|rate-limit/i.test(String(e.message)) ? 502 : 500); }
   });
 
   // ── Formula settings: append-only versions (§3.3, guardrail §6.3) ──
