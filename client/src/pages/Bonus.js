@@ -229,7 +229,7 @@ function BonusView({ locId }) {
 
       {err && <div className="alert-strip" style={{ marginBottom: '12px' }}><span style={{ color: 'var(--danger)' }}>{err}</span></div>}
 
-      {showSettings && <SettingsPanel api={api} locId={locId} formula={formula} versions={versions} people={people} onClose={() => setShowSettings(false)} onSaved={() => { setShowSettings(false); load(month); }} />}
+      {showSettings && <SettingsPanel api={api} locId={locId} formula={formula} versions={versions} people={people} onClose={() => setShowSettings(false)} onSaved={() => { setShowSettings(false); load(month); }} onCrewChanged={() => load(month)} />}
 
       {run ? (
         <>
@@ -425,8 +425,11 @@ function EfficiencyEditor({ techs, month, efficiency, effEdits, setEffEdits, onS
   );
 }
 
-function SettingsPanel({ api, locId, formula, versions, people, onClose, onSaved }) {
+function SettingsPanel({ api, locId, formula, versions, people, onClose, onSaved, onCrewChanged }) {
   const f = formula || {};
+  const [newName, setNewName] = useState('');
+  const [newRole, setNewRole] = useState('tech');
+  const [crewBusy, setCrewBusy] = useState(false);
   const [form, setForm] = useState({
     base_rate: (Number(f.base_rate || 0.005) * 100).toFixed(2),
     stretch_rate: (Number(f.stretch_rate || 0.0075) * 100).toFixed(2),
@@ -461,6 +464,26 @@ function SettingsPanel({ api, locId, formula, versions, people, onClose, onSaved
       onSaved();
     } catch (e) { setErr(e.message); }
     setBusy(false);
+  };
+
+  // Crew changes save immediately (they're roster facts, not formula terms) —
+  // they don't create a formula version and past months are never affected.
+  const addPerson = async () => {
+    if (!newName.trim()) { setErr('Enter a name first'); return; }
+    setCrewBusy(true); setErr(null);
+    try {
+      await api(`/bonus/${locId}/people`, { method: 'POST', body: JSON.stringify({ name: newName.trim(), role: newRole }) });
+      setNewName('');
+      onCrewChanged();
+    } catch (e) { setErr(e.message); }
+    setCrewBusy(false);
+  };
+  const setPersonActive = async (p, active) => {
+    if (!active && !window.confirm(`Remove ${p.name} from the bonus program? Locked months keep their history — this only affects future calculations.`)) return;
+    setCrewBusy(true); setErr(null);
+    try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ active }) }); onCrewChanged(); }
+    catch (e) { setErr(e.message); }
+    setCrewBusy(false);
   };
 
   return (
@@ -501,8 +524,30 @@ function SettingsPanel({ api, locId, formula, versions, people, onClose, onSaved
             </div>
           ))}
       </div>
+      <div style={{ fontSize: '12px', fontWeight: 600, margin: '14px 0 6px' }}>Crew <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(saves instantly — bonus counts them from the next calculation onward)</span></div>
+      <div style={{ marginBottom: '8px' }}>
+        {(people || []).map((p) => (
+          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0', opacity: p.active ? 1 : 0.55 }}>
+            <span style={{ minWidth: '110px', fontSize: '13px' }}>{p.name}</span>
+            <span className="badge" style={{ fontSize: '10px' }}>{p.role}</span>
+            {!p.active && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>not in program</span>}
+            <button onClick={() => setPersonActive(p, !p.active)} disabled={crewBusy}
+              style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px' }}>
+              {p.active ? 'Remove from program' : 'Add back to program'}
+            </button>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+        <input placeholder="New person's name" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ width: '180px' }} />
+        <select value={newRole} onChange={(e) => setNewRole(e.target.value)}>
+          <option value="tech">Tech — efficiency multiplier</option>
+          <option value="advisor">Advisor — flat share</option>
+        </select>
+        <button onClick={addPerson} disabled={crewBusy}>{crewBusy ? '…' : '+ Add to program'}</button>
+      </div>
       <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '10px' }}>
-        Changes apply from the effective month onward. Drafted and locked months are never affected. Every change is a new logged version.
+        Formula changes apply from the effective month onward. Drafted and locked months are never affected. Every change is a new logged version.
       </div>
       {err && <div style={{ fontSize: '12px', color: 'var(--danger)', marginBottom: '8px' }}>{err}</div>}
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
