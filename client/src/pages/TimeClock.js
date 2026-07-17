@@ -50,13 +50,14 @@ function ClockAdmin({ locId }) {
   }, [api, locId]);
   useEffect(() => { loadPeriods(); }, [loadPeriods]);
 
+  const [allPeople, setAllPeople] = useState([]);   // incl. removed — for re-add
   const load = useCallback(() => {
     if (!sel) return;
     Promise.all([
       api(`/clock/${locId}/entries?from=${sel.from}&to=${sel.to}`),
       api(`/bonus/${locId}/overview`).catch(() => ({ people: [] })),
       api(`/clock/${locId}/timeoff`).catch(() => null),
-    ]).then(([e, ov, toff]) => { setData(e); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setErr(null); })
+    ]).then(([e, ov, toff]) => { setData(e); setAllPeople(ov.people || []); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setErr(null); })
       .catch((ex) => setErr(ex.message));
   }, [api, locId, sel]);
   useEffect(() => { load(); }, [load]);
@@ -127,6 +128,27 @@ function ClockAdmin({ locId }) {
 
   // Punch-list filter: one tech or the whole crew.
   const [personFilter, setPersonFilter] = useState('all');
+
+  // Crew management from the clock side: add someone so they can punch (clock-
+  // only by default — probation hires clock in without joining the bonus),
+  // remove leavers, re-add returners.
+  const [addingPerson, setAddingPerson] = useState(null);   // {name, role, in_bonus} while form open
+  const addPerson = async () => {
+    if (!addingPerson || !addingPerson.name.trim()) { setErr('Enter a name'); return; }
+    setBusy(true); setErr(null);
+    try {
+      await api(`/bonus/${locId}/people`, { method: 'POST', body: JSON.stringify({ name: addingPerson.name.trim(), role: addingPerson.role, in_bonus: !!addingPerson.in_bonus }) });
+      setAddingPerson(null); load();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  const setPersonActive = async (p, active) => {
+    if (!active && !window.confirm(`Remove ${p.name} from the time clock? Their punch history stays; they just can't clock in.`)) return;
+    setBusy(true); setErr(null);
+    try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ active }) }); load(); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
 
   // Returns true on success so the edit row can close itself.
   const saveEntry = async (id, body) => {
@@ -228,6 +250,7 @@ function ClockAdmin({ locId }) {
       <div className="card" style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
           <span style={{ fontWeight: 600 }}>Paid hours — {sel ? `${fmtD(sel.from)} – ${fmtD(sel.to)}` : 'period'} <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>(biweekly pay period)</span></span>
+          <button onClick={() => setAddingPerson(addingPerson ? null : { name: '', role: 'tech', in_bonus: false })} disabled={busy} style={{ fontSize: '11px', padding: '3px 10px' }}>＋ Add technician</button>
           <span style={{ fontSize: '12px', marginLeft: 'auto', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
             {(data.closure_days || 0) > 0 && <span style={{ color: 'var(--danger)' }}>🚪 Shop closed {data.closure_days} day{data.closure_days === 1 ? '' : 's'} this period</span>}
             {(data.stat_holidays || []).length > 0 && (
@@ -237,11 +260,26 @@ function ClockAdmin({ locId }) {
             )}
           </span>
         </div>
+        {addingPerson && (
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', padding: '10px 12px', background: 'var(--bg3)', borderRadius: '10px', marginBottom: '10px' }}>
+            <input autoFocus placeholder="Name (as in Shopmonkey)" value={addingPerson.name} onChange={(e) => setAddingPerson((s) => ({ ...s, name: e.target.value }))} style={{ width: '190px' }} />
+            <select value={addingPerson.role} onChange={(e) => setAddingPerson((s) => ({ ...s, role: e.target.value }))}>
+              <option value="tech">Tech</option><option value="advisor">Advisor</option>
+            </select>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!addingPerson.in_bonus} onChange={(e) => setAddingPerson((s) => ({ ...s, in_bonus: e.target.checked }))} />
+              also in the bonus program
+            </label>
+            <button className="primary" disabled={busy} onClick={addPerson} style={{ fontSize: '12px', padding: '5px 14px' }}>Add</button>
+            <button onClick={() => setAddingPerson(null)} style={{ fontSize: '12px', padding: '5px 12px' }}>Cancel</button>
+            <span style={{ fontSize: '11px', color: 'var(--text3)', flexBasis: '100%' }}>Unticked = clock-only (probation): they punch in/out and request time off, but stay out of the profit-share until you include them.</span>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '10px' }}>
           {people.map((p) => (
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px' }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600 }}>{p.name}</div>
+                <div style={{ fontWeight: 600 }}>{p.name}{p.in_bonus === false && <span style={{ fontSize: '10px', color: 'var(--text3)', fontWeight: 400 }}> · clock only</span>}</div>
                 <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
                   {summary[p.id] != null ? `${summary[p.id]} h this period` : 'no punches this period'}
                   {(data.off_days || {})[p.id] ? ` · 🏖 ${data.off_days[p.id]} day${data.off_days[p.id] === 1 ? '' : 's'} off this period` : ''}
@@ -249,9 +287,18 @@ function ClockAdmin({ locId }) {
                 </div>
               </div>
               <button onClick={() => setPin(p)} disabled={busy} style={{ fontSize: '11px', padding: '4px 10px' }}>Set PIN</button>
+              <button onClick={() => setPersonActive(p, false)} disabled={busy} title="Remove from the time clock" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)' }}>✕</button>
             </div>
           ))}
         </div>
+        {allPeople.some((p) => !p.active) && (
+          <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '10px' }}>
+            Removed:{' '}
+            {allPeople.filter((p) => !p.active).map((p) => (
+              <button key={p.id} onClick={() => setPersonActive(p, true)} disabled={busy} style={{ fontSize: '11px', padding: '2px 10px', marginRight: '6px' }}>↩ {p.name}</button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Upcoming approved time off */}
