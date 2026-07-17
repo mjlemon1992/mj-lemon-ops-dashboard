@@ -45,6 +45,9 @@ module.exports = (pool) => {
     if (_init) return;
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS display_pin VARCHAR(12)');
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS weekly_hours DECIMAL(6,2) DEFAULT 40');
+    // Per-board switch: show the all-locations revenue standings, or keep the
+    // board to this shop's own numbers only (owner toggles it under Locations).
+    await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS display_show_leaderboard BOOLEAN DEFAULT true');
     _init = true;
   };
 
@@ -187,9 +190,11 @@ module.exports = (pool) => {
 
       // All-locations revenue standings (revenue only — no targets/efficiency for
       // the others), ranked highest revenue-to-date first. Lets each shop's board
-      // show where it sits against the rest of the group.
+      // show where it sits against the rest of the group. Per-board opt-out:
+      // display_show_leaderboard=false keeps this board to its own numbers only
+      // (other locations' figures never leave the server).
       let leaderboard = [];
-      try {
+      if (loc.display_show_leaderboard !== false) try {
         const lbRes = await pool.query(
           `SELECT l.id, l.name, mc.revenue_mtd
              FROM locations l

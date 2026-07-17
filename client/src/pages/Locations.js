@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', qbo_slug: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, active: true };
+const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', qbo_slug: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, display_show_leaderboard: true, active: true };
 
 export default function Locations() {
   const { api } = useAuth();
@@ -75,6 +75,17 @@ export default function Locations() {
               {field('display_pin','Display PIN (techs enter this on the TV)','text',{maxLength:12})}
               {field('weekly_hours','On-clock hours / tech per week','number',{min:1,max:80})}
             </div>
+            <div className="form-group" style={{ marginTop: '10px' }}>
+              <label className="form-label">Other locations' revenue on this board</label>
+              <select value={form.display_show_leaderboard === false ? 'hide' : 'show'}
+                onChange={e => setForm(f => ({ ...f, display_show_leaderboard: e.target.value === 'show' }))}>
+                <option value="show">Show — group standings (all locations' revenue)</option>
+                <option value="hide">Hide — this shop's numbers only</option>
+              </select>
+              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>
+                Hide keeps other locations' figures off this TV entirely — they never leave the server.
+              </div>
+            </div>
             <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>
               Efficiency = hours sold ÷ available hours (weekly hours minus this province's stat holidays).
             </div>
@@ -131,6 +142,7 @@ export default function Locations() {
               ['Efficiency target', `${loc.efficiency_target}%`],
               ['PPH target', `$${loc.pph_target}/hr`],
               ['Display PIN', loc.display_pin ? 'Set ✓' : 'Not set'],
+              ['Board standings', loc.display_show_leaderboard === false ? 'This shop only' : 'Group shown'],
               ['On-clock hrs/tech', `${loc.weekly_hours || 40}h/wk`],
             ].map(([l, v]) => (
               <div key={l}>
