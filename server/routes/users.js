@@ -34,15 +34,46 @@ module.exports = (pool) => {
     }
   });
 
+  // True when :id is the last ACTIVE owner — demoting, deactivating or deleting
+  // that account would lock everyone out of admin, so those paths are blocked.
+  const lastActiveOwner = async (id) => {
+    const g = await pool.query(
+      `SELECT u.role = 'owner' AND u.active = true
+              AND (SELECT COUNT(*)::int FROM users WHERE role = 'owner' AND active = true) <= 1 AS last
+         FROM users u WHERE u.id = $1`, [id]);
+    if (!g.rows.length) return null;           // user doesn't exist
+    return g.rows[0].last === true;
+  };
+
   router.put('/:id', authenticateToken, requireOwner, async (req, res) => {
     const { name, role, location_id, active } = req.body;
+    if (role && !['owner', 'partner', 'manager'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
     try {
+      if ((role && role !== 'owner') || active === false) {
+        const last = await lastActiveOwner(req.params.id);
+        if (last) return res.status(400).json({ error: 'This is the last active owner — promote someone else to owner first.' });
+      }
       const result = await pool.query(
         'UPDATE users SET name=$1, role=$2, location_id=$3, active=$4, updated_at=NOW() WHERE id=$5 RETURNING id, email, name, role, location_id, active',
         [name, role, location_id || null, active, req.params.id]
       );
       if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
       res.json(result.rows[0]);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Delete a user outright. Owner-only, two hard guards: no self-delete, and
+  // never the last active owner.
+  router.delete('/:id', authenticateToken, requireOwner, async (req, res) => {
+    try {
+      if (String(req.user.id) === String(req.params.id)) return res.status(400).json({ error: "You can't delete your own account." });
+      const last = await lastActiveOwner(req.params.id);
+      if (last === null) return res.status(404).json({ error: 'User not found' });
+      if (last) return res.status(400).json({ error: 'This is the last active owner — promote someone else to owner first.' });
+      await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+      res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

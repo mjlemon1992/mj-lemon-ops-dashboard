@@ -43,4 +43,20 @@ function requireOwnerOrPartner(req, res, next) {
   next();
 }
 
-module.exports = { authenticateToken, syncAuth, requireOwner, requireOwnerOrPartner, JWT_SECRET };
+// Role-list gate for routes managers may also use (location-scoped).
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) return res.status(403).json({ error: `${roles.join('/')} access required` });
+    next();
+  };
+}
+
+// Location scoping: owner/partner see every location; a manager only their own.
+// Any manager-accessible route that touches a locationId MUST check this first.
+function canAccessLocation(user, locationId) {
+  if (!user) return false;
+  if (['owner', 'partner'].includes(user.role)) return true;
+  return user.role === 'manager' && !!user.location_id && user.location_id === locationId;
+}
+
+module.exports = { authenticateToken, syncAuth, requireOwner, requireOwnerOrPartner, requireRole, canAccessLocation, JWT_SECRET };
