@@ -23,6 +23,8 @@ import Targets from './pages/Targets';
 import Notices from './pages/Notices';
 import Users from './pages/Users';
 import Wip from './pages/Wip';
+import Bonus from './pages/Bonus';
+import FuelCard from './pages/FuelCard';
 
 function ProtectedRoute({ children, ownerOnly, ownerOrPartner }) {
   const { user, loading } = useAuth();
@@ -54,6 +56,8 @@ export default function App() {
             <Route path="marketing" element={<Marketing />} />
             <Route path="marketing/approvals" element={<ApprovalsPage />} />
             <Route path="comebacks" element={<Comebacks />} />
+            <Route path="bonus" element={<ProtectedRoute ownerOrPartner><Bonus /></ProtectedRoute>} />
+            <Route path="fuel-card" element={<ProtectedRoute ownerOrPartner><FuelCard /></ProtectedRoute>} />
   <Route path="wip" element={<Wip />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />
             <Route path="targets" element={<Targets />} />
