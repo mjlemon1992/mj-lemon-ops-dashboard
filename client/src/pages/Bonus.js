@@ -68,6 +68,13 @@ function BonusView({ locId }) {
   }, [api, locId]);
   useEffect(() => { load(null); }, [load]);
 
+  // ↻ Refresh: throw away every unsaved local edit (typed hours, net profit,
+  // warnings) and re-pull the clean state from the server.
+  const resetLocal = useCallback(() => {
+    setEffEdits({}); setNetProfit(''); setNeedsConfirm(null); setMissing(null); setPullNote(null); setErr(null);
+    load(month);
+  }, [load, month]);
+
   if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
   if (!data) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading…</div>;
 
@@ -195,7 +202,14 @@ function BonusView({ locId }) {
               return <option key={m} value={m}>{monthLabel(m)}{h ? (h.status === 'approved' ? ' 🔒' : ' ⏳') : ''}</option>;
             })}
           </select>
+          <button onClick={resetLocal} title="Discard unsaved edits and reload">↻ Refresh</button>
           {user?.role === 'owner' && <button onClick={() => setShowSettings((s) => !s)}>⚙ Formula settings</button>}
+          {run && !locked && user?.role === 'owner' && (
+            <button onClick={async () => {
+              if (!window.confirm(`Discard this ${monthLabel(month)} draft? The month goes back to the start — fix the hours, then calculate again. Nothing has been paid or posted.`)) return;
+              try { await api(`/bonus/run/${run.id}`, { method: 'DELETE' }); resetLocal(); } catch (e) { setErr(e.message); }
+            }} style={{ color: 'var(--danger)' }}>🗑 Discard draft</button>
+          )}
           {run && !locked && user?.role === 'owner' && <button className="primary" onClick={approve} disabled={busy}>✓ Approve & Lock</button>}
           {locked && !run.superseded_by && user?.role === 'owner' && (
             <button onClick={() => { setNetProfit(String(run.net_profit)); if (window.confirm('Supersede this locked run? A corrected draft will be created; on approval the fuel ledger receives only the difference.')) doCalculate({ confirm_net: true }, run.id); }}>↺ Supersede</button>
@@ -286,7 +300,12 @@ function BonusView({ locId }) {
 
           {!locked && user?.role === 'owner' && (
             <div className="card" style={{ marginBottom: '16px' }}>
-              <div style={{ fontWeight: 600, marginBottom: '8px' }}>Recalculate</div>
+              <div style={{ fontWeight: 600, marginBottom: '4px' }}>Fix inputs & recalculate</div>
+              <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '10px' }}>
+                Wrong hours or net profit? Correct them here, save, and recalculate — the draft rebuilds from scratch (overrides are discarded).
+              </div>
+              <EfficiencyEditor techs={techs} month={month} efficiency={efficiency} effEdits={effEdits} setEffEdits={setEffEdits} onSave={saveEfficiency} busy={busy}
+                onPullBilled={pullBilled} pulling={pulling} pullNote={pullNote} />
               <CalcForm netProfit={netProfit} setNetProfit={setNetProfit} needsConfirm={needsConfirm} missing={missing}
                 busy={busy} onSubmit={(extra) => doCalculate(extra)} buttonLabel="↺ Recalculate (discards overrides)" />
             </div>
