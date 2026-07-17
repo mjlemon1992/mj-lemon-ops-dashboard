@@ -154,6 +154,12 @@ function ClockAdmin({ locId }) {
   const summary = data.summary || {};
   const kioskUrl = `${window.location.origin}/clock/${locId}`;
 
+  // Punch list under the current filters, plus payroll totals for it.
+  const shown = (data.entries || []).filter((e) => personFilter === 'all' || e.person_id === personFilter);
+  const totBreakMin = Math.round(shown.reduce((s, e) => s + (e.break_seconds || 0), 0) / 60);
+  const totPaid = Math.round(shown.reduce((s, e) => s + (e.paid_hours != null ? Number(e.paid_hours) : 0), 0) * 100) / 100;
+  const openShifts = shown.filter((e) => !e.clock_out).length;
+
   const pending = ((timeoff || {}).requests || []).filter((r) => r.status === 'pending');
   const upcoming = ((timeoff || {}).requests || []).filter((r) => r.status === 'approved' && r.end_date >= new Date().toISOString().slice(0, 10));
   const totals = (timeoff || {}).totals || {};
@@ -285,11 +291,24 @@ function ClockAdmin({ locId }) {
               {['Person', 'Clock in', 'Clock out', 'Break', 'Paid', ''].map((h) => <th key={h} style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '0.5px solid var(--border)' }}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {(data.entries || []).filter((e) => personFilter === 'all' || e.person_id === personFilter)
-                .map((e) => <EntryRow key={e.id} e={e} onSave={saveEntry} onDelete={delEntry} busy={busy} />)}
-              {!(data.entries || []).filter((e) => personFilter === 'all' || e.person_id === personFilter).length &&
+              {shown.map((e) => <EntryRow key={e.id} e={e} onSave={saveEntry} onDelete={delEntry} busy={busy} />)}
+              {!shown.length &&
                 <tr><td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)' }}>No punches {personFilter === 'all' ? 'this pay period' : 'for this technician in this pay period'} yet.</td></tr>}
             </tbody>
+            {shown.length > 0 && (
+              <tfoot>
+                <tr style={{ fontWeight: 700, background: 'var(--bg3)' }}>
+                  <td style={{ padding: '10px 12px' }}>
+                    Total — {personFilter === 'all' ? 'all technicians' : (people.find((p) => p.id === personFilter) || {}).name}
+                    <span style={{ fontWeight: 400, color: 'var(--text3)', fontSize: '11px' }}> · {shown.length} punch{shown.length === 1 ? '' : 'es'}{openShifts ? ` (${openShifts} still on shift)` : ''}</span>
+                  </td>
+                  <td /><td />
+                  <td style={{ padding: '10px 12px' }}>{totBreakMin} min</td>
+                  <td style={{ padding: '10px 12px', fontVariantNumeric: 'tabular-nums' }}>{totPaid} h</td>
+                  <td />
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>
