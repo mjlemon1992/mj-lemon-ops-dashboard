@@ -302,11 +302,15 @@ module.exports = (pool) => {
       const { name, active, efficiency_floor, role } = req.body || {};
       if (role && !['tech', 'advisor'].includes(role)) return fail(res, 'Invalid role', 400);
       if (efficiency_floor != null && !(efficiency_floor > 0 && efficiency_floor <= 1.5)) return fail(res, 'efficiency_floor must be a fraction like 0.9', 400);
+      // Only touch the floor when the key is actually in the body — an
+      // active/name-only update must not wipe a custom floor. Sending
+      // efficiency_floor: null still explicitly clears it to the default.
+      const hasFloor = Object.prototype.hasOwnProperty.call(req.body || {}, 'efficiency_floor');
       const { rows } = await pool.query(
         `UPDATE bonus_person SET name=COALESCE($2,name), role=COALESCE($3,role), active=COALESCE($4,active),
-                efficiency_floor=$5 WHERE id=$1 RETURNING *`,
+                efficiency_floor = CASE WHEN $6 THEN $5::numeric ELSE efficiency_floor END WHERE id=$1 RETURNING *`,
         [req.params.personId, name || null, role || null, typeof active === 'boolean' ? active : null,
-         efficiency_floor === undefined ? null : efficiency_floor]);   // explicit null clears to default
+         efficiency_floor === undefined ? null : efficiency_floor, hasFloor]);
       if (!rows.length) return fail(res, 'Person not found', 404);
       res.json(rows[0]);
     } catch (e) { fail(res, e); }
