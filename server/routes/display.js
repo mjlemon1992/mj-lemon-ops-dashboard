@@ -221,9 +221,27 @@ module.exports = (pool) => {
         }
       } catch (e) { reviews = null; }
 
+      // Live time-clock status per crew member — the board mirrors the kiosk:
+      // clocked in (since when), on break (since when), or clocked out.
+      // Tolerates the clock tables not existing yet.
+      let clock = [];
+      try {
+        const cRes = await pool.query(
+          `SELECT p.name, e.clock_in, e.break_started_at
+             FROM bonus_person p
+             LEFT JOIN time_clock_entry e ON e.person_id = p.id AND e.clock_out IS NULL
+            WHERE p.location_id = $1 AND p.active = true`, [req.params.locationId]);
+        clock = cRes.rows.map(r => ({
+          name: r.name,
+          status: r.clock_in ? (r.break_started_at ? 'break' : 'on') : 'off',
+          clock_in: r.clock_in, break_started_at: r.break_started_at
+        }));
+      } catch (e) { clock = []; }
+
       res.set('Cache-Control', 'no-store');
       res.json({
         location: { id: loc.id, name: loc.name, city: loc.city, province, weekly_hours: locWeekly },
+        clock,
         revenue,
         target,
         gap,

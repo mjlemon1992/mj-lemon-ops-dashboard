@@ -10,6 +10,8 @@ const fmtDT = (t) => t ? new Date(t).toLocaleString('en-CA', { month: 'short', d
 const fmtD = (d) => d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '';
 const forInput = (t) => { if (!t) return ''; const d = new Date(t); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
 const OFF_LABEL = { vacation: 'Holiday', sick: 'Sick', unpaid: 'Unpaid', other: 'Other', closure: 'Shop closure' };
+// Tap anywhere in a date field to pop the native calendar (graceful fallback).
+const openPicker = (e) => { try { e.target.showPicker(); } catch { /* unsupported */ } };
 
 export default function TimeClock() {
   const { isAll, selectedId, scopeLocations, select } = useLocations();
@@ -90,18 +92,27 @@ function ClockAdmin({ locId }) {
 
   // Shop shut for a stretch (holidays week, renovation): one booking covers the
   // whole crew — shows on both calendars, adjusts the bonus, and doesn't touch
-  // anyone's personal days-off total.
+  // anyone's personal days-off total. Calendar-picker form, not prompts.
+  const [closure, setClosure] = useState(null);   // {start, end, note} while the form is open
   const bookClosure = async () => {
-    const start = window.prompt('Shop closed — FIRST day (YYYY-MM-DD):', '');
-    if (!start) return;
-    const end = window.prompt('Shop closed — LAST day (YYYY-MM-DD):', start);
-    if (!end) return;
-    const note = window.prompt('Reason (optional, e.g. "Christmas shutdown"):', '') || '';
+    if (!closure || !closure.start || !closure.end) { setErr('Pick the first and last closed day'); return; }
     setBusy(true); setErr(null);
     try {
-      const out = await api(`/clock/${locId}/closure`, { method: 'POST', body: JSON.stringify({ start_date: start.trim(), end_date: end.trim(), note }) });
+      const out = await api(`/clock/${locId}/closure`, { method: 'POST', body: JSON.stringify({ start_date: closure.start, end_date: closure.end, note: closure.note || '' }) });
       if (out.shopmonkey && /failed/.test(out.shopmonkey)) setErr(`Closure booked, but Shopmonkey calendar ${out.shopmonkey}`);
+      setClosure(null);
       load();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  // One-tap: put this year's remaining stat holidays on the Shopmonkey calendar.
+  const [holNote, setHolNote] = useState(null);
+  const syncHolidays = async () => {
+    setBusy(true); setErr(null); setHolNote(null);
+    try {
+      const out = await api(`/clock/${locId}/sync-holidays`, { method: 'POST' });
+      setHolNote(`${out.pushed.length ? out.pushed.length + ' added to Shopmonkey (' + out.pushed.join(', ') + ')' : 'Nothing new to add'}${out.already ? ` · ${out.already} already there` : ''}${out.failed.length ? ` · failed: ${out.failed.join('; ')}` : ''}`);
     } catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -156,13 +167,41 @@ function ClockAdmin({ locId }) {
           ))}
         </select>
         {isOwner && <button onClick={setAnchor} disabled={busy} title="Set the biweekly cycle start date" style={{ fontSize: '12px', padding: '6px 10px' }}>⚙ Pay cycle</button>}
-        <button onClick={bookClosure} disabled={busy} title="Book a shop-wide closure period" style={{ fontSize: '12px', padding: '6px 10px' }}>🚪 Book closure</button>
+        <button onClick={() => setClosure(closure ? null : { start: '', end: '', note: '' })} disabled={busy} title="Book a shop-wide closure period" style={{ fontSize: '12px', padding: '6px 10px' }}>🚪 Book closure</button>
+        <button onClick={syncHolidays} disabled={busy} title="Put this year's stat holidays on the Shopmonkey calendar" style={{ fontSize: '12px', padding: '6px 10px' }}>🎌 Holidays → Shopmonkey</button>
       </div>
       <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '16px' }}>
         Kiosk for the shop tablet: <code>{kioskUrl}</code> — shop PIN opens it, each tech uses their own PIN to clock and to request time off. Hours feed the bonus; this page shows biweekly pay periods for payroll.
       </div>
 
       {err && <div className="alert-strip" style={{ marginBottom: '12px' }}><span style={{ color: 'var(--danger)' }}>{err}</span></div>}
+      {holNote && <div style={{ fontSize: '12px', color: 'var(--success)', marginBottom: '12px' }}>🎌 {holNote}</div>}
+
+      {/* Closure booking — calendar pickers, one booking covers the whole crew */}
+      {closure && (
+        <div className="card" style={{ marginBottom: '16px', border: '1px solid var(--danger)' }}>
+          <div style={{ fontWeight: 600, marginBottom: '8px' }}>🚪 Book a shop closure</div>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>First closed day
+              <input type="date" value={closure.start} onClick={openPicker} onFocus={openPicker}
+                onChange={(e) => setClosure((c) => ({ ...c, start: e.target.value, end: c.end || e.target.value }))} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>Last closed day
+              <input type="date" value={closure.end} min={closure.start} onClick={openPicker} onFocus={openPicker}
+                onChange={(e) => setClosure((c) => ({ ...c, end: e.target.value }))} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)', flex: 1, minWidth: '200px' }}>What for
+              <input placeholder="e.g. Christmas shutdown, renovation" value={closure.note}
+                onChange={(e) => setClosure((c) => ({ ...c, note: e.target.value }))} />
+            </label>
+            <button className="primary" disabled={busy || !closure.start || !closure.end} onClick={bookClosure} style={{ padding: '8px 18px' }}>Book closure</button>
+            <button onClick={() => setClosure(null)} style={{ padding: '8px 14px' }}>Cancel</button>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '8px' }}>
+            Shows CLOSED on the kiosk calendar and the Shopmonkey calendar, counts in payroll, adjusts everyone's bonus schedule — and doesn't use anyone's personal days off.
+          </div>
+        </div>
+      )}
 
       {/* Time-off approvals */}
       {pending.length > 0 && (
