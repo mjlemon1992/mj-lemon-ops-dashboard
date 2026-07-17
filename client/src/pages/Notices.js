@@ -72,9 +72,28 @@ export default function Notices() {
   const [genPreview, setGenPreview] = useState(null); // object URL for the preview <img>
   const [form, setForm] = useState({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '' });
 
+  const [ideas, setIdeas] = useState([]);
+  const [ideasLoading, setIdeasLoading] = useState(false);
+
   const clearGenerated = () => {
     if (genPreview) URL.revokeObjectURL(genPreview);
     setGenBlob(null); setGenPreview(null);
+  };
+
+  // Board-flavoured idea suggestions: safety reminder, metrics-aware team
+  // encouragement, seasonal/culture piece, wildcard. Picking one fills the form.
+  const suggestIdeas = async () => {
+    setIdeasLoading(true); setError('');
+    try {
+      const d = await api('/notices/poster-ideas', { method: 'POST', body: JSON.stringify({ location_id: form.location_id || null }) });
+      setIdeas(Array.isArray(d.ideas) ? d.ideas : []);
+    } catch (e2) { setError(e2.message || 'Could not fetch ideas'); }
+    setIdeasLoading(false);
+  };
+  const useIdea = (idea) => {
+    setForm(f => ({ ...f, kind: idea.kind || 'notice', title: idea.title || '', body: idea.body || '' }));
+    clearGenerated();
+    setIdeas([]);
   };
 
   // Claude designs the poster from the title/message/type above; we brand it
@@ -207,10 +226,28 @@ export default function Notices() {
               style={{ padding: '9px 18px', fontSize: '14px' }}>
               {designing ? 'Designing…' : '✨ Generate poster'}
             </button>
+            <button type="button" onClick={suggestIdeas} disabled={ideasLoading}
+              style={{ padding: '9px 18px', fontSize: '14px' }}>
+              {ideasLoading ? 'Thinking…' : '💡 Suggest ideas'}
+            </button>
             <span style={{ fontSize: '12px', color: 'var(--text3)' }}>
               Claude designs a board poster from the title, message and type above. Branding follows the Board choice — one shop gets its own line, “All locations” gets the combined brand.
             </span>
           </div>
+          {ideas.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+              {ideas.map((idea, i) => (
+                <button key={i} type="button" onClick={() => useIdea(idea)} title={idea.why || ''}
+                  style={{ textAlign: 'left', padding: '10px 14px', borderRadius: '10px', border: '0.5px solid var(--border)', background: 'var(--bg2)', cursor: 'pointer' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>
+                    {(KINDS.find(k => k.value === idea.kind) || KINDS[0]).label} · {idea.title}
+                  </span>
+                  {idea.body && <span style={{ display: 'block', fontSize: '12px', color: 'var(--text2)', marginTop: '3px' }}>{idea.body}</span>}
+                  {idea.why && <span style={{ display: 'block', fontSize: '11px', color: 'var(--text3)', marginTop: '3px' }}>why now: {idea.why}</span>}
+                </button>
+              ))}
+            </div>
+          )}
           {genPreview && (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginTop: '12px' }}>
               <img src={genPreview} alt="Generated poster preview"
