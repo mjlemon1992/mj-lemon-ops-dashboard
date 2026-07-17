@@ -12,6 +12,9 @@ module.exports = (pool) => {
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS display_pin VARCHAR(12)');
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS weekly_hours DECIMAL(6,2) DEFAULT 40');
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS qbo_slug TEXT');
+    // Per-board toggle: show the all-locations revenue standings on this
+    // location's shop-floor display, or keep the board to its own numbers.
+    await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS display_show_leaderboard BOOLEAN DEFAULT true');
     _colInit = true;
   };
 
@@ -96,13 +99,13 @@ module.exports = (pool) => {
   // the live Shopmonkey roster (see routes/technicians.js) and must not be
   // clobbered by an edit-location save.
   router.put('/:id', authenticateToken, requireOwner, async (req, res) => {
-    const { name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin, weekly_hours } = req.body;
+    const { name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin, weekly_hours, display_show_leaderboard } = req.body;
     try {
       await ensureColumns();
       const result = await pool.query(
-        `UPDATE locations SET name=$1, address=$2, city=$3, province=$4, shopmonkey_location_id=$5, qbo_company_id=$6, qbo_slug=$7, slack_channel=$8, labour_rate=$9, stale_threshold_days=$10, parts_margin_target=$11, efficiency_target=$12, pph_target=$13, active=$14, display_pin=$15, weekly_hours=$16, updated_at=NOW()
-         WHERE id=$17 RETURNING *`,
-        [name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug || null, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin || null, weekly_hours || 40, req.params.id]
+        `UPDATE locations SET name=$1, address=$2, city=$3, province=$4, shopmonkey_location_id=$5, qbo_company_id=$6, qbo_slug=$7, slack_channel=$8, labour_rate=$9, stale_threshold_days=$10, parts_margin_target=$11, efficiency_target=$12, pph_target=$13, active=$14, display_pin=$15, weekly_hours=$16, display_show_leaderboard=COALESCE($17, display_show_leaderboard), updated_at=NOW()
+         WHERE id=$18 RETURNING *`,
+        [name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug || null, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin || null, weekly_hours || 40, typeof display_show_leaderboard === 'boolean' ? display_show_leaderboard : null, req.params.id]
       );
       if (!result.rows.length) return res.status(404).json({ error: 'Location not found' });
       res.json(result.rows[0]);
