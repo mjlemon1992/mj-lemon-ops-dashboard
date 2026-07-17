@@ -8,7 +8,6 @@ import { useLocations } from '../context/LocationContext';
 
 const fmtDT = (t) => t ? new Date(t).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
 const fmtD = (d) => d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '';
-const forInput = (t) => { if (!t) return ''; const d = new Date(t); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
 const OFF_LABEL = { vacation: 'Holiday', sick: 'Sick', unpaid: 'Unpaid', other: 'Other', closure: 'Shop closure' };
 // Tap anywhere in a date field to pop the native calendar (graceful fallback).
 const openPicker = (e) => { try { e.target.showPicker(); } catch { /* unsupported */ } };
@@ -126,11 +125,14 @@ function ClockAdmin({ locId }) {
     setBusy(false);
   };
 
+  // Punch-list filter: one tech or the whole crew.
+  const [personFilter, setPersonFilter] = useState('all');
+
+  // Returns true on success so the edit row can close itself.
   const saveEntry = async (id, body) => {
     setBusy(true); setErr(null);
-    try { await api(`/clock/entries/${id}`, { method: 'PUT', body: JSON.stringify(body) }); load(); }
-    catch (e) { setErr(e.message); }
-    setBusy(false);
+    try { await api(`/clock/entries/${id}`, { method: 'PUT', body: JSON.stringify(body) }); load(); setBusy(false); return true; }
+    catch (e) { setErr(e.message); setBusy(false); return false; }
   };
   const delEntry = async (id) => {
     if (!window.confirm('Delete this punch?')) return;
@@ -160,12 +162,7 @@ function ClockAdmin({ locId }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '6px' }}>
         <h1>Time Clock</h1>
-        {/* Techs are paid biweekly — payroll views run on 14-day periods. */}
-        <select value={sel ? sel.from : ''} onChange={(e) => setSel((periods.periods || []).find((p) => p.from === e.target.value))} style={{ marginLeft: 'auto', width: 'auto' }}>
-          {((periods || {}).periods || []).map((p) => (
-            <option key={p.from} value={p.from}>{fmtD(p.from)} – {fmtD(p.to)}{p.current ? ' (current)' : ''}</option>
-          ))}
-        </select>
+        <span style={{ marginLeft: 'auto' }} />
         {isOwner && <button onClick={setAnchor} disabled={busy} title="Set the biweekly cycle start date" style={{ fontSize: '12px', padding: '6px 10px' }}>⚙ Pay cycle</button>}
         <button onClick={() => setClosure(closure ? null : { start: '', end: '', note: '' })} disabled={busy} title="Book a shop-wide closure period" style={{ fontSize: '12px', padding: '6px 10px' }}>🚪 Book closure</button>
         <button onClick={syncHolidays} disabled={busy} title="Put this year's stat holidays on the Shopmonkey calendar" style={{ fontSize: '12px', padding: '6px 10px' }}>🎌 Holidays → Shopmonkey</button>
@@ -266,10 +263,19 @@ function ClockAdmin({ locId }) {
         </div>
       )}
 
-      {/* Entries */}
+      {/* Entries — filterable by technician and pay period */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '12px 16px', borderBottom: '0.5px solid var(--border)', display: 'flex', alignItems: 'center' }}>
+        <div style={{ padding: '12px 16px', borderBottom: '0.5px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <span style={{ fontWeight: 600 }}>Punches</span>
+          <select value={personFilter} onChange={(e) => setPersonFilter(e.target.value)} style={{ width: 'auto', fontSize: '13px' }}>
+            <option value="all">All technicians</option>
+            {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <select value={sel ? sel.from : ''} onChange={(e) => setSel((periods.periods || []).find((p) => p.from === e.target.value))} style={{ width: 'auto', fontSize: '13px' }}>
+            {((periods || {}).periods || []).map((p) => (
+              <option key={p.from} value={p.from}>{fmtD(p.from)} – {fmtD(p.to)}{p.current ? ' (current)' : ''}</option>
+            ))}
+          </select>
           <button onClick={() => setAdding(true)} style={{ marginLeft: 'auto', fontSize: '12px', padding: '5px 12px' }}>＋ Add manual entry</button>
         </div>
         {adding && <AddRow people={people} onCancel={() => setAdding(false)} onSave={addEntry} busy={busy} />}
@@ -279,8 +285,10 @@ function ClockAdmin({ locId }) {
               {['Person', 'Clock in', 'Clock out', 'Break', 'Paid', ''].map((h) => <th key={h} style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '0.5px solid var(--border)' }}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {(data.entries || []).map((e) => <EntryRow key={e.id} e={e} onSave={saveEntry} onDelete={delEntry} busy={busy} />)}
-              {!data.entries.length && <tr><td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)' }}>No punches this pay period yet.</td></tr>}
+              {(data.entries || []).filter((e) => personFilter === 'all' || e.person_id === personFilter)
+                .map((e) => <EntryRow key={e.id} e={e} onSave={saveEntry} onDelete={delEntry} busy={busy} />)}
+              {!(data.entries || []).filter((e) => personFilter === 'all' || e.person_id === personFilter).length &&
+                <tr><td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)' }}>No punches {personFilter === 'all' ? 'this pay period' : 'for this technician in this pay period'} yet.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -289,21 +297,66 @@ function ClockAdmin({ locId }) {
   );
 }
 
+// Date + time picker with an explicit AM/PM control — tapping the date pops the
+// calendar; hour/minute/AM-PM are big dropdowns (no 24h guessing on the tablet).
+const p2 = (n) => String(n).padStart(2, '0');
+function DTPicker({ value, onChange }) {
+  const d = value ? new Date(value) : null;
+  const dateStr = d ? `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}` : '';
+  const h24 = d ? d.getHours() : 8;
+  const ap = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = ((h24 + 11) % 12) + 1;
+  const min = d ? d.getMinutes() : 0;
+  const emit = (ds, h, m, a) => {
+    if (!ds) { onChange(null); return; }
+    const hh = (Number(h) % 12) + (a === 'PM' ? 12 : 0);
+    onChange(new Date(`${ds}T${p2(hh)}:${p2(m)}:00`).toISOString());
+  };
+  return (
+    <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+      <input type="date" value={dateStr} onClick={openPicker} onFocus={openPicker}
+        onChange={(ev) => emit(ev.target.value, h12, min, ap)} style={{ width: '130px' }} />
+      <select value={h12} disabled={!dateStr} onChange={(ev) => emit(dateStr, ev.target.value, min, ap)} style={{ width: 'auto' }}>
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((h) => <option key={h} value={h}>{h}</option>)}
+      </select>
+      <span>:</span>
+      <select value={min} disabled={!dateStr} onChange={(ev) => emit(dateStr, h12, ev.target.value, ap)} style={{ width: 'auto' }}>
+        {Array.from({ length: 60 }, (_, i) => i).map((m) => <option key={m} value={m}>{p2(m)}</option>)}
+      </select>
+      <select value={ap} disabled={!dateStr} onChange={(ev) => emit(dateStr, h12, min, ev.target.value)} style={{ width: 'auto', fontWeight: 600 }}>
+        <option>AM</option><option>PM</option>
+      </select>
+    </span>
+  );
+}
+
 function EntryRow({ e, onSave, onDelete, busy }) {
   const [edit, setEdit] = useState(false);
-  const [ci, setCi] = useState(forInput(e.clock_in));
-  const [co, setCo] = useState(forInput(e.clock_out));
+  const [ci, setCi] = useState(e.clock_in);
+  const [co, setCo] = useState(e.clock_out);
   const [brk, setBrk] = useState(Math.round((e.break_seconds || 0) / 60));
+  const [paid, setPaid] = useState(e.paid_hours != null ? String(e.paid_hours) : '');
+  const beginEdit = () => { setCi(e.clock_in); setCo(e.clock_out); setBrk(Math.round((e.break_seconds || 0) / 60)); setPaid(e.paid_hours != null ? String(e.paid_hours) : ''); setEdit(true); };
+  const save = async () => {
+    const body = { clock_in: ci, clock_out: co || null, break_minutes: Number(brk) };
+    // Paid edited? Send it — the server keeps the punch times and back-computes
+    // the break so paid = (out − in) − break stays true.
+    if (paid !== '' && Number(paid) !== Number(e.paid_hours)) body.paid_hours = Number(paid);
+    const ok = await onSave(e.id, body);
+    if (ok) setEdit(false);   // save lands you back on the normal list — no extra Cancel click
+  };
   if (edit) {
     return (
       <tr style={{ background: 'var(--bg3)' }}>
-        <td style={{ padding: '8px 12px' }}>{e.person_name}</td>
-        <td style={{ padding: '8px 12px' }}><input type="datetime-local" value={ci} onChange={(ev) => setCi(ev.target.value)} /></td>
-        <td style={{ padding: '8px 12px' }}><input type="datetime-local" value={co} onChange={(ev) => setCo(ev.target.value)} /></td>
-        <td style={{ padding: '8px 12px' }}><input type="number" value={brk} onChange={(ev) => setBrk(ev.target.value)} style={{ width: '64px' }} /> min</td>
-        <td />
+        <td style={{ padding: '8px 12px', fontWeight: 600 }}>{e.person_name}</td>
+        <td style={{ padding: '8px 12px' }}><DTPicker value={ci} onChange={setCi} /></td>
+        <td style={{ padding: '8px 12px' }}><DTPicker value={co} onChange={setCo} /></td>
+        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}><input type="number" min="0" value={brk} onChange={(ev) => setBrk(ev.target.value)} style={{ width: '64px' }} /> min</td>
         <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
-          <button className="primary" disabled={busy} onClick={() => onSave(e.id, { clock_in: new Date(ci).toISOString(), clock_out: co ? new Date(co).toISOString() : null, break_minutes: Number(brk) })} style={{ fontSize: '11px', padding: '3px 8px' }}>Save</button>{' '}
+          {e.clock_out ? <><input type="number" min="0" step="0.25" value={paid} onChange={(ev) => setPaid(ev.target.value)} style={{ width: '72px' }} /> h</> : '—'}
+        </td>
+        <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+          <button className="primary" disabled={busy} onClick={save} style={{ fontSize: '11px', padding: '3px 8px' }}>Save</button>{' '}
           <button onClick={() => setEdit(false)} style={{ fontSize: '11px', padding: '3px 8px' }}>Cancel</button>
         </td>
       </tr>
@@ -317,7 +370,7 @@ function EntryRow({ e, onSave, onDelete, busy }) {
       <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)' }}>{Math.round((e.break_seconds || 0) / 60)} min</td>
       <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>{e.paid_hours != null ? `${e.paid_hours} h` : '—'}</td>
       <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', whiteSpace: 'nowrap' }}>
-        <button onClick={() => setEdit(true)} style={{ fontSize: '11px', padding: '3px 8px' }}>Edit</button>{' '}
+        <button onClick={beginEdit} style={{ fontSize: '11px', padding: '3px 8px' }}>Edit</button>{' '}
         <button onClick={() => onDelete(e.id)} style={{ fontSize: '11px', padding: '3px 8px', color: 'var(--danger)' }}>Delete</button>
       </td>
     </tr>
@@ -326,17 +379,25 @@ function EntryRow({ e, onSave, onDelete, busy }) {
 
 function AddRow({ people, onCancel, onSave, busy }) {
   const [pid, setPid] = useState((people[0] || {}).id || '');
-  const [ci, setCi] = useState('');
-  const [co, setCo] = useState('');
+  const [ci, setCi] = useState(null);
+  const [co, setCo] = useState(null);
   const [brk, setBrk] = useState(0);
   return (
-    <div style={{ padding: '12px 16px', background: 'var(--bg3)', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', borderBottom: '0.5px solid var(--border)' }}>
-      <select value={pid} onChange={(e) => setPid(e.target.value)}>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-      <label style={{ fontSize: '12px', color: 'var(--text3)' }}>In <input type="datetime-local" value={ci} onChange={(e) => setCi(e.target.value)} /></label>
-      <label style={{ fontSize: '12px', color: 'var(--text3)' }}>Out <input type="datetime-local" value={co} onChange={(e) => setCo(e.target.value)} /></label>
-      <label style={{ fontSize: '12px', color: 'var(--text3)' }}>Break <input type="number" value={brk} onChange={(e) => setBrk(e.target.value)} style={{ width: '60px' }} /> min</label>
-      <button className="primary" disabled={busy || !pid || !ci} onClick={() => onSave({ person_id: pid, clock_in: new Date(ci).toISOString(), clock_out: co ? new Date(co).toISOString() : null, break_minutes: Number(brk) })} style={{ fontSize: '12px', padding: '5px 12px' }}>Add</button>
-      <button onClick={onCancel} style={{ fontSize: '12px', padding: '5px 12px' }}>Cancel</button>
+    <div style={{ padding: '12px 16px', background: 'var(--bg3)', display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'flex-end', borderBottom: '0.5px solid var(--border)' }}>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>Technician
+        <select value={pid} onChange={(e) => setPid(e.target.value)}>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+      </label>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>Clock in
+        <DTPicker value={ci} onChange={setCi} />
+      </label>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>Clock out
+        <DTPicker value={co} onChange={setCo} />
+      </label>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>Break (min)
+        <input type="number" min="0" value={brk} onChange={(e) => setBrk(e.target.value)} style={{ width: '70px' }} />
+      </label>
+      <button className="primary" disabled={busy || !pid || !ci} onClick={() => onSave({ person_id: pid, clock_in: ci, clock_out: co || null, break_minutes: Number(brk) })} style={{ fontSize: '12px', padding: '6px 14px' }}>Add</button>
+      <button onClick={onCancel} style={{ fontSize: '12px', padding: '6px 14px' }}>Cancel</button>
     </div>
   );
 }
