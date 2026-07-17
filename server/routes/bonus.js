@@ -419,7 +419,9 @@ module.exports = (pool) => {
       // reduced by any APPROVED time off so holidays never count against a tech.
       await ensureTimeClockTables(pool);
       const clockHours = await paidHoursByMonth(pool, req.params.locationId, month);
-      const offDays = await approvedOffDaysByMonth(pool, req.params.locationId, month, toIsodow(openSet));
+      // Personal approved time off + location-wide closures (both reduce the
+      // schedule — nobody is measured against days the shop was shut).
+      const off = await approvedOffDaysByMonth(pool, req.params.locationId, month, toIsodow(openSet));
       const perDay = weekly / openSet.size;
       // Match crew first names against tech names (case/whitespace/accents folded).
       // Anything unmatched is surfaced with its hours, never guessed.
@@ -431,9 +433,10 @@ module.exports = (pool) => {
         const person = crew.find((p) => p.role === 'tech' && nm && nm.startsWith(normName(p.name).split(' ')[0]));
         if (person && !claimed.has(person.id)) {
           claimed.add(person.id);
-          const holidayAdj = round2((offDays[person.id] || 0) * perDay);
+          const daysOff = (off.byPerson[person.id] || 0) + off.closure;
+          const holidayAdj = round2(daysOff * perDay);
           const clocked = clockHours[person.id] != null ? clockHours[person.id] : Math.max(0, round2(e.scheduled - holidayAdj));
-          matched.push({ person_id: person.id, person_name: person.name, tech_name: e.name, billed_hours: e.hours, clocked_hours: clocked, clocked_source: clockHours[person.id] != null ? 'clock' : 'schedule', holiday_days_off: offDays[person.id] || 0 });
+          matched.push({ person_id: person.id, person_name: person.name, tech_name: e.name, billed_hours: e.hours, clocked_hours: clocked, clocked_source: clockHours[person.id] != null ? 'clock' : 'schedule', holiday_days_off: daysOff });
         } else {
           unmatched.push({ tech_name: e.name, billed_hours: e.hours });
         }

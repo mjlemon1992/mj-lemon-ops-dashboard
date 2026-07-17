@@ -49,7 +49,20 @@ export default function Locations() {
           <div className="form-section">
             <div className="form-section-title">Basic info</div>
             <div className="form-row">{field('name','Location name')} {field('city','City')}</div>
-            <div className="form-row">{field('address','Address')} {field('province','Province')}</div>
+            <div className="form-row">
+              {field('address','Address')}
+              <div className="form-group">
+                <label className="form-label">Province</label>
+                {/* Dropdown, not free text — the stat-holiday calendar, time-off
+                    day counting, and payroll all key off this exact code. */}
+                <select value={String(form.province || 'AB').toUpperCase()} onChange={e => setForm(f => ({ ...f, province: e.target.value }))}>
+                  {[['AB','Alberta'],['BC','British Columbia'],['SK','Saskatchewan'],['MB','Manitoba'],['ON','Ontario'],['QC','Québec'],['NB','New Brunswick'],['NS','Nova Scotia'],['PE','Prince Edward Island'],['NL','Newfoundland and Labrador'],['YT','Yukon'],['NT','Northwest Territories'],['NU','Nunavut']].map(([c, n]) => (
+                    <option key={c} value={c}>{n} ({c})</option>
+                  ))}
+                </select>
+                <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>Sets which stat-holiday calendar applies to this shop.</div>
+              </div>
+            </div>
           </div>
           <div className="form-section">
             <div className="form-section-title">Integrations</div>

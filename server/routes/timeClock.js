@@ -122,19 +122,25 @@ module.exports = (pool) => {
   const OFF_TYPES = ['vacation', 'sick', 'unpaid', 'other'];
 
   // Who's-off board for the kiosk: approved (and pending, flagged) requests
-  // from a week back to ~10 weeks out.
+  // from a week back to ~10 weeks out, plus the province's stat holidays for
+  // the calendar window (current + next month) — closures show as "Shop closed".
   router.get('/:locationId/timeoff-board', async (req, res) => {
     try {
       await ensure();
       if (!(await checkLocPin(req, res))) return;
       const { rows } = await pool.query(
-        `SELECT r.id, r.person_id, p.name AS person_name, r.start_date::text AS start_date, r.end_date::text AS end_date, r.type, r.status, r.working_days
-           FROM time_off_request r JOIN bonus_person p ON p.id = r.person_id
+        `SELECT r.id, r.person_id, COALESCE(p.name, 'Shop closed') AS person_name, r.start_date::text AS start_date, r.end_date::text AS end_date, r.type, r.status, r.working_days
+           FROM time_off_request r LEFT JOIN bonus_person p ON p.id = r.person_id
           WHERE r.location_id = $1 AND r.status IN ('approved','pending')
             AND r.end_date >= (now() AT TIME ZONE 'America/Edmonton')::date - 7
             AND r.start_date <= (now() AT TIME ZONE 'America/Edmonton')::date + 70
           ORDER BY r.start_date`, [req.params.locationId]);
-      res.json({ requests: rows });
+      const { rows: lr } = await pool.query('SELECT province FROM locations WHERE id=$1', [req.params.locationId]);
+      const today = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' }) + 'T12:00:00Z');
+      const winFrom = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-01`;
+      const nextEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 2, 0));
+      const winTo = nextEnd.toISOString().slice(0, 10);
+      res.json({ requests: rows, holidays: holidaysBetween((lr[0] || {}).province || 'ab', winFrom, winTo) });
     } catch (e) { fail(res, e); }
   });
 
@@ -179,14 +185,15 @@ module.exports = (pool) => {
     const smLoc = rows[0] && rows[0].shopmonkey_location_id;
     if (!apiKey || !smLoc) return { ok: false, error: 'Shopmonkey not configured' };
     const label = { vacation: 'Holiday', sick: 'Sick', unpaid: 'Unpaid leave', other: 'Time off' }[r.type] || 'Time off';
+    const title = r.type === 'closure' ? '🚪 Shop closed' : `🏖 ${personName} — ${label}`;
     try {
       const resp = await fetch('https://api.shopmonkey.cloud/v3/appointment', {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           locationId: smLoc,
-          name: `🏖 ${personName} — ${label}`,
-          note: `${personName} off ${r.start_date} to ${r.end_date} (${r.working_days} working day${r.working_days === 1 ? '' : 's'}). Approved in the ops dashboard.`,
+          name: title,
+          note: `${r.type === 'closure' ? 'Shop closed' : personName + ' off'} ${r.start_date} to ${r.end_date} (${r.working_days} working day${r.working_days === 1 ? '' : 's'}). Set in the ops dashboard.`,
           allDay: true,
           startDate: `${r.start_date}T15:00:00.000Z`,
           endDate: `${r.end_date}T23:00:00.000Z`,
@@ -241,14 +248,15 @@ module.exports = (pool) => {
         : await paidHoursByMonth(pool, req.params.locationId, month);
       // Payroll context for the period: per-person approved days off (open days
       // only) and any stat holidays falling inside it (province-based).
-      let off_days = {}, stat_holidays = [];
+      let off_days = {}, closure_days = 0, stat_holidays = [];
       if (range) {
         const { rows: lr } = await pool.query('SELECT province, open_days FROM locations WHERE id=$1', [req.params.locationId]);
         const loc = lr[0] || {};
-        off_days = await approvedOffDaysByRange(pool, req.params.locationId, range[0], range[1], toIsodow(openDaySet(loc.open_days)));
+        const off = await approvedOffDaysByRange(pool, req.params.locationId, range[0], range[1], toIsodow(openDaySet(loc.open_days)));
+        off_days = off.byPerson; closure_days = off.closure;
         stat_holidays = holidaysBetween(loc.province || 'ab', range[0], range[1]);
       }
-      res.json({ month: month || null, from: range ? range[0] : null, to: range ? range[1] : null, entries: rows, summary, off_days, stat_holidays });
+      res.json({ month: month || null, from: range ? range[0] : null, to: range ? range[1] : null, entries: rows, summary, off_days, closure_days, stat_holidays });
     } catch (e) { fail(res, e); }
   });
 
@@ -284,19 +292,41 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
-  // Year's requests + per-person approved totals (working days).
+  // Year's requests + per-person approved totals (working days). Closure days
+  // are location-wide and deliberately NOT charged to personal totals.
   router.get('/:locationId/timeoff', ...authed, scoped, async (req, res) => {
     try {
       await ensure();
       const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : String(new Date().getFullYear());
       const { rows: requests } = await pool.query(
-        `SELECT r.*, r.start_date::text AS start_date, r.end_date::text AS end_date, p.name AS person_name
-           FROM time_off_request r JOIN bonus_person p ON p.id = r.person_id
+        `SELECT r.*, r.start_date::text AS start_date, r.end_date::text AS end_date, COALESCE(p.name, 'Shop closed') AS person_name
+           FROM time_off_request r LEFT JOIN bonus_person p ON p.id = r.person_id
           WHERE r.location_id=$1 AND (to_char(r.start_date,'YYYY')=$2 OR to_char(r.end_date,'YYYY')=$2)
           ORDER BY r.status='pending' DESC, r.start_date DESC`, [req.params.locationId, year]);
       const totals = {};
-      for (const r of requests) if (r.status === 'approved') totals[r.person_id] = (totals[r.person_id] || 0) + (r.working_days || 0);
+      for (const r of requests) if (r.status === 'approved' && r.person_id) totals[r.person_id] = (totals[r.person_id] || 0) + (r.working_days || 0);
       res.json({ year, requests, totals });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Book a location-wide closure (owner/manager) — created approved directly,
+  // applies to the whole crew, mirrors to the Shopmonkey calendar.
+  router.post('/:locationId/closure', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { start_date, end_date, note } = req.body || {};
+      if (!isDate(start_date) || !isDate(end_date)) return fail(res, 'start_date + end_date required', 400);
+      if (end_date < start_date) return fail(res, 'End date is before start date', 400);
+      const { rows: locRows } = await pool.query('SELECT province, open_days FROM locations WHERE id=$1', [req.params.locationId]);
+      const days = workingDaysBetween((locRows[0] || {}).province || 'ab', start_date, end_date, openDaySet((locRows[0] || {}).open_days));
+      const { rows } = await pool.query(
+        `INSERT INTO time_off_request (location_id, person_id, start_date, end_date, type, note, working_days, status, decided_by, decided_at)
+         VALUES ($1, NULL, $2, $3, 'closure', $4, $5, 'approved', $6, now())
+         RETURNING *, start_date::text AS start_date, end_date::text AS end_date`,
+        [req.params.locationId, start_date, end_date, String(note || '').slice(0, 300), days, who(req)]);
+      const sm = await smPush(req.params.locationId, 'Shop closed', rows[0]);
+      if (sm && sm.ok) await pool.query('UPDATE time_off_request SET sm_appointment_id=$2 WHERE id=$1', [rows[0].id, sm.id]);
+      res.json({ ok: true, id: rows[0].id, working_days: days, shopmonkey: sm ? (sm.ok ? 'calendar entry created' : `push failed: ${sm.error}`) : null });
     } catch (e) { fail(res, e); }
   });
 

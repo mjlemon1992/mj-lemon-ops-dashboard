@@ -46,6 +46,9 @@ function ensureTimeClockTables(pool) {
       decided_at TIMESTAMPTZ
     )`);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_tor_loc_dates ON time_off_request (location_id, start_date, end_date)');
+    // Group closures ("shop shut Dec 24–28"): one row with person_id NULL that
+    // applies to the whole crew — never charged to personal day-off totals.
+    await pool.query('ALTER TABLE time_off_request ALTER COLUMN person_id DROP NOT NULL');
     // Biweekly payroll: periods are 14 days from this anchor (a period START date).
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS pay_period_anchor DATE');
     // Which weekdays the shop is open ('mon,tue,...'). Drives how holiday days
@@ -89,9 +92,10 @@ async function paidHoursByRange(pool, locationId, from, to) {
   return out;
 }
 
-// Approved time-off days per person overlapping a month ('YYYY-MM'), counted
-// on the shop's OPEN days only (isodow list, default Mon–Fri). Overlap is
-// clipped to the month.
+// Approved time-off days overlapping a month ('YYYY-MM'), counted on the
+// shop's OPEN days only (isodow list, default Mon–Fri), clipped to the month.
+// Returns { byPerson: {person_id: days}, closure: days } — closure rows
+// (person_id NULL) apply to the whole crew.
 async function approvedOffDaysByMonth(pool, locationId, month, isodow = [1, 2, 3, 4, 5]) {
   const { rows } = await pool.query(
     `SELECT person_id,
@@ -105,13 +109,16 @@ async function approvedOffDaysByMonth(pool, locationId, month, isodow = [1, 2, 3
         AND end_date >= ($2||'-01')::date
       GROUP BY person_id`,
     [locationId, month, isodow]);
-  const out = {};
-  for (const r of rows) out[r.person_id] = Number(r.days) || 0;
+  const out = { byPerson: {}, closure: 0 };
+  for (const r of rows) {
+    if (r.person_id == null) out.closure += Number(r.days) || 0;
+    else out.byPerson[r.person_id] = Number(r.days) || 0;
+  }
   return out;
 }
 
-// Same per-person open-day counting over an arbitrary [from..to] range —
-// payroll shows days off inside each biweekly pay period.
+// Same open-day counting over an arbitrary [from..to] range — payroll shows
+// days off inside each biweekly pay period. Same { byPerson, closure } shape.
 async function approvedOffDaysByRange(pool, locationId, from, to, isodow = [1, 2, 3, 4, 5]) {
   const { rows } = await pool.query(
     `SELECT person_id,
@@ -123,8 +130,11 @@ async function approvedOffDaysByRange(pool, locationId, from, to, isodow = [1, 2
         AND start_date <= $3::date AND end_date >= $2::date
       GROUP BY person_id`,
     [locationId, from, to, isodow]);
-  const out = {};
-  for (const r of rows) out[r.person_id] = Number(r.days) || 0;
+  const out = { byPerson: {}, closure: 0 };
+  for (const r of rows) {
+    if (r.person_id == null) out.closure += Number(r.days) || 0;
+    else out.byPerson[r.person_id] = Number(r.days) || 0;
+  }
   return out;
 }
 
