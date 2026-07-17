@@ -361,24 +361,45 @@ module.exports = (pool) => {
       const { rows: locRows } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [req.params.locationId]);
       const smId = locRows[0] && locRows[0].shopmonkey_location_id;
       if (!smId) return fail(res, 'Location not connected to Shopmonkey', 400);
-      const { byTech, names, orders_scanned } = await monthBilledHours(pool, req.params.locationId, smId, month);
+      // PREFERRED SOURCE: the last MTD tech snapshot inside the month — the
+      // pipeline validated penny-exact against Shopmonkey's tech report, and it
+      // costs zero API calls (the live crawl kept rate-limiting AND undercounted
+      // whenever fetches failed). Live crawl remains only as a fallback for
+      // months that predate snapshots.
+      let entries = [];   // [{ name, hours }]
+      let source = null;
+      const { rows: snap } = await pool.query(
+        `SELECT DISTINCT ON (tech_id) tech_id, tech_name, hours_billed, snapshot_date
+           FROM tech_efficiency
+          WHERE location_id = $1 AND period_type = 'mtd'
+            AND snapshot_date >= ($2 || '-01')::date AND snapshot_date < ($3 || '-01')::date
+          ORDER BY tech_id, snapshot_date DESC, hours_billed DESC`,
+        [req.params.locationId, month, nextMonth(month)]);
+      if (snap.length) {
+        entries = snap.map((r) => ({ name: (r.tech_name || '').trim(), hours: round2(Number(r.hours_billed) || 0) }));
+        source = { kind: 'snapshot', date: String(snap[0].snapshot_date).slice(0, 10) };
+      } else {
+        const { byTech, names, orders_scanned } = await monthBilledHours(pool, req.params.locationId, smId, month);
+        entries = Object.entries(byTech).map(([techId, hours]) => ({ name: (names[techId] || '').trim() || techId, hours }));
+        source = { kind: 'live', orders_scanned };
+      }
       const crew = await activePeople(req.params.locationId);
-      // Match: crew first name against the resolved tech name (normalized —
-      // case/whitespace/accents folded). Anything unmatched is surfaced with
-      // its hours, never guessed.
+      // Match crew first names against tech names (case/whitespace/accents folded).
+      // Anything unmatched is surfaced with its hours, never guessed.
       const matched = [], unmatched = [];
       const claimed = new Set();
-      for (const [techId, hours] of Object.entries(byTech)) {
-        const smName = normName(names[techId]);
-        const person = crew.find((p) => p.role === 'tech' && smName && smName.startsWith(normName(p.name).split(' ')[0]));
+      for (const e of entries) {
+        if (!(e.hours > 0)) continue;
+        const nm = normName(e.name);
+        const person = crew.find((p) => p.role === 'tech' && nm && nm.startsWith(normName(p.name).split(' ')[0]));
         if (person && !claimed.has(person.id)) {
           claimed.add(person.id);
-          matched.push({ person_id: person.id, person_name: person.name, tech_name: (names[techId] || '').trim(), billed_hours: hours });
+          matched.push({ person_id: person.id, person_name: person.name, tech_name: e.name, billed_hours: e.hours });
         } else {
-          unmatched.push({ tech_name: (names[techId] || '').trim() || techId, billed_hours: hours });
+          unmatched.push({ tech_name: e.name, billed_hours: e.hours });
         }
       }
-      res.json({ month, matched, unmatched, orders_scanned });
+      res.json({ month, matched, unmatched, source });
     } catch (e) { fail(res, e, /incomplete|rate-limit/i.test(String(e.message)) ? 502 : 500); }
   });
 
