@@ -86,43 +86,70 @@ async function monthRevenue(smLocationId, month) {
 // definition as the Technicians page. Comeback ($0) lines contribute nothing,
 // which matches the program: comeback time hits clocked, never billed.
 // Complete-or-throw: this feeds payroll, so a partial pull refuses.
-async function monthBilledHours(smLocationId, month) {
+async function monthBilledHours(pool, locationId, smLocationId, month) {
   const key = SHOPMONKEY_KEY();
   const orders = await monthOrders(smLocationId, month);
   const byTech = {};
-  let failed = 0;
-  for (const o of orders) {
-    try {
-      const sr = await fetch(`https://api.shopmonkey.cloud/v3/order/${o.id}/service?limit=100`, {
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      });
-      if (!sr.ok) { failed++; continue; }
-      const sj = await sr.json();
-      const lines = (sj && sj.data && sj.data.data) ? sj.data.data : (sj.data || []);
-      for (const ln of (lines || [])) {
-        if (!((ln.calculatedLaborCents || 0) > 0)) continue;   // billed = revenue-generating lines only
-        for (const lab of (ln.labors || [])) {
-          if (!lab.technicianId) continue;
-          const hrs = Number(lab.hours) || 0;
-          if (hrs > 0) byTech[lab.technicianId] = round2((byTech[lab.technicianId] || 0) + hrs);
-        }
+  const fetchOne = async (o) => {
+    const sr = await fetch(`https://api.shopmonkey.cloud/v3/order/${o.id}/service?limit=100`, {
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    });
+    if (!sr.ok) return false;
+    const sj = await sr.json();
+    const lines = (sj && sj.data && sj.data.data) ? sj.data.data : (sj.data || []);
+    for (const ln of (lines || [])) {
+      if (!((ln.calculatedLaborCents || 0) > 0)) continue;   // billed = revenue-generating lines only
+      for (const lab of (ln.labors || [])) {
+        if (!lab.technicianId) continue;
+        const hrs = Number(lab.hours) || 0;
+        if (hrs > 0) byTech[lab.technicianId] = round2((byTech[lab.technicianId] || 0) + hrs);
       }
-      await _sleep(100);
-    } catch (e) { failed++; }
+    }
+    return true;
+  };
+  // First pass gentle; failed orders get ONE retry pass after a cool-down —
+  // Shopmonkey rate-limits this volume of calls routinely.
+  let failedOrders = [];
+  for (const o of orders) {
+    try { if (!(await fetchOne(o))) failedOrders.push(o); } catch (e) { failedOrders.push(o); }
+    await _sleep(140);
   }
-  if (failed > 0) throw new Error(`Billed-hours pull incomplete (${failed}/${orders.length} orders failed, likely rate-limited) — try again in a few minutes`);
-  // Names for matching to the bonus crew (roster lives on /v3/user).
+  if (failedOrders.length) {
+    await _sleep(2500);
+    const still = [];
+    for (const o of failedOrders) {
+      try { if (!(await fetchOne(o))) still.push(o); } catch (e) { still.push(o); }
+      await _sleep(250);
+    }
+    failedOrders = still;
+  }
+  if (failedOrders.length > 0) {
+    throw new Error(`Billed-hours pull incomplete (${failedOrders.length}/${orders.length} orders failed, likely rate-limited) — wait a few minutes and try again`);
+  }
+  // Names: the labor technicianId space matches tech_efficiency.tech_id (NOT the
+  // /v3/user id space) — resolve from our own snapshot history first (#101's
+  // lesson), then fill any gaps from the user roster.
   const names = {};
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (tech_id) tech_id, tech_name FROM tech_efficiency
+        WHERE location_id = $1 ORDER BY tech_id, snapshot_date DESC`, [locationId]);
+    for (const r of rows) if (r.tech_name && !/^Tech [0-9a-f]{6}$/.test(r.tech_name)) names[r.tech_id] = r.tech_name;
+  } catch (e) { /* fall through to roster */ }
   try {
     const res = await fetch('https://api.shopmonkey.cloud/v3/user?limit=200', { headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' } });
     if (res.ok) {
       const td = await res.json();
       const list = (td && td.data && td.data.data) ? td.data.data : (td.data || []);
-      for (const t of list) names[t.id] = t.name || [t.firstName, t.lastName].filter(Boolean).join(' ') || 'Unknown';
+      for (const t of list) if (!names[t.id]) names[t.id] = t.name || [t.firstName, t.lastName].filter(Boolean).join(' ') || '';
     }
-  } catch (e) { /* names optional */ }
+  } catch (e) { /* names best-effort */ }
   return { byTech, names, orders_scanned: orders.length };
 }
+
+// Fold whitespace runs, accents and case so "Stephane LaRochelle " matches
+// "Stephane" and "Keith  Mcilhargey" matches "Keith".
+const normName = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 module.exports = (pool) => {
   const router = express.Router();
@@ -334,20 +361,21 @@ module.exports = (pool) => {
       const { rows: locRows } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [req.params.locationId]);
       const smId = locRows[0] && locRows[0].shopmonkey_location_id;
       if (!smId) return fail(res, 'Location not connected to Shopmonkey', 400);
-      const { byTech, names, orders_scanned } = await monthBilledHours(smId, month);
+      const { byTech, names, orders_scanned } = await monthBilledHours(pool, req.params.locationId, smId, month);
       const crew = await activePeople(req.params.locationId);
-      // Match: crew first name against the Shopmonkey display name (prefix,
-      // case-insensitive). Anything unmatched is surfaced, never guessed.
+      // Match: crew first name against the resolved tech name (normalized —
+      // case/whitespace/accents folded). Anything unmatched is surfaced with
+      // its hours, never guessed.
       const matched = [], unmatched = [];
       const claimed = new Set();
       for (const [techId, hours] of Object.entries(byTech)) {
-        const smName = (names[techId] || '').trim();
-        const person = crew.find((p) => p.role === 'tech' && smName.toLowerCase().startsWith(p.name.trim().toLowerCase().split(/\s+/)[0]));
+        const smName = normName(names[techId]);
+        const person = crew.find((p) => p.role === 'tech' && smName && smName.startsWith(normName(p.name).split(' ')[0]));
         if (person && !claimed.has(person.id)) {
           claimed.add(person.id);
-          matched.push({ person_id: person.id, person_name: person.name, tech_name: smName, billed_hours: hours });
+          matched.push({ person_id: person.id, person_name: person.name, tech_name: (names[techId] || '').trim(), billed_hours: hours });
         } else {
-          unmatched.push({ tech_name: smName || techId, billed_hours: hours });
+          unmatched.push({ tech_name: (names[techId] || '').trim() || techId, billed_hours: hours });
         }
       }
       res.json({ month, matched, unmatched, orders_scanned });

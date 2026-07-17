@@ -60,6 +60,7 @@ function BonusView({ locId }) {
   const [targetEdit, setTargetEdit] = useState('');
   const [pulling, setPulling] = useState(false);
   const [pullNote, setPullNote] = useState(null);
+  const [refreshed, setRefreshed] = useState(false);
 
   const load = useCallback((m) => {
     api(`/bonus/${locId}/overview${m ? `?month=${m}` : ''}`)
@@ -73,6 +74,8 @@ function BonusView({ locId }) {
   const resetLocal = useCallback(() => {
     setEffEdits({}); setNetProfit(''); setNeedsConfirm(null); setMissing(null); setPullNote(null); setErr(null);
     load(month);
+    setRefreshed(true);
+    setTimeout(() => setRefreshed(false), 2000);
   }, [load, month]);
 
   if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
@@ -202,7 +205,7 @@ function BonusView({ locId }) {
               return <option key={m} value={m}>{monthLabel(m)}{h ? (h.status === 'approved' ? ' 🔒' : ' ⏳') : ''}</option>;
             })}
           </select>
-          <button onClick={resetLocal} title="Discard unsaved edits and reload">↻ Refresh</button>
+          <button onClick={resetLocal} title="Discard unsaved edits and reload" style={refreshed ? { color: 'var(--success)' } : undefined}>{refreshed ? '✓ Refreshed' : '↻ Refresh'}</button>
           {user?.role === 'owner' && <button onClick={() => setShowSettings((s) => !s)}>⚙ Formula settings</button>}
           {run && !locked && user?.role === 'owner' && (
             <button onClick={async () => {
