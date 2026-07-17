@@ -78,10 +78,27 @@ function efficiencyPct(hoursSold, province, hoursPerWeek = 40, today = new Date(
   return Math.round((Number(hoursSold) / avail) * 1000) / 10;
 }
 
+// Working days (Mon–Fri minus stat holidays) in [from..to], dates as 'YYYY-MM-DD'.
+// Used to size time-off requests and holiday-adjust the schedule denominator.
+function workingDaysBetween(province, from, to) {
+  const start = new Date(from + 'T12:00:00');
+  const end = new Date(to + 'T12:00:00');
+  let n = 0;
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) continue;
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (holidaySet(province, d.getFullYear()).has(iso)) continue;
+    n++;
+  }
+  return n;
+}
+
 module.exports = {
   workingDaysElapsed,
   workingDaysInMonth,
   workingPaceFrac,
   availableHoursMTD,
-  efficiencyPct
+  efficiencyPct,
+  workingDaysBetween
 };

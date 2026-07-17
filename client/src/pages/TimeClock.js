@@ -6,10 +6,10 @@ import { useLocations } from '../context/LocationContext';
 // fix missed/wrong ones, add a manual entry, and set each tech's kiosk PIN. The
 // shop-floor kiosk lives at /clock/:locationId. Monthly paid hours feed the bonus.
 
-const monthLabel = (m) => m ? new Date(m + '-15T12:00:00Z').toLocaleDateString('en-CA', { month: 'long', year: 'numeric' }) : '';
 const fmtDT = (t) => t ? new Date(t).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+const fmtD = (d) => d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '';
 const forInput = (t) => { if (!t) return ''; const d = new Date(t); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
-const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const OFF_LABEL = { vacation: 'Holiday', sick: 'Sick', unpaid: 'Unpaid', other: 'Other' };
 
 export default function TimeClock() {
   const { isAll, selectedId, scopeLocations, select } = useLocations();
@@ -29,28 +29,63 @@ export default function TimeClock() {
 }
 
 function ClockAdmin({ locId }) {
-  const { api } = useAuth();
-  const [month, setMonth] = useState(thisMonth());
+  const { api, user } = useAuth();
+  const [periods, setPeriods] = useState(null);   // biweekly pay periods (techs paid biweekly)
+  const [sel, setSel] = useState(null);           // selected period {from,to}
   const [data, setData] = useState(null);
   const [people, setPeople] = useState([]);
+  const [timeoff, setTimeoff] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
+  const isOwner = user?.role === 'owner';
+
+  // Load the pay-period list once (and after an anchor change).
+  const loadPeriods = useCallback(() => {
+    api(`/clock/${locId}/pay-periods`).then((p) => {
+      setPeriods(p);
+      setSel((s) => s || (p.periods || []).find((x) => x.current) || (p.periods || [])[0] || null);
+    }).catch((e) => setErr(e.message));
+  }, [api, locId]);
+  useEffect(() => { loadPeriods(); }, [loadPeriods]);
 
   const load = useCallback(() => {
+    if (!sel) return;
     Promise.all([
-      api(`/clock/${locId}/entries?month=${month}`),
-      api(`/bonus/${locId}/overview?month=${month}`).catch(() => ({ people: [] })),
-    ]).then(([e, ov]) => { setData(e); setPeople((ov.people || []).filter((p) => p.active)); setErr(null); })
+      api(`/clock/${locId}/entries?from=${sel.from}&to=${sel.to}`),
+      api(`/bonus/${locId}/overview`).catch(() => ({ people: [] })),
+      api(`/clock/${locId}/timeoff`).catch(() => null),
+    ]).then(([e, ov, toff]) => { setData(e); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setErr(null); })
       .catch((ex) => setErr(ex.message));
-  }, [api, locId, month]);
+  }, [api, locId, sel]);
   useEffect(() => { load(); }, [load]);
 
-  const monthOptions = (() => {
-    const now = new Date(); const out = [];
-    for (let i = 0; i < 14; i++) { const d = new Date(now.getFullYear(), now.getMonth() - i, 15); out.push(d.toISOString().slice(0, 7)); }
-    return out;
-  })();
+  const setAnchor = async () => {
+    const v = window.prompt('Biweekly period START date (YYYY-MM-DD) — pick the first day of any real pay period; all periods count 14 days from it:', (periods && periods.anchor) || '2026-01-04');
+    if (!v) return;
+    setBusy(true); setErr(null);
+    try { await api(`/clock/${locId}/pay-anchor`, { method: 'PUT', body: JSON.stringify({ anchor: v.trim() }) }); setSel(null); loadPeriods(); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  const decide = async (r, action) => {
+    if (action === 'approve' && !window.confirm(`Approve ${r.person_name}'s ${OFF_LABEL[r.type] || r.type} — ${fmtD(r.start_date)} to ${fmtD(r.end_date)} (${r.working_days} working day${r.working_days === 1 ? '' : 's'})?\n\nIt will show on the kiosk calendar and the Shopmonkey calendar, and the bonus schedule adjusts so it doesn't count against them.`)) return;
+    setBusy(true); setErr(null);
+    try {
+      const out = await api(`/clock/timeoff/${r.id}/decide`, { method: 'PUT', body: JSON.stringify({ action }) });
+      if (out.shopmonkey && /failed/.test(out.shopmonkey)) setErr(`Approved, but Shopmonkey calendar ${out.shopmonkey}`);
+      load();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  const cancelOff = async (r) => {
+    if (!window.confirm(`Cancel ${r.person_name}'s time off ${fmtD(r.start_date)}–${fmtD(r.end_date)}? Removes the calendar entry too.`)) return;
+    setBusy(true); setErr(null);
+    try { await api(`/clock/timeoff/${r.id}`, { method: 'DELETE' }); load(); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
 
   const setPin = async (p) => {
     const v = window.prompt(`Set kiosk PIN for ${p.name} (4–6 digits, blank to clear):`, '');
@@ -87,35 +122,79 @@ function ClockAdmin({ locId }) {
   const summary = data.summary || {};
   const kioskUrl = `${window.location.origin}/clock/${locId}`;
 
+  const pending = ((timeoff || {}).requests || []).filter((r) => r.status === 'pending');
+  const upcoming = ((timeoff || {}).requests || []).filter((r) => r.status === 'approved' && r.end_date >= new Date().toISOString().slice(0, 10));
+  const totals = (timeoff || {}).totals || {};
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '6px' }}>
-        <h1>Time Clock — {monthLabel(month)}</h1>
-        <select value={month} onChange={(e) => setMonth(e.target.value)} style={{ marginLeft: 'auto', width: 'auto' }}>
-          {monthOptions.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+        <h1>Time Clock</h1>
+        {/* Techs are paid biweekly — payroll views run on 14-day periods. */}
+        <select value={sel ? sel.from : ''} onChange={(e) => setSel((periods.periods || []).find((p) => p.from === e.target.value))} style={{ marginLeft: 'auto', width: 'auto' }}>
+          {((periods || {}).periods || []).map((p) => (
+            <option key={p.from} value={p.from}>{fmtD(p.from)} – {fmtD(p.to)}{p.current ? ' (current)' : ''}</option>
+          ))}
         </select>
+        {isOwner && <button onClick={setAnchor} disabled={busy} title="Set the biweekly cycle start date" style={{ fontSize: '12px', padding: '6px 10px' }}>⚙ Pay cycle</button>}
       </div>
       <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '16px' }}>
-        Kiosk for the shop tablet: <code>{kioskUrl}</code> — opens with the shop's display PIN, then each tech uses their own PIN. Monthly paid hours flow into the bonus.
+        Kiosk for the shop tablet: <code>{kioskUrl}</code> — shop PIN opens it, each tech uses their own PIN to clock and to request time off. Hours feed the bonus; this page shows biweekly pay periods for payroll.
       </div>
 
       {err && <div className="alert-strip" style={{ marginBottom: '12px' }}><span style={{ color: 'var(--danger)' }}>{err}</span></div>}
 
-      {/* Per-person paid hours + PIN status */}
+      {/* Time-off approvals */}
+      {pending.length > 0 && (
+        <div className="card" style={{ marginBottom: '16px', border: '1px solid var(--warning)' }}>
+          <div style={{ fontWeight: 600, marginBottom: '10px' }}>🏖 Time-off requests awaiting your decision</div>
+          {pending.map((r) => (
+            <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px', marginBottom: '6px' }}>
+              <span style={{ fontWeight: 700 }}>{r.person_name}</span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{OFF_LABEL[r.type] || r.type} · {fmtD(r.start_date)} – {fmtD(r.end_date)} · {r.working_days} working day{r.working_days === 1 ? '' : 's'}</span>
+              {r.note && <span style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic' }}>"{r.note}"</span>}
+              <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+                <button className="primary" disabled={busy} onClick={() => decide(r, 'approve')} style={{ fontSize: '12px', padding: '5px 14px' }}>✓ Approve</button>
+                <button disabled={busy} onClick={() => decide(r, 'deny')} style={{ fontSize: '12px', padding: '5px 14px', color: 'var(--danger)' }}>Deny</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Per-person paid hours (this pay period) + PIN + time off taken this year */}
       <div className="card" style={{ marginBottom: '16px' }}>
-        <div style={{ fontWeight: 600, marginBottom: '10px' }}>Paid hours this month</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px' }}>
+        <div style={{ fontWeight: 600, marginBottom: '10px' }}>Paid hours — {sel ? `${fmtD(sel.from)} – ${fmtD(sel.to)}` : 'period'} <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>(biweekly pay period)</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '10px' }}>
           {people.map((p) => (
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 600 }}>{p.name}</div>
-                <div style={{ fontSize: '12px', color: 'var(--text3)' }}>{summary[p.id] != null ? `${summary[p.id]} h clocked` : 'no punches — bonus uses schedule'}</div>
+                <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
+                  {summary[p.id] != null ? `${summary[p.id]} h this period` : 'no punches this period'}
+                  {totals[p.id] ? ` · ${totals[p.id]} day${totals[p.id] === 1 ? '' : 's'} off this year` : ''}
+                </div>
               </div>
               <button onClick={() => setPin(p)} disabled={busy} style={{ fontSize: '11px', padding: '4px 10px' }}>Set PIN</button>
             </div>
           ))}
         </div>
       </div>
+
+      {/* Upcoming approved time off */}
+      {upcoming.length > 0 && (
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <div style={{ fontWeight: 600, marginBottom: '10px' }}>Upcoming time off</div>
+          {upcoming.map((r) => (
+            <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', marginBottom: '4px' }}>
+              <span style={{ fontWeight: 600 }}>{r.person_name}</span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{OFF_LABEL[r.type] || r.type} · {fmtD(r.start_date)} – {fmtD(r.end_date)}</span>
+              {r.sm_appointment_id && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>📅 on Shopmonkey</span>}
+              <button disabled={busy} onClick={() => cancelOff(r)} style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px', color: 'var(--danger)' }}>Cancel</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Entries */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -131,7 +210,7 @@ function ClockAdmin({ locId }) {
             </tr></thead>
             <tbody>
               {(data.entries || []).map((e) => <EntryRow key={e.id} e={e} onSave={saveEntry} onDelete={delEntry} busy={busy} />)}
-              {!data.entries.length && <tr><td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)' }}>No punches this month yet.</td></tr>}
+              {!data.entries.length && <tr><td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)' }}>No punches this pay period yet.</td></tr>}
             </tbody>
           </table>
         </div>
