@@ -9,7 +9,7 @@ import { useLocations } from '../context/LocationContext';
 const fmtDT = (t) => t ? new Date(t).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
 const fmtD = (d) => d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '';
 const forInput = (t) => { if (!t) return ''; const d = new Date(t); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
-const OFF_LABEL = { vacation: 'Holiday', sick: 'Sick', unpaid: 'Unpaid', other: 'Other' };
+const OFF_LABEL = { vacation: 'Holiday', sick: 'Sick', unpaid: 'Unpaid', other: 'Other', closure: 'Shop closure' };
 
 export default function TimeClock() {
   const { isAll, selectedId, scopeLocations, select } = useLocations();
@@ -80,10 +80,29 @@ function ClockAdmin({ locId }) {
     setBusy(false);
   };
   const cancelOff = async (r) => {
-    if (!window.confirm(`Cancel ${r.person_name}'s time off ${fmtD(r.start_date)}–${fmtD(r.end_date)}? Removes the calendar entry too.`)) return;
+    const what = r.type === 'closure' ? 'the shop closure' : `${r.person_name}'s time off`;
+    if (!window.confirm(`Cancel ${what} ${fmtD(r.start_date)}–${fmtD(r.end_date)}? Removes the calendar entry too.`)) return;
     setBusy(true); setErr(null);
     try { await api(`/clock/timeoff/${r.id}`, { method: 'DELETE' }); load(); }
     catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  // Shop shut for a stretch (holidays week, renovation): one booking covers the
+  // whole crew — shows on both calendars, adjusts the bonus, and doesn't touch
+  // anyone's personal days-off total.
+  const bookClosure = async () => {
+    const start = window.prompt('Shop closed — FIRST day (YYYY-MM-DD):', '');
+    if (!start) return;
+    const end = window.prompt('Shop closed — LAST day (YYYY-MM-DD):', start);
+    if (!end) return;
+    const note = window.prompt('Reason (optional, e.g. "Christmas shutdown"):', '') || '';
+    setBusy(true); setErr(null);
+    try {
+      const out = await api(`/clock/${locId}/closure`, { method: 'POST', body: JSON.stringify({ start_date: start.trim(), end_date: end.trim(), note }) });
+      if (out.shopmonkey && /failed/.test(out.shopmonkey)) setErr(`Closure booked, but Shopmonkey calendar ${out.shopmonkey}`);
+      load();
+    } catch (e) { setErr(e.message); }
     setBusy(false);
   };
 
@@ -137,6 +156,7 @@ function ClockAdmin({ locId }) {
           ))}
         </select>
         {isOwner && <button onClick={setAnchor} disabled={busy} title="Set the biweekly cycle start date" style={{ fontSize: '12px', padding: '6px 10px' }}>⚙ Pay cycle</button>}
+        <button onClick={bookClosure} disabled={busy} title="Book a shop-wide closure period" style={{ fontSize: '12px', padding: '6px 10px' }}>🚪 Book closure</button>
       </div>
       <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '16px' }}>
         Kiosk for the shop tablet: <code>{kioskUrl}</code> — shop PIN opens it, each tech uses their own PIN to clock and to request time off. Hours feed the bonus; this page shows biweekly pay periods for payroll.
@@ -166,11 +186,14 @@ function ClockAdmin({ locId }) {
       <div className="card" style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
           <span style={{ fontWeight: 600 }}>Paid hours — {sel ? `${fmtD(sel.from)} – ${fmtD(sel.to)}` : 'period'} <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>(biweekly pay period)</span></span>
-          {(data.stat_holidays || []).length > 0 && (
-            <span style={{ fontSize: '12px', color: 'var(--warning)', marginLeft: 'auto' }}>
-              🎌 Stat holiday{data.stat_holidays.length > 1 ? 's' : ''} this period: {data.stat_holidays.map((h) => `${h.name} (${fmtD(h.date)})`).join(', ')}
-            </span>
-          )}
+          <span style={{ fontSize: '12px', marginLeft: 'auto', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+            {(data.closure_days || 0) > 0 && <span style={{ color: 'var(--danger)' }}>🚪 Shop closed {data.closure_days} day{data.closure_days === 1 ? '' : 's'} this period</span>}
+            {(data.stat_holidays || []).length > 0 && (
+              <span style={{ color: 'var(--warning)' }}>
+                🎌 Stat holiday{data.stat_holidays.length > 1 ? 's' : ''}: {data.stat_holidays.map((h) => `${h.name} (${fmtD(h.date)})`).join(', ')}
+              </span>
+            )}
+          </span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '10px' }}>
           {people.map((p) => (
@@ -195,8 +218,8 @@ function ClockAdmin({ locId }) {
           <div style={{ fontWeight: 600, marginBottom: '10px' }}>Upcoming time off</div>
           {upcoming.map((r) => (
             <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', marginBottom: '4px' }}>
-              <span style={{ fontWeight: 600 }}>{r.person_name}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{OFF_LABEL[r.type] || r.type} · {fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'} used</b></span>
+              <span style={{ fontWeight: 600 }}>{r.type === 'closure' ? '🚪 Shop closed' : r.person_name}</span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{r.type === 'closure' ? '' : (OFF_LABEL[r.type] || r.type) + ' · '}{fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'}{r.type === 'closure' ? '' : ' used'}</b></span>
               {r.sm_appointment_id && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>📅 on Shopmonkey</span>}
               <button disabled={busy} onClick={() => cancelOff(r)} style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px', color: 'var(--danger)' }}>Cancel</button>
             </div>

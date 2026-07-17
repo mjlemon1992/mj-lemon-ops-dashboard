@@ -31,6 +31,7 @@ export default function ClockKiosk() {
   const [flash, setFlash] = useState('');
   const [view, setView] = useState('roster');       // roster | timeoff | request
   const [board, setBoard] = useState([]);           // time-off requests for the calendar
+  const [holidays, setHolidays] = useState([]);     // province stat holidays in the window
   const [reqForm, setReqForm] = useState({ person: null, start: '', end: '', type: 'vacation', pin: '' });
   const timer = useRef(null);
 
@@ -56,7 +57,7 @@ export default function ClockKiosk() {
     try {
       const res = await fetch(`/api/clock/${locationId}/timeoff-board?pin=${encodeURIComponent(locPin)}`);
       const body = await res.json().catch(() => ({}));
-      if (res.ok) setBoard(body.requests || []);
+      if (res.ok) { setBoard(body.requests || []); setHolidays(body.holidays || []); }
     } catch { /* board is best-effort */ }
   }, [locationId, locPin]);
   useEffect(() => { if (entered && view === 'timeoff') loadBoard(); }, [entered, view, loadBoard]);
@@ -166,15 +167,20 @@ export default function ClockKiosk() {
         </div>
         {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', margin: '10px 0 0' }}>✓ {flash}</div>}
         <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '18px' }}>
-          <OffMonth offset={0} board={board} />
-          <OffMonth offset={1} board={board} />
+          <OffMonth offset={0} board={board} holidays={holidays} />
+          <OffMonth offset={1} board={board} holidays={holidays} />
         </div>
+        {holidays.length > 0 && (
+          <div style={{ fontSize: '12px', color: 'var(--accent)', marginTop: '10px', textAlign: 'center' }}>
+            🎌 {holidays.map((h) => `${h.name} — ${new Date(h.date + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}`).join(' · ')}
+          </div>
+        )}
         <div style={{ width: '100%', maxWidth: '820px', marginTop: '16px' }}>
           {board.length === 0 && <div style={{ color: 'var(--text3)', textAlign: 'center' }}>No time off booked.</div>}
           {board.map((r) => (
-            <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px 12px', background: 'var(--bg2)', borderRadius: '10px', marginBottom: '6px', opacity: r.status === 'pending' ? 0.65 : 1 }}>
-              <span style={{ fontWeight: 700 }}>{r.person_name}</span>
-              <span style={{ color: 'var(--text3)', fontSize: '13px' }}>{r.start_date === r.end_date ? r.start_date : `${r.start_date} → ${r.end_date}`} · {r.type} · {r.working_days} day{r.working_days === 1 ? '' : 's'}</span>
+            <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px 12px', background: 'var(--bg2)', borderRadius: '10px', marginBottom: '6px', opacity: r.status === 'pending' ? 0.65 : 1, border: r.type === 'closure' ? '1px solid var(--danger)' : 'none' }}>
+              <span style={{ fontWeight: 700 }}>{r.type === 'closure' ? '🚪 Shop closed' : r.person_name}</span>
+              <span style={{ color: 'var(--text3)', fontSize: '13px' }}>{r.start_date === r.end_date ? r.start_date : `${r.start_date} → ${r.end_date}`}{r.type !== 'closure' ? ` · ${r.type}` : ''} · {r.working_days} day{r.working_days === 1 ? '' : 's'}</span>
               <span style={{ ...pill, marginLeft: 'auto', fontSize: '11px', background: r.status === 'approved' ? 'rgba(52,199,89,0.14)' : 'var(--bg3)', color: r.status === 'approved' ? 'var(--success)' : 'var(--text3)' }}>{r.status === 'approved' ? '✓ approved' : 'awaiting approval'}</span>
             </div>
           ))}
@@ -254,8 +260,8 @@ export default function ClockKiosk() {
 }
 
 // One month of the who's-off calendar. Approved names solid, pending dimmed
-// with a "?" — so the crew can see the real schedule at a glance.
-function OffMonth({ offset, board }) {
+// with a "?", stat holidays flagged 🎌, closures painted across the cell.
+function OffMonth({ offset, board, holidays }) {
   const now = new Date();
   const first = new Date(now.getFullYear(), now.getMonth() + offset, 1);
   const daysIn = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
@@ -267,6 +273,8 @@ function OffMonth({ offset, board }) {
       if (dd >= r.start_date && dd <= r.end_date) (byDay[dd] = byDay[dd] || []).push(r);
     }
   }
+  const holByDay = {};
+  for (const h of holidays || []) holByDay[h.date] = h;
   const cells = [];
   for (let i = 0; i < (first.getDay() + 6) % 7; i++) cells.push(null);   // Monday-first
   for (let d = 1; d <= daysIn; d++) cells.push(d);
@@ -284,12 +292,16 @@ function OffMonth({ offset, board }) {
           const dow = new Date(first.getFullYear(), first.getMonth(), d).getDay();
           const weekend = dow === 0 || dow === 6;
           const offs = byDay[dd] || [];
+          const hol = holByDay[dd];
+          const closed = offs.some((r) => r.type === 'closure' && r.status === 'approved');
           return (
-            <div key={i} style={{ minHeight: '44px', borderRadius: '6px', padding: '3px', fontSize: '10px',
-              background: dd === todayIso ? 'rgba(10,132,255,0.18)' : weekend ? 'transparent' : 'var(--bg3)',
-              opacity: weekend ? 0.45 : 1, border: dd === todayIso ? '1px solid var(--accent)' : '1px solid transparent' }}>
-              <div style={{ color: 'var(--text3)', fontSize: '10px' }}>{d}</div>
-              {offs.map((r, j) => (
+            <div key={i} title={hol ? hol.name : undefined} style={{ minHeight: '44px', borderRadius: '6px', padding: '3px', fontSize: '10px',
+              background: closed ? 'rgba(255,69,58,0.16)' : hol ? 'rgba(10,132,255,0.12)' : dd === todayIso ? 'rgba(10,132,255,0.18)' : weekend ? 'transparent' : 'var(--bg3)',
+              opacity: weekend && !hol ? 0.45 : 1, border: dd === todayIso ? '1px solid var(--accent)' : closed ? '1px solid var(--danger)' : '1px solid transparent' }}>
+              <div style={{ color: 'var(--text3)', fontSize: '10px' }}>{d}{hol ? ' 🎌' : ''}</div>
+              {hol && <div style={{ color: 'var(--accent)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hol.name}</div>}
+              {closed && <div style={{ color: 'var(--danger)', fontWeight: 700 }}>CLOSED</div>}
+              {offs.filter((r) => r.type !== 'closure').map((r, j) => (
                 <div key={j} style={{ color: r.status === 'approved' ? 'var(--warning)' : 'var(--text3)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {r.person_name.split(' ')[0]}{r.status === 'pending' ? '?' : ''}
                 </div>

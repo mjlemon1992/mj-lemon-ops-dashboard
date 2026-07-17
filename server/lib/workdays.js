@@ -5,30 +5,49 @@
 // efficiency = hours_sold / available_hours measures sold work against the
 // ~40h/week a tech is on the clock, net of stat holidays (per Jamie's def).
 
+// Statutory holidays per province/territory, 2026. Each province gets its own
+// legal list — Family Day doesn't exist in QC, Saskatchewan Day isn't BC Day,
+// etc. The Locations province dropdown selects which list applies.
 const HOLIDAYS = {
-  ab: {
-    2026: [
-      '2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01',
-      '2026-09-07', '2026-10-12', '2026-11-11', '2026-12-25', '2026-12-28'
-    ]
-  },
-  bc: {
-    2026: [
-      '2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01',
-      '2026-08-03', '2026-09-07', '2026-09-30', '2026-10-12', '2026-11-11',
-      '2026-12-25', '2026-12-28'
-    ]
-  }
+  ab: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01', '2026-09-07', '2026-10-12', '2026-11-11', '2026-12-25', '2026-12-28'] },
+  bc: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01', '2026-08-03', '2026-09-07', '2026-09-30', '2026-10-12', '2026-11-11', '2026-12-25', '2026-12-28'] },
+  sk: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01', '2026-08-03', '2026-09-07', '2026-10-12', '2026-11-11', '2026-12-25'] },
+  mb: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01', '2026-09-07', '2026-10-12', '2026-12-25'] },
+  on: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01', '2026-09-07', '2026-10-12', '2026-12-25', '2026-12-28'] },
+  qc: { 2026: ['2026-01-01', '2026-04-03', '2026-05-18', '2026-06-24', '2026-07-01', '2026-09-07', '2026-10-12', '2026-12-25'] },
+  nb: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-07-01', '2026-08-03', '2026-09-07', '2026-11-11', '2026-12-25'] },
+  ns: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-07-01', '2026-09-07', '2026-11-11', '2026-12-25'] },
+  pe: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-07-01', '2026-09-07', '2026-11-11', '2026-12-25'] },
+  nl: { 2026: ['2026-01-01', '2026-04-03', '2026-07-01', '2026-09-07', '2026-11-11', '2026-12-25'] },
+  yt: { 2026: ['2026-01-01', '2026-04-03', '2026-05-18', '2026-07-01', '2026-08-17', '2026-09-07', '2026-09-30', '2026-10-12', '2026-11-11', '2026-12-25'] },
+  nt: { 2026: ['2026-01-01', '2026-04-03', '2026-05-18', '2026-06-22', '2026-07-01', '2026-08-03', '2026-09-07', '2026-09-30', '2026-10-12', '2026-11-11', '2026-12-25'] },
+  nu: { 2026: ['2026-01-01', '2026-04-03', '2026-05-18', '2026-07-01', '2026-07-09', '2026-08-03', '2026-09-07', '2026-10-12', '2026-11-11', '2026-12-25'] }
 };
 
-// Display names for the stat-holiday dates above (payroll views show these).
+// Display names: nationwide defaults + per-province naming (Feb 16 and Aug 3
+// mean different things in different provinces).
 const HOLIDAY_NAMES = {
   '2026-01-01': "New Year's Day", '2026-02-16': 'Family Day', '2026-04-03': 'Good Friday',
-  '2026-05-18': 'Victoria Day', '2026-07-01': 'Canada Day', '2026-08-03': 'BC Day',
+  '2026-05-18': 'Victoria Day', '2026-06-22': 'National Indigenous Peoples Day (observed)',
+  '2026-06-24': 'Fête nationale', '2026-07-01': 'Canada Day', '2026-07-09': 'Nunavut Day',
+  '2026-08-03': 'Civic Holiday', '2026-08-17': 'Discovery Day',
   '2026-09-07': 'Labour Day', '2026-09-30': 'Truth & Reconciliation Day',
   '2026-10-12': 'Thanksgiving', '2026-11-11': 'Remembrance Day',
   '2026-12-25': 'Christmas Day', '2026-12-28': 'Boxing Day (observed)'
 };
+const PROV_HOLIDAY_NAMES = {
+  bc: { '2026-08-03': 'BC Day' },
+  sk: { '2026-08-03': 'Saskatchewan Day' },
+  mb: { '2026-02-16': 'Louis Riel Day' },
+  qc: { '2026-05-18': "National Patriots' Day" },
+  nb: { '2026-08-03': 'New Brunswick Day' },
+  ns: { '2026-02-16': 'Heritage Day' },
+  pe: { '2026-02-16': 'Islander Day' }
+};
+function holidayName(province, date) {
+  const prov = (province || '').toLowerCase();
+  return (PROV_HOLIDAY_NAMES[prov] && PROV_HOLIDAY_NAMES[prov][date]) || HOLIDAY_NAMES[date] || 'Stat holiday';
+}
 
 // A shop's open days as a Set of JS weekday numbers (0=Sun..6=Sat), from the
 // locations.open_days CSV ('mon,tue,...'). Default: Mon–Fri.
@@ -112,13 +131,14 @@ function workingDaysBetween(province, from, to, openDays) {
   return n;
 }
 
-// Stat holidays falling inside [from..to] for a province → [{date, name}].
+// Stat holidays falling inside [from..to] for a province → [{date, name}],
+// named the way that province names them.
 function holidaysBetween(province, from, to) {
   const years = new Set([Number(from.slice(0, 4)), Number(to.slice(0, 4))]);
   const out = [];
   for (const y of years) {
     for (const d of holidaySet(province, y)) {
-      if (d >= from && d <= to) out.push({ date: d, name: HOLIDAY_NAMES[d] || 'Stat holiday' });
+      if (d >= from && d <= to) out.push({ date: d, name: holidayName(province, d) });
     }
   }
   return out.sort((a, b) => a.date.localeCompare(b.date));
