@@ -36,6 +36,15 @@ export default function Users() {
 
   const roleBadgeClass = r => r === 'owner' ? 'info' : r === 'partner' ? 'success' : 'neutral';
 
+  // Hard delete (server blocks self-delete and the last active owner).
+  const remove = async (u) => {
+    if (!window.confirm(`Delete ${u.name} (${u.email})? They lose access immediately. This can't be undone.`)) return;
+    try {
+      await api(`/users/${u.id}`, { method: 'DELETE' });
+      setUsers(prev => prev.filter(x => x.id !== u.id));
+    } catch (err) { setError(err.message); window.alert(err.message); }
+  };
+
   const initials = name => name ? name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : '?';
 
   if (editing !== null) {
@@ -54,9 +63,9 @@ export default function Users() {
             <div className="form-group">
               <label className="form-label">Role</label>
               <select value={form.role} onChange={e => setForm(f=>({...f,role:e.target.value}))}>
-                <option value="owner">Owner</option>
-                <option value="partner">Partner</option>
-                <option value="manager">Manager</option>
+                <option value="owner">Owner — full admin (locations, users, everything)</option>
+                <option value="partner">Partner — all locations, no admin settings</option>
+                <option value="manager">Shop operator — their location only: marketing + targets</option>
               </select>
             </div>
             {form.role === 'manager' && (
@@ -115,6 +124,7 @@ export default function Users() {
               </div>
               <span className={`badge ${roleBadgeClass(u.role)}`} style={{ textTransform: 'capitalize' }}>{u.role}</span>
               {u.id !== me?.id && <button onClick={() => openEdit(u)} style={{ fontSize: '11px', padding: '4px 10px' }}>Edit</button>}
+              {u.id !== me?.id && <button onClick={() => remove(u)} style={{ fontSize: '11px', padding: '4px 10px', color: 'var(--danger)' }}>Delete</button>}
             </div>
           );
         })}

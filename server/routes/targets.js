@@ -1,8 +1,15 @@
 const express = require('express');
-const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth');
+const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
 
 module.exports = (pool) => {
   const router = express.Router();
+
+  // Owner/partner set targets anywhere; a manager only for their own location.
+  const assertLoc = (req, res) => {
+    if (canAccessLocation(req.user, req.params.locationId)) return true;
+    res.status(403).json({ error: 'Access denied for this location' });
+    return false;
+  };
 
   router.get('/:locationId/:year', authenticateToken, async (req, res) => {
     try {
@@ -19,8 +26,9 @@ module.exports = (pool) => {
     }
   });
 
-  router.put('/:locationId/:year/:month', authenticateToken, requireOwnerOrPartner, async (req, res) => {
+  router.put('/:locationId/:year/:month', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     const { revenue, car_count, parts_margin, labour_margin, labour_hours, efficiency, avg_ro_value, pph } = req.body;
+    if (!assertLoc(req, res)) return;
     try {
       const result = await pool.query(
         `INSERT INTO targets (location_id, year, month, revenue, car_count, parts_margin, labour_margin, labour_hours, efficiency, avg_ro_value, pph)
@@ -36,9 +44,10 @@ module.exports = (pool) => {
     }
   });
 
-  router.post('/:locationId/:year/bulk', authenticateToken, requireOwnerOrPartner, async (req, res) => {
+  router.post('/:locationId/:year/bulk', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     const { targets } = req.body;
     if (!Array.isArray(targets)) return res.status(400).json({ error: 'targets must be an array' });
+    if (!assertLoc(req, res)) return;
     try {
       const client = await pool.connect();
       try {

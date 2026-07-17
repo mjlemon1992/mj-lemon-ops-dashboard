@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth');
+const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
 
 // Marketing module, piece 2: capture -> AI captions -> approval queue.
 // A bay photo (+ short note) is stored, Claude writes platform captions, and it
@@ -265,7 +265,26 @@ module.exports = (pool) => {
 
   const dataUri = (row) => row.image_data ? `data:${row.image_mime};base64,${row.image_data.toString('base64')}` : null;
   const fail = (res, e) => res.status(e.status || 500).json({ error: String(e.message || e) });
-  const gate = [authenticateToken, requireOwnerOrPartner];
+  // Managers (single-location operators) can use marketing for THEIR location:
+  // owner/partner pass everywhere; a manager is asserted against the location
+  // on :locationId routes and against the post's location on /post/:postId ones.
+  const gate = [authenticateToken, requireRole('owner', 'partner', 'manager')];
+  const assertLoc = (req, res) => {
+    if (canAccessLocation(req.user, req.params.locationId)) return true;
+    res.status(403).json({ error: 'Access denied for this location' });
+    return false;
+  };
+  // Post-level guard: managers may only touch posts belonging to their location.
+  const postGuard = async (req, res, next) => {
+    try {
+      if (['owner', 'partner'].includes(req.user.role)) return next();
+      const { rows } = await pool.query('SELECT location_id FROM marketing_post WHERE id = $1', [req.params.postId]);
+      if (rows.length && !canAccessLocation(req.user, rows[0].location_id)) {
+        return res.status(403).json({ error: 'Access denied for this post' });
+      }
+      next();   // missing post falls through: the handler returns its own 404
+    } catch (e) { fail(res, e); }
+  };
 
   router.get('/status', ...gate, (req, res) => res.json({ configured: !!ANTHROPIC_KEY, model: MODEL, purgeDays: PURGE_DAYS, imageGen: HAS_IMAGE_GEN }));
 
@@ -300,6 +319,7 @@ module.exports = (pool) => {
     express.raw({ type: ['image/*', 'application/octet-stream'], limit: '30mb' }),
     async (req, res) => {
       try {
+        if (!assertLoc(req, res)) return;
         await ensureTables();
         if (!Buffer.isBuffer(req.body) || !req.body.length)
           return res.status(400).json({ error: 'No image body. POST the photo with Content-Type: image/jpeg.' });
@@ -336,6 +356,7 @@ module.exports = (pool) => {
   // Approval queue: draft posts for a location, image inlined as a data URI.
   router.get('/:locationId/queue', ...gate, async (req, res) => {
     try {
+      if (!assertLoc(req, res)) return;
       await ensureTables();
       await purge();
       const status = req.query.status || 'draft';
@@ -375,15 +396,15 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   };
   // NOTE: "approve" marks ready-to-post; real publishing waits on Meta/GBP access.
-  router.post('/post/:postId/approve', ...gate, setStatus('approved'));
-  router.post('/post/:postId/skip', ...gate, setStatus('skipped'));
-  router.post('/post/:postId/unapprove', ...gate, setStatus('draft'));
+  router.post('/post/:postId/approve', ...gate, postGuard, setStatus('approved'));
+  router.post('/post/:postId/skip', ...gate, postGuard, setStatus('skipped'));
+  router.post('/post/:postId/unapprove', ...gate, postGuard, setStatus('draft'));
 
   // Soft delete (e.g. imported the wrong image). The row + image are KEPT and
   // hidden from the live queues; it lands in "Recently deleted" and can be
   // restored. A bounded hard-sweep in purge() reclaims the storage later. Every
   // delete is audited, so a vanished post is always attributable.
-  router.delete('/post/:postId', ...gate, async (req, res) => {
+  router.delete('/post/:postId', ...gate, postGuard, async (req, res) => {
     try {
       await ensureTables();
       const actor = actorOf(req);
@@ -399,7 +420,7 @@ module.exports = (pool) => {
   });
 
   // Restore a soft-deleted post back to its prior status.
-  router.post('/post/:postId/restore', ...gate, async (req, res) => {
+  router.post('/post/:postId/restore', ...gate, postGuard, async (req, res) => {
     try {
       await ensureTables();
       const { rows } = await pool.query(
@@ -414,7 +435,7 @@ module.exports = (pool) => {
   });
 
   // Per-post audit trail: who did what, when. Answers "why did this change/vanish".
-  router.get('/post/:postId/audit', ...gate, async (req, res) => {
+  router.get('/post/:postId/audit', ...gate, postGuard, async (req, res) => {
     try {
       await ensureTables();
       const { rows } = await pool.query(
@@ -426,7 +447,7 @@ module.exports = (pool) => {
   });
 
   // Edit captions before approving.
-  router.patch('/post/:postId', ...gate, async (req, res) => {
+  router.patch('/post/:postId', ...gate, postGuard, async (req, res) => {
     try {
       await ensureTables();
       const { ig, fb, gbp } = req.body || {};
@@ -441,7 +462,7 @@ module.exports = (pool) => {
   });
 
   // Re-run caption generation on the stored image (e.g. you didn't like the draft).
-  router.post('/post/:postId/regenerate', ...gate, async (req, res) => {
+  router.post('/post/:postId/regenerate', ...gate, postGuard, async (req, res) => {
     try {
       await ensureTables();
       const { rows } = await pool.query('SELECT image_data, image_mime, note FROM marketing_post WHERE id=$1 AND deleted_at IS NULL', [req.params.postId]);
