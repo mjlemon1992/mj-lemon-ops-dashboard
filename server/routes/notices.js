@@ -124,21 +124,43 @@ Rules:
 - Leave the top-left area (x 0-320, y 0-170) visually calm — the brand logo is overlaid there afterward. No text there; background color/shapes are fine.
 - Mood by KIND: celebration = energetic, bold diagonal shapes/rays/confetti dots, orange-dominant; safety = high-contrast, hazard chevrons or bold stripes, charcoal+orange, serious; notice = clean, minimal, informational.
 - Fill the full canvas (no white page margins). Strong contrast: light text on dark, or charcoal on light.
+- If a FOOTER line is provided, render it VERBATIM as a small attribution near the bottom (24-32px, muted off-white or light gray, bottom-left or bottom-center). Never alter it, never invent a different shop/location name anywhere on the poster.
 - NO <script>, NO <image>, NO <foreignObject>, NO external URLs, NO event handlers, NO CTA phrases like "book now"/"call today".`;
+
+  // Location-aware branding footer. Specific board -> that shop's line;
+  // All locations -> combined line across active shops. Casing in the DB is
+  // messy ("red deer ", "ab"), so normalize here — the model renders verbatim.
+  const tcase = (s) => String(s || '').trim().split(/\s+/).map(w => w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : '').join(' ');
+  const brandLineFor = async (locationId) => {
+    try {
+      if (locationId) {
+        const { rows } = await pool.query('SELECT name, city, province FROM locations WHERE id = $1', [locationId]);
+        if (!rows.length) return 'Mister Transmission';
+        const l = rows[0];
+        return l.city ? `Mister Transmission — ${tcase(l.city)}, ${String(l.province || '').trim().toUpperCase()}`.replace(/, $/, '')
+                      : `Mister Transmission — ${String(l.name || '').trim()}`;
+      }
+      const { rows } = await pool.query('SELECT city, name FROM locations WHERE active = true ORDER BY name');
+      const cities = [...new Set(rows.map(l => tcase(l.city) || String(l.name || '').trim()).filter(Boolean))];
+      return cities.length ? `Mister Transmission — ${cities.join(' & ')}` : 'Mister Transmission';
+    } catch { return 'Mister Transmission'; }
+  };
 
   router.post('/design-poster', syncAuth, requireOwnerOrPartner, async (req, res) => {
     try {
       const KEY = process.env.ANTHROPIC_API_KEY;
       if (!KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set' });
-      const { title, body, kind } = req.body || {};
+      const { title, body, kind, location_id } = req.body || {};
       if (!title || !String(title).trim()) return res.status(400).json({ error: 'title required' });
       const mood = ['celebration', 'safety', 'notice', 'poster'].includes(kind) ? kind : 'notice';
+      await ensureTable();
+      const footer = await brandLineFor(location_id || null);
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
         body: JSON.stringify({
           model: DESIGN_MODEL, max_tokens: 4096, system: designSystem,
-          messages: [{ role: 'user', content: `KIND: ${mood}\nTITLE: ${String(title).slice(0, 200)}\n${body ? `BODY: ${String(body).slice(0, 400)}` : 'BODY: (none)'}` }],
+          messages: [{ role: 'user', content: `KIND: ${mood}\nTITLE: ${String(title).slice(0, 200)}\n${body ? `BODY: ${String(body).slice(0, 400)}` : 'BODY: (none)'}\nFOOTER: ${footer}` }],
         }),
       });
       const data = await r.json();
