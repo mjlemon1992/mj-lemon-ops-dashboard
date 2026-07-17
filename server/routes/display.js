@@ -227,12 +227,13 @@ module.exports = (pool) => {
       let clock = [];
       try {
         const cRes = await pool.query(
-          `SELECT p.name, e.clock_in, e.break_started_at
+          `SELECT p.name, p.color, p.photo, p.photo_mime, e.clock_in, e.break_started_at
              FROM bonus_person p
              LEFT JOIN time_clock_entry e ON e.person_id = p.id AND e.clock_out IS NULL
             WHERE p.location_id = $1 AND p.active = true`, [req.params.locationId]);
         clock = cRes.rows.map(r => ({
-          name: r.name,
+          name: r.name, color: r.color || null,
+          photo: r.photo ? `data:${r.photo_mime || 'image/jpeg'};base64,${r.photo.toString('base64')}` : null,
           status: r.clock_in ? (r.break_started_at ? 'break' : 'on') : 'off',
           clock_in: r.clock_in, break_started_at: r.break_started_at
         }));

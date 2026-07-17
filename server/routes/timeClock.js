@@ -48,13 +48,15 @@ module.exports = (pool) => {
     return true;
   };
 
-  // Roster + each person's current clock status.
+  const photoUri = (p) => (p.photo ? `data:${p.photo_mime || 'image/jpeg'};base64,${p.photo.toString('base64')}` : null);
+
+  // Roster + each person's current clock status (+ their colour and photo).
   router.get('/:locationId/roster', async (req, res) => {
     try {
       await ensure();
       if (!(await checkLocPin(req, res))) return;
       const { rows: people } = await pool.query(
-        'SELECT id, name, role, (clock_pin IS NOT NULL) AS has_pin FROM bonus_person WHERE location_id=$1 AND active=true ORDER BY role, name',
+        'SELECT id, name, role, color, photo, photo_mime, (clock_pin IS NOT NULL) AS has_pin FROM bonus_person WHERE location_id=$1 AND active=true ORDER BY role, name',
         [req.params.locationId]);
       const { rows: open } = await pool.query(
         'SELECT person_id, clock_in, break_started_at FROM time_clock_entry WHERE location_id=$1 AND clock_out IS NULL',
@@ -63,10 +65,98 @@ module.exports = (pool) => {
       res.json({
         people: people.map((p) => ({
           id: p.id, name: p.name, role: p.role, has_pin: p.has_pin,
+          color: p.color || null, photo: photoUri(p),
           status: statusOf(byId[p.id]), since: byId[p.id] ? (byId[p.id].break_started_at || byId[p.id].clock_in) : null,
           clock_in: byId[p.id] ? byId[p.id].clock_in : null,   // original in-time, always
         })),
       });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ── Tech self-service (kiosk, person-PIN-authed) ──────────────────────
+  const PALETTE = ['#0a84ff', '#34c759', '#ff9f0a', '#ff375f', '#bf5af2', '#5ac8fa', '#ffd60a', '#ff6b35', '#64d2ff', '#30d158'];
+  const personAuth = async (req, res) => {
+    const { person_id, pin } = req.body || {};
+    if (!person_id) { fail(res, 'person_id required', 400); return null; }
+    const { rows } = await pool.query('SELECT id, name, clock_pin FROM bonus_person WHERE id=$1 AND location_id=$2 AND active=true', [person_id, req.params.locationId]);
+    if (!rows.length) { fail(res, 'Person not found', 404); return null; }
+    if (!rows[0].clock_pin) { fail(res, 'No clock PIN set — ask the owner to set one.', 400); return null; }
+    const rk = rlKey(req, req.params.locationId) + '|' + person_id;
+    if (isLocked(rk)) { fail(res, 'Too many incorrect PINs. Try again later.', 429); return null; }
+    if (!pinEqual(pin, rows[0].clock_pin)) { recordFail(rk); fail(res, 'Incorrect PIN', 401); return null; }
+    fails.delete(rk);
+    return rows[0];
+  };
+
+  // Set my colour and/or photo (photo arrives base64, client-resized small).
+  router.post('/:locationId/profile', async (req, res) => {
+    try {
+      await ensure();
+      if (!(await checkLocPin(req, res))) return;
+      const person = await personAuth(req, res);
+      if (!person) return;
+      const { color, photo_base64, photo_mime, clear_photo } = req.body || {};
+      if (color !== undefined && color !== null && !PALETTE.includes(color)) return fail(res, 'Pick a colour from the palette', 400);
+      let photoBuf, mime;
+      if (photo_base64) {
+        photoBuf = Buffer.from(String(photo_base64), 'base64');
+        if (photoBuf.length > 600 * 1024) return fail(res, 'Photo too large — try again', 400);
+        mime = /^image\/(jpeg|png|webp)$/.test(photo_mime || '') ? photo_mime : 'image/jpeg';
+      }
+      await pool.query(
+        `UPDATE bonus_person SET color = CASE WHEN $2 THEN $3 ELSE color END,
+                photo = CASE WHEN $4 THEN $5 WHEN $6 THEN NULL ELSE photo END,
+                photo_mime = CASE WHEN $4 THEN $7 WHEN $6 THEN NULL ELSE photo_mime END
+          WHERE id=$1`,
+        [person.id, color !== undefined, color, !!photoBuf, photoBuf || null, !!clear_photo, mime || null]);
+      res.json({ ok: true, name: person.name });
+    } catch (e) { fail(res, e); }
+  });
+
+  // My timesheet for the CURRENT pay period (+ totals).
+  router.post('/:locationId/timesheet', async (req, res) => {
+    try {
+      await ensure();
+      if (!(await checkLocPin(req, res))) return;
+      const person = await personAuth(req, res);
+      if (!person) return;
+      const { rows: lr } = await pool.query('SELECT pay_period_anchor::text AS anchor FROM locations WHERE id=$1', [req.params.locationId]);
+      const anchor = (lr[0] && lr[0].anchor) || '2026-01-04';
+      const DAY = 86400e3;
+      const a = new Date(anchor + 'T12:00:00Z').getTime();
+      const today = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' }) + 'T12:00:00Z').getTime();
+      const idx = Math.max(0, Math.floor((today - a) / (14 * DAY)));
+      const iso = (t) => new Date(t).toISOString().slice(0, 10);
+      const from = iso(a + idx * 14 * DAY), to = iso(a + idx * 14 * DAY + 13 * DAY);
+      const { rows: entries } = await pool.query(
+        `SELECT id, clock_in, clock_out, break_seconds,
+                CASE WHEN clock_out IS NULL THEN NULL ELSE ${paidExpr} END AS paid_hours
+           FROM time_clock_entry e
+          WHERE location_id=$1 AND person_id=$2
+            AND (clock_in AT TIME ZONE 'America/Edmonton')::date BETWEEN $3::date AND $4::date
+          ORDER BY clock_in DESC`, [req.params.locationId, person.id, from, to]);
+      const total = Math.round(entries.reduce((s, e) => s + (e.paid_hours != null ? Number(e.paid_hours) : 0), 0) * 100) / 100;
+      res.json({ from, to, entries, total_paid: total, name: person.name });
+    } catch (e) { fail(res, e); }
+  });
+
+  // "This punch is wrong / a punch is missing" — goes to the admin queue.
+  router.post('/:locationId/edit-request', async (req, res) => {
+    try {
+      await ensure();
+      if (!(await checkLocPin(req, res))) return;
+      const person = await personAuth(req, res);
+      if (!person) return;
+      const { entry_id, note } = req.body || {};
+      if (!note || !String(note).trim()) return fail(res, 'Say what needs changing', 400);
+      const { rows: dup } = await pool.query(
+        "SELECT 1 FROM time_edit_request WHERE person_id=$1 AND status='pending' AND COALESCE(entry_id::text,'') = COALESCE($2,'') LIMIT 1",
+        [person.id, entry_id || null]);
+      if (dup.length) return fail(res, 'Already requested — the owner will review it', 409);
+      await pool.query(
+        'INSERT INTO time_edit_request (location_id, person_id, entry_id, note) VALUES ($1,$2,$3,$4)',
+        [req.params.locationId, person.id, entry_id || null, String(note).slice(0, 400)]);
+      res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
 
@@ -426,14 +516,14 @@ module.exports = (pool) => {
     try {
       await ensure();
       const { rows } = await pool.query(
-        `SELECT p.id, p.name, p.role, e.clock_in, e.break_started_at, e.break_seconds
+        `SELECT p.id, p.name, p.role, p.color, p.photo, p.photo_mime, e.clock_in, e.break_started_at, e.break_seconds
            FROM bonus_person p
            LEFT JOIN time_clock_entry e ON e.person_id = p.id AND e.clock_out IS NULL
           WHERE p.location_id=$1 AND p.active=true
           ORDER BY p.role, p.name`, [req.params.locationId]);
       res.json({
         people: rows.map((r) => ({
-          id: r.id, name: r.name, role: r.role,
+          id: r.id, name: r.name, role: r.role, color: r.color || null, photo: photoUri(r),
           status: r.clock_in ? (r.break_started_at ? 'break' : 'on') : 'off',
           clock_in: r.clock_in, break_started_at: r.break_started_at,
         })),
@@ -480,6 +570,53 @@ module.exports = (pool) => {
         } catch (e) { failed.push(`${h.name}: ${e.message}`); }
       }
       res.json({ ok: true, pushed, already: doneSet.size, failed });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Timesheet alteration requests from the kiosk — pending queue + resolve.
+  router.get('/:locationId/edit-requests', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { rows } = await pool.query(
+        `SELECT r.*, p.name AS person_name, e.clock_in, e.clock_out, e.break_seconds
+           FROM time_edit_request r
+           JOIN bonus_person p ON p.id = r.person_id
+           LEFT JOIN time_clock_entry e ON e.id = r.entry_id
+          WHERE r.location_id=$1 AND r.status='pending'
+          ORDER BY r.requested_at`, [req.params.locationId]);
+      res.json({ requests: rows });
+    } catch (e) { fail(res, e); }
+  });
+  router.put('/edit-requests/:id', ...authed, async (req, res) => {
+    try {
+      await ensure();
+      const action = (req.body || {}).action;
+      if (!['resolved', 'dismissed'].includes(action)) return fail(res, 'action must be resolved|dismissed', 400);
+      const { rows: rr } = await pool.query('SELECT location_id FROM time_edit_request WHERE id=$1', [req.params.id]);
+      if (!rr.length) return fail(res, 'Request not found', 404);
+      if (!canAccessLocation(req.user, rr[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      await pool.query('UPDATE time_edit_request SET status=$2, resolved_by=$3, resolved_at=now() WHERE id=$1', [req.params.id, action, who(req)]);
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Owner/manager photo fallback — upload a picture for a tech from the admin
+  // page when the kiosk camera isn't an option. Same size/format rules.
+  router.put('/:locationId/person/:pid/photo', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { photo_base64, photo_mime, clear } = req.body || {};
+      if (clear) {
+        await pool.query('UPDATE bonus_person SET photo=NULL, photo_mime=NULL WHERE id=$1 AND location_id=$2', [req.params.pid, req.params.locationId]);
+        return res.json({ ok: true, cleared: true });
+      }
+      if (!photo_base64) return fail(res, 'photo_base64 required', 400);
+      const buf = Buffer.from(String(photo_base64), 'base64');
+      if (buf.length > 600 * 1024) return fail(res, 'Photo too large', 400);
+      const mime = /^image\/(jpeg|png|webp)$/.test(photo_mime || '') ? photo_mime : 'image/jpeg';
+      const { rows } = await pool.query('UPDATE bonus_person SET photo=$3, photo_mime=$4 WHERE id=$1 AND location_id=$2 RETURNING name', [req.params.pid, req.params.locationId, buf, mime]);
+      if (!rows.length) return fail(res, 'Person not found', 404);
+      res.json({ ok: true, name: rows[0].name });
     } catch (e) { fail(res, e); }
   });
 

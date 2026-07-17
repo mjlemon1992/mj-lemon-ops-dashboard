@@ -8,9 +8,36 @@ import { useParams } from 'react-router-dom';
 
 const REFRESH_MS = 20 * 1000;
 const fmtTime = (t) => t ? new Date(t).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : '';
+const fmtDay = (t) => t ? new Date(t).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
 // Tapping anywhere in a date field pops the native calendar (tablet-friendly);
 // browsers without showPicker() just fall back to the field's own behaviour.
 const openPicker = (e) => { try { e.target.showPicker(); } catch { /* unsupported */ } };
+// Must match the server's PALETTE list exactly.
+const PALETTE = ['#0a84ff', '#34c759', '#ff9f0a', '#ff375f', '#bf5af2', '#5ac8fa', '#ffd60a', '#ff6b35', '#64d2ff', '#30d158'];
+// Square-crop + shrink a camera shot to 256px JPEG before upload.
+const resizePhoto = (file) => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => {
+    const s = Math.min(img.width, img.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 256;
+    canvas.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 256, 256);
+    URL.revokeObjectURL(img.src);
+    resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+  };
+  img.onerror = reject;
+  img.src = URL.createObjectURL(file);
+});
+// Photo if they have one, otherwise initials in their colour.
+function Avatar({ p, size = 44 }) {
+  const st = { width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 };
+  if (p.photo) return <img src={p.photo} alt="" style={{ ...st, border: `2px solid ${p.color || 'var(--border)'}` }} />;
+  return (
+    <div style={{ ...st, background: p.color || 'var(--bg3)', color: p.color ? '#fff' : 'var(--text3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: size * 0.4 }}>
+      {String(p.name || '?').trim().slice(0, 1).toUpperCase()}
+    </div>
+  );
+}
 const STATUS = {
   off:   { label: 'Off',       color: 'var(--text3)',   bg: 'var(--bg3)' },
   on:    { label: 'On the clock', color: 'var(--success)', bg: 'rgba(52,199,89,0.14)' },
@@ -29,10 +56,11 @@ export default function ClockKiosk() {
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState('');
-  const [view, setView] = useState('roster');       // roster | timeoff | request
+  const [view, setView] = useState('roster');       // roster | timeoff | request | timesheet | profile
   const [board, setBoard] = useState([]);           // time-off requests for the calendar
   const [holidays, setHolidays] = useState([]);     // province stat holidays in the window
   const [reqForm, setReqForm] = useState({ person: null, start: '', end: '', type: 'vacation', pin: '' });
+  const [sheet, setSheet] = useState(null);         // my-timesheet payload (keeps person+pin for requests)
   const timer = useRef(null);
 
   const loadRoster = useCallback(async (lp) => {
@@ -61,6 +89,69 @@ export default function ClockKiosk() {
     } catch { /* board is best-effort */ }
   }, [locationId, locPin]);
   useEffect(() => { if (entered && view === 'timeoff') loadBoard(); }, [entered, view, loadBoard]);
+
+  // ── Tech self-service (uses the PIN already typed on the person screen) ──
+  const openTimesheet = async () => {
+    if (!active || pin.length < 4) return;
+    setBusy(true); setError('');
+    try {
+      const res = await fetch(`/api/clock/${locationId}/timesheet`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loc_pin: locPin, person_id: active.id, pin }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
+      setSheet({ ...body, person: active, pin });
+      setView('timesheet');
+    } catch { setError('Network error'); }
+    setBusy(false);
+  };
+  const requestEdit = async (entryId) => {
+    const note = window.prompt(entryId ? 'What needs changing on this punch?' : 'Describe the missing punch (day and times):', '');
+    if (!note || !note.trim()) return;
+    setBusy(true); setError('');
+    try {
+      const res = await fetch(`/api/clock/${locationId}/edit-request`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loc_pin: locPin, person_id: sheet.person.id, pin: sheet.pin, entry_id: entryId || null, note }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
+      setFlash('Change requested — the owner will review it');
+      setTimeout(() => setFlash(''), 3000);
+    } catch { setError('Network error'); }
+    setBusy(false);
+  };
+  const saveProfile = async (patch) => {
+    setBusy(true); setError('');
+    try {
+      const res = await fetch(`/api/clock/${locationId}/profile`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loc_pin: locPin, person_id: sheet.person.id, pin: sheet.pin, ...patch }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
+      await loadRoster(locPin);
+      setFlash('Saved ✓'); setTimeout(() => setFlash(''), 2000);
+    } catch { setError('Network error'); }
+    setBusy(false);
+  };
+  const openProfile = async () => {
+    if (!active || pin.length < 4) return;
+    // Verify the PIN by loading the timesheet (cheap), then show profile.
+    setBusy(true); setError('');
+    try {
+      const res = await fetch(`/api/clock/${locationId}/timesheet`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loc_pin: locPin, person_id: active.id, pin }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
+      setSheet({ ...body, person: active, pin });
+      setView('profile');
+    } catch { setError('Network error'); }
+    setBusy(false);
+  };
 
   const submitTimeOff = async () => {
     const f = reqForm;
@@ -124,7 +215,10 @@ export default function ClockKiosk() {
     const s = active.status;
     return (
       <div style={wrap}>
-        <div style={{ fontSize: '24px', fontWeight: 700 }}>{active.name}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <Avatar p={people.find((p) => p.id === active.id) || active} size={52} />
+          <div style={{ fontSize: '24px', fontWeight: 700, color: active.color || 'var(--text1)' }}>{active.name}</div>
+        </div>
         <div style={{ ...pill, background: STATUS[s].bg, color: STATUS[s].color, marginTop: '8px' }}>
           {s === 'break'
             ? `On break since ${fmtTime(active.since)} · clocked in ${fmtTime(active.clock_in)}`
@@ -152,6 +246,76 @@ export default function ClockKiosk() {
             <button className="primary" disabled={busy || pin.length < 4} onClick={() => punch('out')} style={bigBtn}>Clock out</button>
           </>}
         </div>
+        <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
+          <button disabled={busy || pin.length < 4} onClick={openTimesheet} style={{ fontSize: '14px', padding: '9px 16px' }}>📋 My timesheet</button>
+          <button disabled={busy || pin.length < 4} onClick={openProfile} style={{ fontSize: '14px', padding: '9px 16px' }}>🎨 My profile</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── My timesheet (this pay period) + change requests ──
+  if (view === 'timesheet' && sheet) {
+    return (
+      <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '26px' }}>
+        <div style={{ fontSize: '22px', fontWeight: 700 }}>📋 {sheet.person.name} — my timesheet</div>
+        <div style={{ color: 'var(--text3)', margin: '4px 0 14px' }}>
+          {fmtDay(sheet.from + 'T12:00:00')} → {fmtDay(sheet.to + 'T12:00:00')} (this pay period) · <b style={{ color: 'var(--text1)' }}>{sheet.total_paid} h paid</b>
+        </div>
+        {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', marginBottom: '10px' }}>✓ {flash}</div>}
+        <div style={{ width: '100%', maxWidth: '620px' }}>
+          {(sheet.entries || []).length === 0 && <div style={{ color: 'var(--text3)', textAlign: 'center', padding: '20px' }}>No punches this period yet.</div>}
+          {(sheet.entries || []).map((e) => (
+            <div key={e.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '10px 14px', background: 'var(--bg2)', borderRadius: '10px', marginBottom: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 600, minWidth: '110px' }}>{fmtDay(e.clock_in)}</span>
+              <span style={{ color: 'var(--text2)', fontSize: '14px' }}>
+                {fmtTime(e.clock_in)} → {e.clock_out ? fmtTime(e.clock_out) : 'on shift'}
+                {e.break_seconds > 0 ? ` · break ${Math.round(e.break_seconds / 60)} min` : ''}
+              </span>
+              <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{e.paid_hours != null ? `${e.paid_hours} h` : '—'}</span>
+              <button disabled={busy} onClick={() => requestEdit(e.id)} style={{ fontSize: '11px', padding: '4px 10px' }}>✋ Request change</button>
+            </div>
+          ))}
+          <button disabled={busy} onClick={() => requestEdit(null)} style={{ fontSize: '13px', padding: '8px 14px', marginTop: '6px' }}>＋ Report a missing punch</button>
+        </div>
+        {error && <div style={{ color: 'var(--danger)', marginTop: '12px' }}>{error}</div>}
+        <button onClick={() => { setView('roster'); setSheet(null); setActive(null); setPin(''); setError(''); }} style={{ marginTop: '18px', fontSize: '15px', padding: '10px 18px' }}>← Done</button>
+      </div>
+    );
+  }
+
+  // ── My profile: name colour + photo ──
+  if (view === 'profile' && sheet) {
+    const me = people.find((p) => p.id === sheet.person.id) || sheet.person;
+    return (
+      <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '26px' }}>
+        <div style={{ fontSize: '22px', fontWeight: 700, marginBottom: '10px' }}>🎨 {sheet.person.name} — my profile</div>
+        {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', marginBottom: '10px' }}>✓ {flash}</div>}
+        <Avatar p={me} size={110} />
+        <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+          <label style={{ fontSize: '13px', padding: '8px 14px', background: 'var(--bg3)', borderRadius: '10px', cursor: 'pointer' }}>
+            📷 Take / choose photo
+            <input type="file" accept="image/*" capture="user" style={{ display: 'none' }}
+              onChange={async (ev) => {
+                const f = ev.target.files && ev.target.files[0];
+                ev.target.value = '';
+                if (!f) return;
+                try { const b64 = await resizePhoto(f); saveProfile({ photo_base64: b64, photo_mime: 'image/jpeg' }); }
+                catch { setError('Could not read that photo'); }
+              }} />
+          </label>
+          {me.photo && <button disabled={busy} onClick={() => saveProfile({ clear_photo: true })} style={{ fontSize: '13px', padding: '8px 14px' }}>Remove photo</button>}
+        </div>
+        <div style={{ fontSize: '14px', color: 'var(--text3)', margin: '18px 0 8px' }}>My colour — shows on the clock and the performance boards</div>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', maxWidth: '420px' }}>
+          {PALETTE.map((c) => (
+            <button key={c} disabled={busy} onClick={() => saveProfile({ color: c })}
+              style={{ width: '46px', height: '46px', borderRadius: '50%', background: c, cursor: 'pointer',
+                border: me.color === c ? '4px solid var(--text1)' : '2px solid transparent' }} aria-label={c} />
+          ))}
+        </div>
+        {error && <div style={{ color: 'var(--danger)', marginTop: '12px' }}>{error}</div>}
+        <button onClick={() => { setView('roster'); setSheet(null); setActive(null); setPin(''); setError(''); }} style={{ marginTop: '20px', fontSize: '15px', padding: '10px 18px' }}>← Done</button>
       </div>
     );
   }
@@ -243,7 +407,10 @@ export default function ClockKiosk() {
         {people.map((p) => (
           <button key={p.id} onClick={() => { if (!p.has_pin) { setError(`${p.name} has no PIN set yet`); return; } setActive(p); setPin(''); setError(''); }}
             style={{ ...card, opacity: p.has_pin ? 1 : 0.5, borderColor: STATUS[p.status].color }}>
-            <div style={{ fontSize: '18px', fontWeight: 700 }}>{p.name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'center' }}>
+              <Avatar p={p} size={40} />
+              <div style={{ fontSize: '18px', fontWeight: 700, color: p.color || 'var(--text1)' }}>{p.name}</div>
+            </div>
             <div style={{ ...pill, background: STATUS[p.status].bg, color: STATUS[p.status].color, marginTop: '8px' }}>
               {p.status === 'break'
                 ? `On break · in at ${fmtTime(p.clock_in)}`
