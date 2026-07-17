@@ -70,6 +70,9 @@ export default function Notices() {
   const [designing, setDesigning] = useState(false);
   const [genBlob, setGenBlob] = useState(null);       // AI-designed poster, ready to upload
   const [genPreview, setGenPreview] = useState(null); // object URL for the preview <img>
+  const [genSvg, setGenSvg] = useState(null);         // raw design SVG (sent with 👍/👎 feedback)
+  const [rated, setRated] = useState(null);           // 'up' after a thumbs-up on the current design
+  const [lightbox, setLightbox] = useState(null);     // enlarged preview overlay
   const [form, setForm] = useState({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '' });
 
   const [ideas, setIdeas] = useState([]);
@@ -77,7 +80,17 @@ export default function Notices() {
 
   const clearGenerated = () => {
     if (genPreview) URL.revokeObjectURL(genPreview);
-    setGenBlob(null); setGenPreview(null);
+    setGenBlob(null); setGenPreview(null); setGenSvg(null); setRated(null);
+  };
+
+  // 👍 records the design as liked (steers future generations toward it).
+  // 👎 records it as disliked and immediately tries a fresh design.
+  const rate = async (rating) => {
+    if (!genSvg) return;
+    try { await api('/notices/poster-feedback', { method: 'POST', body: JSON.stringify({ rating, kind: form.kind, title: form.title, svg: genSvg }) }); }
+    catch (e2) { /* taste capture is best-effort */ }
+    if (rating === 'up') setRated('up');
+    else generatePoster();
   };
 
   // Board-flavoured idea suggestions: safety reminder, metrics-aware team
@@ -108,6 +121,7 @@ export default function Notices() {
       const blob = await renderNoticePoster(d.svg);
       if (genPreview) URL.revokeObjectURL(genPreview);
       setGenBlob(blob); setGenPreview(URL.createObjectURL(blob));
+      setGenSvg(d.svg); setRated(null);
       setFile(null);   // generated poster replaces any picked file
     } catch (e2) { setError(e2.message || 'Poster generation failed — try again'); }
     setDesigning(false);
@@ -250,15 +264,26 @@ export default function Notices() {
           )}
           {genPreview && (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginTop: '12px' }}>
-              <img src={genPreview} alt="Generated poster preview"
-                style={{ width: '220px', height: '220px', objectFit: 'cover', borderRadius: '10px', border: '0.5px solid var(--border)' }} />
+              <img src={genPreview} alt="Generated poster preview" title="Click to enlarge"
+                onClick={() => setLightbox(genPreview)}
+                style={{ width: '220px', height: '220px', objectFit: 'cover', borderRadius: '10px', border: '0.5px solid var(--border)', cursor: 'zoom-in' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button type="button" onClick={() => rate('up')} disabled={designing || rated === 'up'}
+                    style={{ padding: '7px 14px', fontSize: '13px' }}>
+                    {rated === 'up' ? '👍 Saved' : '👍 Like'}
+                  </button>
+                  <button type="button" onClick={() => rate('down')} disabled={designing}
+                    style={{ padding: '7px 14px', fontSize: '13px' }}>
+                    👎 Not this
+                  </button>
+                </div>
                 <button type="button" onClick={generatePoster} disabled={designing} style={{ padding: '7px 14px', fontSize: '13px' }}>
                   {designing ? 'Designing…' : '↻ Regenerate'}
                 </button>
                 <button type="button" onClick={clearGenerated} style={{ padding: '7px 14px', fontSize: '13px', color: 'var(--danger)' }}>✕ Discard</button>
                 <span style={{ fontSize: '12px', color: 'var(--text3)', maxWidth: '260px' }}>
-                  Happy with it? Hit “Post to board” — it publishes full-screen on the shop display.
+                  👍/👎 teach the designer your taste — 👎 saves the dislike and tries a fresh design. Click the image to enlarge. Happy with it? Hit “Post to board”.
                 </span>
               </div>
             </div>
@@ -314,6 +339,13 @@ export default function Notices() {
           );
         })}
       </div>
+
+      {lightbox && (
+        <div onClick={() => setLightbox(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', cursor: 'zoom-out' }}>
+          <img src={lightbox} alt="" style={{ maxWidth: '92vw', maxHeight: '92vh', borderRadius: 8, boxShadow: '0 10px 50px rgba(0,0,0,0.6)' }} />
+        </div>
+      )}
     </div>
   );
 }
