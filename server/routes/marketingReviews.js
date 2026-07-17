@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth');
+const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
 
 // Marketing: live Google review scorecard. Read-only — pulls rating, total count and a few
 // recent reviews from the Google Places Details API, cached 12h per location. Replies are NOT
@@ -60,13 +60,20 @@ module.exports = (pool) => {
   };
 
   const fail = (res, e) => res.status(e.status || 500).json({ error: String(e.message || e) });
-  const gate = [authenticateToken, requireOwnerOrPartner];
+  // Shop operators (managers) may use this for THEIR location; asserted below.
+  const gate = [authenticateToken, requireRole('owner', 'partner', 'manager')];
+  const assertLoc = (req, res) => {
+    if (canAccessLocation(req.user, req.params.locationId)) return true;
+    res.status(403).json({ error: 'Access denied for this location' });
+    return false;
+  };
 
   router.get('/status', ...gate, (req, res) => res.json({ configured: !!GOOGLE_KEY }));
 
   // Cached 12h; ?force=1 refetches. 503 when the key or this location's place_id is missing,
   // which the client treats as "not configured" and hides the tile.
   router.get('/:locationId', ...gate, async (req, res) => {
+    if (!assertLoc(req, res)) return;
     try {
       await ensure();
       const id = req.params.locationId, force = req.query.force === '1';

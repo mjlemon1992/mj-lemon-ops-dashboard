@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth');
+const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
 
 // Call-tracking ingestion (marketing module, piece 1).
 // Monthly Marchex/Telmetrics call-measurement PDF -> Claude extraction -> DB ->
@@ -218,13 +218,20 @@ module.exports = (pool) => {
     } catch (e) { /* best effort */ }
   };
 
-  const gate = [authenticateToken, requireOwnerOrPartner];
+  // Shop operators (managers) may use this for THEIR location; asserted below.
+  const gate = [authenticateToken, requireRole('owner', 'partner', 'manager')];
+  const assertLoc = (req, res) => {
+    if (canAccessLocation(req.user, req.params.locationId)) return true;
+    res.status(403).json({ error: 'Access denied for this location' });
+    return false;
+  };
 
   router.get('/status', ...gate, (req, res) => {
     res.json({ configured: !!ANTHROPIC_KEY, slack: !!SLACK_WEBHOOK, model: MODEL, qualifiedMinSeconds: QUALIFIED_MIN_SECONDS });
   });
 
   router.get('/:locationId/periods', ...gate, async (req, res) => {
+    if (!assertLoc(req, res)) return;
     try {
       await ensureTables();
       const { rows } = await pool.query(
@@ -238,6 +245,7 @@ module.exports = (pool) => {
   });
 
   router.get('/:locationId/summary', ...gate, async (req, res) => {
+    if (!assertLoc(req, res)) return;
     try {
       await ensureTables();
       const id = req.params.locationId;
@@ -262,6 +270,7 @@ module.exports = (pool) => {
     express.raw({ type: ['application/pdf', 'application/octet-stream'], limit: '25mb' }),
     async (req, res) => {
       try {
+        if (!assertLoc(req, res)) return;
         await ensureTables();
         if (!Buffer.isBuffer(req.body) || !req.body.length)
           return res.status(400).json({ error: 'No PDF body. POST the file with Content-Type: application/pdf.' });
