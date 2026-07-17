@@ -102,6 +102,9 @@ export default function ClockKiosk() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
       setSheet({ ...body, person: active, pin });
+      // The person/PIN screen renders ahead of every other view — it must be
+      // dismissed or the timesheet never shows.
+      setActive(null); setPin('');
       setView('timesheet');
     } catch { setError('Network error'); }
     setBusy(false);
@@ -148,6 +151,7 @@ export default function ClockKiosk() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
       setSheet({ ...body, person: active, pin });
+      setActive(null); setPin('');   // dismiss the person screen (renders first)
       setView('profile');
     } catch { setError('Network error'); }
     setBusy(false);
