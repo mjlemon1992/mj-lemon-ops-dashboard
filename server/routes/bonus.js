@@ -314,9 +314,13 @@ module.exports = (pool) => {
   router.put('/people/:personId', ...write, async (req, res) => {
     try {
       await ensure();
-      const { name, active, efficiency_floor, role, in_bonus } = req.body || {};
+      const { name, active, efficiency_floor, role, in_bonus, vacation_days_per_year } = req.body || {};
       if (role && !['tech', 'advisor'].includes(role)) return fail(res, 'Invalid role', 400);
       if (efficiency_floor != null && !(efficiency_floor > 0 && efficiency_floor <= 1.5)) return fail(res, 'efficiency_floor must be a fraction like 0.9', 400);
+      if (vacation_days_per_year != null && !(vacation_days_per_year >= 0 && vacation_days_per_year <= 365)) return fail(res, 'vacation_days_per_year must be 0–365', 400);
+      // Holiday allowance: only touched when the key is present; null clears.
+      const hasVac = Object.prototype.hasOwnProperty.call(req.body || {}, 'vacation_days_per_year');
+      if (hasVac) await pool.query('UPDATE bonus_person SET vacation_days_per_year=$2 WHERE id=$1', [req.params.personId, vacation_days_per_year == null ? null : Math.round(vacation_days_per_year)]);
       // Only touch the floor when the key is actually in the body — an
       // active/name-only update must not wipe a custom floor. Sending
       // efficiency_floor: null still explicitly clears it to the default.

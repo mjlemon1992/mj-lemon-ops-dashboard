@@ -309,9 +309,18 @@ export default function ClockKiosk() {
     return (
       <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '26px' }}>
         <div style={{ fontSize: '22px', fontWeight: 700 }}>📋 {sheet.person.name} — my timesheet</div>
-        <div style={{ color: 'var(--text3)', margin: '4px 0 14px' }}>
+        <div style={{ color: 'var(--text3)', margin: '4px 0 6px' }}>
           {fmtDay(sheet.from + 'T12:00:00')} → {fmtDay(sheet.to + 'T12:00:00')} (this pay period) · <b style={{ color: 'var(--text1)' }}>{sheet.total_paid} h paid</b>
         </div>
+        {sheet.holidays && (
+          <div style={{ ...pill, marginBottom: '12px',
+            background: sheet.holidays.allowance != null && sheet.holidays.used >= sheet.holidays.allowance ? 'rgba(255,69,58,0.14)' : 'rgba(10,132,255,0.12)',
+            color: sheet.holidays.allowance != null && sheet.holidays.used >= sheet.holidays.allowance ? 'var(--danger)' : 'var(--accent)' }}>
+            🏖 Holidays this year: {sheet.holidays.allowance != null
+              ? `${sheet.holidays.used} used of ${sheet.holidays.allowance} — ${sheet.holidays.left} left`
+              : `${sheet.holidays.used} day${sheet.holidays.used === 1 ? '' : 's'} used`}
+          </div>
+        )}
         {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', marginBottom: '10px' }}>✓ {flash}</div>}
         <div style={{ width: '100%', maxWidth: '640px' }}>
           {(sheet.entries || []).length === 0 && <div style={{ color: 'var(--text3)', textAlign: 'center', padding: '20px' }}>No punches this period yet.</div>}
