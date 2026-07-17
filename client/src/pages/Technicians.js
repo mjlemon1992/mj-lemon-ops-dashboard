@@ -17,6 +17,33 @@ function TechniciansView({ locId }) {
   const [recomputeMsg, setRecomputeMsg] = useState(null);
   const [period, setPeriod] = useState('mtd');
   const [hidden, setHidden] = useState(new Set());
+  const [clock, setClock] = useState([]);          // live time-clock status per crew member
+  const [tick, setTick] = useState(0);             // re-render so break durations count up
+
+  // Live clock status (from the shop-floor kiosk) — polled so the page mirrors
+  // the bay in near-real-time. Best-effort: absence of clock data hides chips.
+  useEffect(() => {
+    if (!locId) return undefined;
+    let alive = true;
+    const pull = () => api(`/clock/${locId}/status`).then(d => { if (alive) setClock(d.people || []); }).catch(() => {});
+    pull();
+    const t = setInterval(() => { pull(); setTick(x => x + 1); }, 30 * 1000);
+    return () => { alive = false; clearInterval(t); };
+  }, [api, locId]);
+
+  // Match kiosk crew to Shopmonkey tech names by folded first name (same rule
+  // the bonus pull uses).
+  const normFirst = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/\s+/)[0];
+  const clockFor = (techName) => clock.find(c => normFirst(c.name) && normFirst(techName).startsWith(normFirst(c.name)));
+  const fmtT = (t) => t ? new Date(t).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : '';
+  const minsSince = (t) => Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000));
+  const ClockChip = ({ c }) => {
+    if (!c) return null;
+    const style = { fontSize: '10px', fontWeight: 600, padding: '2px 8px', borderRadius: '10px', marginLeft: '8px', whiteSpace: 'nowrap' };
+    if (c.status === 'on') return <span style={{ ...style, background: 'rgba(52,199,89,0.14)', color: 'var(--success)' }}>🟢 Clocked in {fmtT(c.clock_in)}</span>;
+    if (c.status === 'break') return <span style={{ ...style, background: 'rgba(255,184,0,0.16)', color: 'var(--warning)' }}>🟡 On break {minsSince(c.break_started_at)} min</span>;
+    return <span style={{ ...style, background: 'var(--bg3)', color: 'var(--text3)' }}>⚫ Clocked out</span>;
+  };
 
   useEffect(() => {
     if (!locId) return;
@@ -172,7 +199,7 @@ function TechniciansView({ locId }) {
                   <tr><td colSpan={cols} style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)' }}>No technicians returned from Shopmonkey.</td></tr>
                 ) : techs.map(t => (
                   <tr key={t.tech_id || t.tech_name} onClick={() => toggleHide(t, true)} title="Click to hide from board" style={{ borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
-                    <td style={{ padding: '8px 12px', color: 'var(--text)' }} className="strong">{t.tech_name}</td>
+                    <td style={{ padding: '8px 12px', color: 'var(--text)' }} className="strong">{t.tech_name}<ClockChip c={clockFor(t.tech_name)} /></td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.hours_sold != null ? 'var(--text)' : 'var(--text3)' }}>{t.hours_sold != null ? hrsNum(t.hours_sold) : '\u2014'}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.hours_billed != null ? 'var(--text)' : 'var(--text3)' }}>{t.hours_billed != null ? hrsNum(t.hours_billed) : '\u2014'}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.vehicle_count != null ? 'var(--text)' : 'var(--text3)' }}>{t.vehicle_count != null ? t.vehicle_count : '\u2014'}</td>

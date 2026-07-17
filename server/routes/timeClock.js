@@ -411,6 +411,69 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
+  // Live clock status for the dashboards (Technicians page polls this): who's
+  // clocked in / on break (and since when) right now.
+  router.get('/:locationId/status', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { rows } = await pool.query(
+        `SELECT p.id, p.name, p.role, e.clock_in, e.break_started_at, e.break_seconds
+           FROM bonus_person p
+           LEFT JOIN time_clock_entry e ON e.person_id = p.id AND e.clock_out IS NULL
+          WHERE p.location_id=$1 AND p.active=true
+          ORDER BY p.role, p.name`, [req.params.locationId]);
+      res.json({
+        people: rows.map((r) => ({
+          id: r.id, name: r.name, role: r.role,
+          status: r.clock_in ? (r.break_started_at ? 'break' : 'on') : 'off',
+          clock_in: r.clock_in, break_started_at: r.break_started_at,
+        })),
+      });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Mirror the province's remaining stat holidays (this year) onto the
+  // Shopmonkey calendar. Idempotent — already-pushed dates are skipped.
+  router.post('/:locationId/sync-holidays', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { rows: lr } = await pool.query('SELECT province, shopmonkey_location_id FROM locations WHERE id=$1', [req.params.locationId]);
+      const loc = lr[0] || {};
+      if (!loc.shopmonkey_location_id || !process.env.SHOPMONKEY_API_KEY) return fail(res, 'Shopmonkey not configured for this location', 400);
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
+      const hols = holidaysBetween(loc.province || 'ab', today, `${today.slice(0, 4)}-12-31`);
+      const { rows: done } = await pool.query('SELECT holiday_date::text AS d FROM holiday_sm_push WHERE location_id=$1', [req.params.locationId]);
+      const doneSet = new Set(done.map((r) => r.d));
+      const pushed = [], failed = [];
+      for (const h of hols) {
+        if (doneSet.has(h.date)) continue;
+        try {
+          const resp = await fetch('https://api.shopmonkey.cloud/v3/appointment', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${process.env.SHOPMONKEY_API_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              locationId: loc.shopmonkey_location_id,
+              name: `🎌 ${h.name}`,
+              note: `Statutory holiday (${(loc.province || 'AB').toUpperCase()}). Added by the ops dashboard.`,
+              allDay: true,
+              startDate: `${h.date}T15:00:00.000Z`,
+              endDate: `${h.date}T23:00:00.000Z`,
+              color: 'red',
+              sendConfirmation: false, sendReminder: false,
+            }),
+          });
+          const body = await resp.json().catch(() => ({}));
+          if (!resp.ok) { failed.push(`${h.name}: ${body.message || resp.status}`); continue; }
+          const id = (body.data && body.data.id) || body.id;
+          await pool.query('INSERT INTO holiday_sm_push (location_id, holiday_date, sm_appointment_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [req.params.locationId, h.date, id || null]);
+          pushed.push(h.name);
+          await new Promise((r) => setTimeout(r, 250));   // gentle on SM rate limits
+        } catch (e) { failed.push(`${h.name}: ${e.message}`); }
+      }
+      res.json({ ok: true, pushed, already: doneSet.size, failed });
+    } catch (e) { fail(res, e); }
+  });
+
   // Set / clear a person's kiosk PIN (4–6 digits; null clears).
   router.put('/:locationId/person/:pid/pin', ...authed, scoped, async (req, res) => {
     try {

@@ -267,9 +267,22 @@ export default function Display() {
         {techRows.map(t => {
           const eff = t.efficiency;
           const effColor = eff == null ? 'var(--text3)' : (eff >= effTarget ? 'var(--success)' : (eff >= effTarget - 10 ? 'var(--warning)' : 'var(--danger)'));
+          // Live kiosk status: mirror the time clock on the board (matched by
+          // folded first name, same rule the bonus pull uses).
+          const nf = s => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/\s+/)[0];
+          const c = (data.clock || []).find(x => nf(x.name) && nf(t.tech_name).startsWith(nf(x.name)));
+          const tmin = ts => Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 60000));
+          const tfmt = ts => new Date(ts).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+          const chip = !c ? null
+            : c.status === 'on' ? { txt: `🟢 In since ${tfmt(c.clock_in)}`, col: 'var(--success)' }
+            : c.status === 'break' ? { txt: `🟡 Break · ${tmin(c.break_started_at)} min`, col: 'var(--warning)' }
+            : { txt: '⚫ Clocked out', col: 'var(--text3)' };
           return (
             <div key={t.tech_id || t.tech_name} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1.2fr', padding: '16px 24px', borderBottom: '0.5px solid var(--border)', alignItems: 'center' }}>
-              <div style={{ fontSize: '22px', fontWeight: 600, color: 'var(--text)' }}>{t.tech_name}</div>
+              <div style={{ fontSize: '22px', fontWeight: 600, color: 'var(--text)' }}>
+                {t.tech_name}
+                {chip && <span style={{ fontSize: '13px', fontWeight: 600, color: chip.col, marginLeft: '12px', whiteSpace: 'nowrap' }}>{chip.txt}</span>}
+              </div>
               <div style={{ textAlign: 'right', fontSize: '22px', color: 'var(--text2)' }}>{hrs(t.hours_billed)}</div>
               <div style={{ textAlign: 'right', fontSize: '22px', color: 'var(--text2)' }}>{hrs(t.hours_sold)}</div>
               <div style={{ textAlign: 'right', fontSize: '24px', fontWeight: 700, color: effColor }}>{eff == null ? '—' : `${eff}%`}</div>

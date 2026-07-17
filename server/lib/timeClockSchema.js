@@ -51,6 +51,15 @@ function ensureTimeClockTables(pool) {
     await pool.query('ALTER TABLE time_off_request ALTER COLUMN person_id DROP NOT NULL');
     // Biweekly payroll: periods are 14 days from this anchor (a period START date).
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS pay_period_anchor DATE');
+    // Which stat holidays have already been mirrored to the Shopmonkey calendar
+    // (per location) — makes the push idempotent.
+    await pool.query(`CREATE TABLE IF NOT EXISTS holiday_sm_push (
+      location_id UUID NOT NULL,
+      holiday_date DATE NOT NULL,
+      sm_appointment_id TEXT,
+      pushed_at TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (location_id, holiday_date)
+    )`);
     // Which weekdays the shop is open ('mon,tue,...'). Drives how holiday days
     // are counted (days used) and the bonus schedule denominator.
     await pool.query("ALTER TABLE locations ADD COLUMN IF NOT EXISTS open_days VARCHAR(40) DEFAULT 'mon,tue,wed,thu,fri'");
