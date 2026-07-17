@@ -128,7 +128,9 @@ function BonusView({ locId }) {
         for (const m of d.matched) next[m.person_id] = { ...next[m.person_id], billed_hours: m.billed_hours };
         return next;
       });
-      const note = `Filled ${d.matched.length} tech${d.matched.length === 1 ? '' : 's'} from ${d.orders_scanned} orders` +
+      const src = d.source && d.source.kind === 'snapshot'
+        ? `the ${d.source.date} tech snapshot` : `${(d.source && d.source.orders_scanned) || '?'} orders`;
+      const note = `Filled ${d.matched.length} tech${d.matched.length === 1 ? '' : 's'} from ${src}` +
         (d.unmatched.length ? ` · unmatched: ${d.unmatched.map((u) => `${u.tech_name} (${u.billed_hours}h)`).join(', ')}` : '');
       setPullNote(note);
     } catch (e) { setErr(e.message); }
