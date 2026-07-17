@@ -85,7 +85,7 @@ export default function ClockKiosk() {
   const [view, setView] = useState('roster');       // roster | timeoff | request | timesheet | profile
   const [board, setBoard] = useState([]);           // time-off requests for the calendar
   const [holidays, setHolidays] = useState([]);     // province stat holidays in the window
-  const [reqForm, setReqForm] = useState({ person: null, start: '', end: '', type: 'vacation', pin: '' });
+  const [reqForm, setReqForm] = useState({ person: null, start: '', end: '', type: 'vacation', pin: '', paid: true });
   const [sheet, setSheet] = useState(null);         // my-timesheet payload (keeps person+pin for requests)
   const timer = useRef(null);
 
@@ -209,12 +209,12 @@ export default function ClockKiosk() {
     try {
       const res = await fetch(`/api/clock/${locationId}/timeoff`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loc_pin: locPin, person_id: f.person.id, pin: f.pin, start_date: f.start, end_date: f.end, type: f.type }),
+        body: JSON.stringify({ loc_pin: locPin, person_id: f.person.id, pin: f.pin, start_date: f.start, end_date: f.end, type: f.type, paid: f.type === 'unpaid' ? false : !!f.paid }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
       setFlash(`${f.person.name} — time off requested (${body.working_days} working day${body.working_days === 1 ? '' : 's'}), awaiting approval`);
-      setReqForm({ person: null, start: '', end: '', type: 'vacation', pin: '' });
+      setReqForm({ person: null, start: '', end: '', type: 'vacation', pin: '', paid: true });
       setView('timeoff'); loadBoard();
       setTimeout(() => setFlash(''), 4000);
     } catch { setError('Network error'); }
@@ -476,12 +476,18 @@ export default function ClockKiosk() {
                 <option value="other">Other</option>
               </select>
             </label>
+            {f.type !== 'unpaid' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!f.paid} onChange={(e) => setReqForm((s) => ({ ...s, paid: e.target.checked }))} />
+                Use as PAID time off (your daily hours are paid for these days)
+              </label>
+            )}
             <label style={lbl}>Your PIN<input type="password" inputMode="numeric" value={f.pin} onChange={(e) => setReqForm((s) => ({ ...s, pin: e.target.value.replace(/\D/g, '').slice(0, 6) }))} style={{ ...inp, letterSpacing: '6px', textAlign: 'center' }} /></label>
             {error && <div style={{ color: 'var(--danger)', textAlign: 'center' }}>{error}</div>}
             <button className="primary" disabled={busy} onClick={submitTimeOff} style={{ ...bigBtn, width: '100%' }}>Submit request</button>
           </div>
         )}
-        <button onClick={() => { setView('timeoff'); setReqForm({ person: null, start: '', end: '', type: 'vacation', pin: '' }); setError(''); }} style={{ marginTop: '18px', fontSize: '15px', padding: '10px 18px' }}>← Back</button>
+        <button onClick={() => { setView('timeoff'); setReqForm({ person: null, start: '', end: '', type: 'vacation', pin: '', paid: true }); setError(''); }} style={{ marginTop: '18px', fontSize: '15px', padding: '10px 18px' }}>← Back</button>
       </div>
     );
   }
