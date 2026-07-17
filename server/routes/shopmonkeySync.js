@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, canAccessLocation } = require('../middleware/auth');
 const { workingDaysElapsed } = require('../lib/workdays');
 
 function parseShopmonkeyDate(str) {
@@ -255,6 +255,7 @@ module.exports = (pool) => {
   // shop supplies, tires, subcontracts) so the dashboard total can be matched
   // line-by-line against the Shopmonkey Sales Summary, same window the metric uses.
   router.get('/:locationId/reconcile', authenticateToken, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     try {
@@ -296,6 +297,7 @@ module.exports = (pool) => {
   });
 
   router.post('/:locationId/refresh', syncAuth, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     try {
@@ -473,6 +475,7 @@ module.exports = (pool) => {
   // Worked hours / efficiency stay null until QBO Time connects. Costs one extra API
   // call per order, so it is heavier than the order-level path.
   router.post('/:locationId/refresh-tech', syncAuth, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
 
@@ -614,6 +617,7 @@ module.exports = (pool) => {
   });
 
   router.post('/:locationId/refresh-comebacks', authenticateToken, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
     try {
@@ -681,6 +685,7 @@ module.exports = (pool) => {
   });
 
   router.get('/:locationId/comebacks', authenticateToken, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     try {
       const latest = await pool.query('SELECT MAX(snapshot_date) AS d FROM comebacks WHERE location_id = $1', [req.params.locationId]);
       const d = latest.rows[0] && latest.rows[0].d ? latest.rows[0].d : null;
@@ -712,6 +717,7 @@ module.exports = (pool) => {
   });
 // // ---- Committed WIP routes (added) ----
       router.post('/:locationId/refresh-wip', syncAuth, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
         const apiKey = process.env.SHOPMONKEY_API_KEY;
         if (!apiKey) return res.status(500).json({ error: 'SHOPMONKEY_API_KEY not configured' });
         const { locationId } = req.params;
@@ -725,6 +731,7 @@ module.exports = (pool) => {
         }
       });
       router.get('/:locationId/wip', authenticateToken, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
         const { locationId } = req.params;
         try {
           const { rows } = await pool.query(`SELECT payload, created_at FROM committed_wip_cache WHERE location_id = $1`, [locationId]);
