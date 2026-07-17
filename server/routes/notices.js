@@ -29,6 +29,17 @@ module.exports = (pool) => {
     // Uploaded poster bytes (same Postgres-bytea pattern as marketing_post).
     await pool.query('ALTER TABLE shop_notices ADD COLUMN IF NOT EXISTS image_data BYTEA');
     await pool.query('ALTER TABLE shop_notices ADD COLUMN IF NOT EXISTS image_mime VARCHAR(60)');
+    // Owner taste feedback on AI-designed posters (👍/👎 + the rated SVG).
+    // Recent rows are fed back into the design prompt as aesthetic exemplars,
+    // so the designer converges on what the owner actually likes.
+    await pool.query(`CREATE TABLE IF NOT EXISTS notice_poster_feedback (
+      id SERIAL PRIMARY KEY,
+      rating VARCHAR(8) NOT NULL,      -- up | down
+      kind VARCHAR(16),
+      title VARCHAR(200),
+      svg TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
     _init = true;
   };
 
@@ -155,12 +166,24 @@ Rules:
       const mood = ['celebration', 'safety', 'notice', 'poster'].includes(kind) ? kind : 'notice';
       await ensureTable();
       const footer = await brandLineFor(location_id || null);
+      // Owner taste: recent 👍/👎 designs go in as aesthetic exemplars. SVGs are
+      // clipped to bound the prompt; the model emulates/avoids the LOOK, never
+      // the literal words of past posters.
+      let taste = '';
+      try {
+        const fb = await pool.query('SELECT rating, svg FROM notice_poster_feedback ORDER BY created_at DESC LIMIT 12');
+        const clip = (s) => String(s || '').slice(0, 3500);
+        const ups = fb.rows.filter(x => x.rating === 'up').slice(0, 3);
+        const downs = fb.rows.filter(x => x.rating === 'down').slice(0, 3);
+        if (ups.length) taste += `\n\nOWNER TASTE — the owner LIKED these previous designs. Emulate their aesthetic direction (composition energy, palette use, type treatment) — NOT their literal words:\n${ups.map((x, i) => `LIKED ${i + 1}:\n${clip(x.svg)}`).join('\n')}`;
+        if (downs.length) taste += `\n\nOWNER TASTE — the owner DISLIKED these designs. Avoid their aesthetic direction:\n${downs.map((x, i) => `DISLIKED ${i + 1}:\n${clip(x.svg)}`).join('\n')}`;
+      } catch (_) { /* taste is garnish, never a blocker */ }
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
         body: JSON.stringify({
           model: DESIGN_MODEL, max_tokens: 4096, system: designSystem,
-          messages: [{ role: 'user', content: `KIND: ${mood}\nTITLE: ${String(title).slice(0, 200)}\n${body ? `BODY: ${String(body).slice(0, 400)}` : 'BODY: (none)'}\nFOOTER: ${footer}` }],
+          messages: [{ role: 'user', content: `KIND: ${mood}\nTITLE: ${String(title).slice(0, 200)}\n${body ? `BODY: ${String(body).slice(0, 400)}` : 'BODY: (none)'}\nFOOTER: ${footer}${taste}` }],
         }),
       });
       const data = await r.json();
@@ -176,6 +199,22 @@ Rules:
                .replace(/\son\w+="[^"]*"/gi, '')
                .replace(/(xlink:href|href)="(?!#)[^"]*"/gi, '');
       res.json({ svg, kind: mood });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // 👍/👎 on a generated design. Stored with the SVG; recent rows steer the
+  // next generations (see the taste block in design-poster).
+  router.post('/poster-feedback', syncAuth, requireOwnerOrPartner, async (req, res) => {
+    try {
+      await ensureTable();
+      const { rating, kind, title, svg } = req.body || {};
+      if (!['up', 'down'].includes(rating)) return res.status(400).json({ error: 'rating must be "up" or "down"' });
+      if (!svg) return res.status(400).json({ error: 'svg required' });
+      await pool.query(
+        'INSERT INTO notice_poster_feedback (rating, kind, title, svg) VALUES ($1,$2,$3,$4)',
+        [rating, String(kind || '').slice(0, 16), String(title || '').slice(0, 200), String(svg).slice(0, 30000)]
+      );
+      res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
