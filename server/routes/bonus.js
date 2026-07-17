@@ -2,8 +2,8 @@ const express = require('express');
 const { authenticateToken, requireRole, requireOwner, canAccessLocation } = require('../middleware/auth');
 const { ensureBonusFuelTables } = require('../lib/bonusFuelSchema');
 const { computeRun, round2 } = require('../lib/bonusCalc');
-const { workingPaceFrac, workingDaysInMonth } = require('../lib/workdays');
-const { ensureTimeClockTables, paidHoursByMonth, approvedOffDaysByMonth } = require('../lib/timeClockSchema');
+const { workingPaceFrac, workingDaysInMonthOpen, openDaySet } = require('../lib/workdays');
+const { ensureTimeClockTables, paidHoursByMonth, approvedOffDaysByMonth, toIsodow } = require('../lib/timeClockSchema');
 
 // Bonus module (spec: lemonops-bonus-fuelcard-spec-FULL.md). Owner-only
 // mutations; owner+partner reads. Everything location-scoped; managers have no
@@ -372,7 +372,7 @@ module.exports = (pool) => {
       await ensure();
       const { month } = req.params;
       if (!validMonth(month)) return fail(res, 'month must be YYYY-MM', 400);
-      const { rows: locRows } = await pool.query('SELECT shopmonkey_location_id, province, weekly_hours FROM locations WHERE id=$1', [req.params.locationId]);
+      const { rows: locRows } = await pool.query('SELECT shopmonkey_location_id, province, weekly_hours, open_days FROM locations WHERE id=$1', [req.params.locationId]);
       const smId = locRows[0] && locRows[0].shopmonkey_location_id;
       if (!smId) return fail(res, 'Location not connected to Shopmonkey', 400);
       // Scheduled ("clocked") hours for the month = the SAME 40h/week-minus-
@@ -384,7 +384,10 @@ module.exports = (pool) => {
       //    formula figure with each tech's real clocked hours for the month. ──
       const monthDate = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1);
       const weekly = Number(locRows[0] && locRows[0].weekly_hours) || 40;
-      const scheduledMonth = round2(workingDaysInMonth((locRows[0] && locRows[0].province) || 'ab', monthDate) * (weekly / 5));
+      // Open days come from Locations settings — a 6-day shop divides its
+      // weekly hours across 6 days and counts Saturdays as working days.
+      const openSet = openDaySet(locRows[0] && locRows[0].open_days);
+      const scheduledMonth = round2(workingDaysInMonthOpen((locRows[0] && locRows[0].province) || 'ab', monthDate, openSet) * (weekly / openSet.size));
       // PREFERRED SOURCE: the last MTD tech snapshot inside the month — the
       // pipeline validated penny-exact against Shopmonkey's tech report, and it
       // costs zero API calls (the live crawl kept rate-limiting AND undercounted
@@ -416,8 +419,8 @@ module.exports = (pool) => {
       // reduced by any APPROVED time off so holidays never count against a tech.
       await ensureTimeClockTables(pool);
       const clockHours = await paidHoursByMonth(pool, req.params.locationId, month);
-      const offDays = await approvedOffDaysByMonth(pool, req.params.locationId, month);
-      const perDay = weekly / 5;
+      const offDays = await approvedOffDaysByMonth(pool, req.params.locationId, month, toIsodow(openSet));
+      const perDay = weekly / openSet.size;
       // Match crew first names against tech names (case/whitespace/accents folded).
       // Anything unmatched is surfaced with its hours, never guessed.
       const matched = [], unmatched = [];

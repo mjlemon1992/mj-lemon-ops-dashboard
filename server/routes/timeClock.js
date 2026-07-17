@@ -1,8 +1,8 @@
 const express = require('express');
 const crypto = require('crypto');
 const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
-const { ensureTimeClockTables, paidHoursByMonth, paidHoursByRange } = require('../lib/timeClockSchema');
-const { workingDaysBetween } = require('../lib/workdays');
+const { ensureTimeClockTables, paidHoursByMonth, paidHoursByRange, approvedOffDaysByRange, toIsodow } = require('../lib/timeClockSchema');
+const { workingDaysBetween, holidaysBetween, openDaySet } = require('../lib/workdays');
 
 // Shop-floor Time Clock. Two surfaces:
 //   • KIOSK (public, PIN-gated like the display boards) — a shared tablet in the
@@ -158,8 +158,10 @@ module.exports = (pool) => {
         `SELECT 1 FROM time_off_request WHERE person_id=$1 AND status IN ('pending','approved') AND start_date <= $3 AND end_date >= $2 LIMIT 1`,
         [person_id, start_date, end_date]);
       if (overlap.length) return fail(res, 'You already have a request covering those dates', 409);
-      const { rows: locRows } = await pool.query('SELECT province FROM locations WHERE id=$1', [req.params.locationId]);
-      const days = workingDaysBetween((locRows[0] || {}).province || 'ab', start_date, end_date);
+      const { rows: locRows } = await pool.query('SELECT province, open_days FROM locations WHERE id=$1', [req.params.locationId]);
+      // Days used = the shop's OPEN days in the range, minus stat holidays —
+      // Saturdays/Sundays (or whatever the shop is closed) never count.
+      const days = workingDaysBetween((locRows[0] || {}).province || 'ab', start_date, end_date, openDaySet((locRows[0] || {}).open_days));
       const { rows } = await pool.query(
         `INSERT INTO time_off_request (location_id, person_id, start_date, end_date, type, note, working_days)
          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
@@ -237,7 +239,16 @@ module.exports = (pool) => {
       const summary = range
         ? await paidHoursByRange(pool, req.params.locationId, range[0], range[1])
         : await paidHoursByMonth(pool, req.params.locationId, month);
-      res.json({ month: month || null, from: range ? range[0] : null, to: range ? range[1] : null, entries: rows, summary });
+      // Payroll context for the period: per-person approved days off (open days
+      // only) and any stat holidays falling inside it (province-based).
+      let off_days = {}, stat_holidays = [];
+      if (range) {
+        const { rows: lr } = await pool.query('SELECT province, open_days FROM locations WHERE id=$1', [req.params.locationId]);
+        const loc = lr[0] || {};
+        off_days = await approvedOffDaysByRange(pool, req.params.locationId, range[0], range[1], toIsodow(openDaySet(loc.open_days)));
+        stat_holidays = holidaysBetween(loc.province || 'ab', range[0], range[1]);
+      }
+      res.json({ month: month || null, from: range ? range[0] : null, to: range ? range[1] : null, entries: rows, summary, off_days, stat_holidays });
     } catch (e) { fail(res, e); }
   });
 

@@ -48,6 +48,9 @@ function ensureTimeClockTables(pool) {
     await pool.query('CREATE INDEX IF NOT EXISTS idx_tor_loc_dates ON time_off_request (location_id, start_date, end_date)');
     // Biweekly payroll: periods are 14 days from this anchor (a period START date).
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS pay_period_anchor DATE');
+    // Which weekdays the shop is open ('mon,tue,...'). Drives how holiday days
+    // are counted (days used) and the bonus schedule denominator.
+    await pool.query("ALTER TABLE locations ADD COLUMN IF NOT EXISTS open_days VARCHAR(40) DEFAULT 'mon,tue,wed,thu,fri'");
   })();
   return _init;
 }
@@ -86,25 +89,46 @@ async function paidHoursByRange(pool, locationId, from, to) {
   return out;
 }
 
-// Approved time-off working days per person overlapping a month ('YYYY-MM').
-// Overlap is clipped to the month; counts Mon–Fri only (stat holidays already
-// excluded from the schedule, so weekday count is the right adjustment unit).
-async function approvedOffDaysByMonth(pool, locationId, month) {
+// Approved time-off days per person overlapping a month ('YYYY-MM'), counted
+// on the shop's OPEN days only (isodow list, default Mon–Fri). Overlap is
+// clipped to the month.
+async function approvedOffDaysByMonth(pool, locationId, month, isodow = [1, 2, 3, 4, 5]) {
   const { rows } = await pool.query(
     `SELECT person_id,
             SUM((SELECT COUNT(*) FROM generate_series(GREATEST(start_date, ($2||'-01')::date),
                                                        LEAST(end_date, (($2||'-01')::date + interval '1 month' - interval '1 day')::date),
                                                        '1 day') d
-                  WHERE EXTRACT(ISODOW FROM d) < 6)) AS days
+                  WHERE EXTRACT(ISODOW FROM d) = ANY($3::int[]))) AS days
        FROM time_off_request
       WHERE location_id = $1 AND status = 'approved'
         AND start_date <= (($2||'-01')::date + interval '1 month' - interval '1 day')::date
         AND end_date >= ($2||'-01')::date
       GROUP BY person_id`,
-    [locationId, month]);
+    [locationId, month, isodow]);
   const out = {};
   for (const r of rows) out[r.person_id] = Number(r.days) || 0;
   return out;
 }
 
-module.exports = { ensureTimeClockTables, paidHoursByMonth, paidHoursByRange, approvedOffDaysByMonth };
+// Same per-person open-day counting over an arbitrary [from..to] range —
+// payroll shows days off inside each biweekly pay period.
+async function approvedOffDaysByRange(pool, locationId, from, to, isodow = [1, 2, 3, 4, 5]) {
+  const { rows } = await pool.query(
+    `SELECT person_id,
+            SUM((SELECT COUNT(*) FROM generate_series(GREATEST(start_date, $2::date),
+                                                       LEAST(end_date, $3::date), '1 day') d
+                  WHERE EXTRACT(ISODOW FROM d) = ANY($4::int[]))) AS days
+       FROM time_off_request
+      WHERE location_id = $1 AND status = 'approved'
+        AND start_date <= $3::date AND end_date >= $2::date
+      GROUP BY person_id`,
+    [locationId, from, to, isodow]);
+  const out = {};
+  for (const r of rows) out[r.person_id] = Number(r.days) || 0;
+  return out;
+}
+
+// JS weekday Set (0=Sun..6) → Postgres ISODOW list (1=Mon..7=Sun).
+const toIsodow = (openSet) => [...openSet].map((d) => (d === 0 ? 7 : d));
+
+module.exports = { ensureTimeClockTables, paidHoursByMonth, paidHoursByRange, approvedOffDaysByMonth, approvedOffDaysByRange, toIsodow };

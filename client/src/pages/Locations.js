@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', qbo_slug: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, display_show_leaderboard: true, active: true };
+const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', qbo_slug: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, display_show_leaderboard: true, open_days: 'mon,tue,wed,thu,fri', active: true };
 
 export default function Locations() {
   const { api } = useAuth();
@@ -68,6 +68,28 @@ export default function Locations() {
             </div>
             <div className="form-row">{field('stale_threshold_days','Stale vehicle threshold (days)','number',{min:1})} {field('pph_target','PPH target ($/hr)','number',{min:1})}</div>
             <div className="form-row">{field('parts_margin_target','Parts margin target (%)','number',{min:0,max:100})} {field('efficiency_target','Efficiency target (%)','number',{min:0,max:100})}</div>
+            <div className="form-group" style={{ marginTop: '10px' }}>
+              <label className="form-label">Days open</label>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                {[['mon','Mon'],['tue','Tue'],['wed','Wed'],['thu','Thu'],['fri','Fri'],['sat','Sat'],['sun','Sun']].map(([k, lab]) => {
+                  const set = new Set(String(form.open_days || 'mon,tue,wed,thu,fri').split(',').map(s => s.trim()).filter(Boolean));
+                  const on = set.has(k);
+                  return (
+                    <label key={k} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={on} onChange={() => {
+                        const next = new Set(set);
+                        if (on) next.delete(k); else next.add(k);
+                        if (!next.size) return;   // a shop open zero days breaks day counting
+                        setForm(f => ({ ...f, open_days: ['mon','tue','wed','thu','fri','sat','sun'].filter(d => next.has(d)).join(',') }));
+                      }} />{lab}
+                    </label>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>
+                Holiday "days used" and the bonus schedule only count these days — closed days and stat holidays never cost anyone a day off.
+              </div>
+            </div>
           </div>
           <div className="form-section">
             <div className="form-section-title">Shop-floor display</div>
@@ -144,6 +166,7 @@ export default function Locations() {
               ['Display PIN', loc.display_pin ? 'Set ✓' : 'Not set'],
               ['Board standings', loc.display_show_leaderboard === false ? 'This shop only' : 'Group shown'],
               ['On-clock hrs/tech', `${loc.weekly_hours || 40}h/wk`],
+              ['Days open', String(loc.open_days || 'mon,tue,wed,thu,fri').split(',').map(d => d.trim().slice(0, 1).toUpperCase() + d.trim().slice(1, 3)).join(' ')],
             ].map(([l, v]) => (
               <div key={l}>
                 <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '2px' }}>{l}</div>

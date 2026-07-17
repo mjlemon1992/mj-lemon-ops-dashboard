@@ -174,7 +174,7 @@ export default function ClockKiosk() {
           {board.map((r) => (
             <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px 12px', background: 'var(--bg2)', borderRadius: '10px', marginBottom: '6px', opacity: r.status === 'pending' ? 0.65 : 1 }}>
               <span style={{ fontWeight: 700 }}>{r.person_name}</span>
-              <span style={{ color: 'var(--text3)', fontSize: '13px' }}>{r.start_date === r.end_date ? r.start_date : `${r.start_date} → ${r.end_date}`} · {r.type}</span>
+              <span style={{ color: 'var(--text3)', fontSize: '13px' }}>{r.start_date === r.end_date ? r.start_date : `${r.start_date} → ${r.end_date}`} · {r.type} · {r.working_days} day{r.working_days === 1 ? '' : 's'}</span>
               <span style={{ ...pill, marginLeft: 'auto', fontSize: '11px', background: r.status === 'approved' ? 'rgba(52,199,89,0.14)' : 'var(--bg3)', color: r.status === 'approved' ? 'var(--success)' : 'var(--text3)' }}>{r.status === 'approved' ? '✓ approved' : 'awaiting approval'}</span>
             </div>
           ))}

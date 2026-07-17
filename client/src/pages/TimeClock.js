@@ -164,7 +164,14 @@ function ClockAdmin({ locId }) {
 
       {/* Per-person paid hours (this pay period) + PIN + time off taken this year */}
       <div className="card" style={{ marginBottom: '16px' }}>
-        <div style={{ fontWeight: 600, marginBottom: '10px' }}>Paid hours — {sel ? `${fmtD(sel.from)} – ${fmtD(sel.to)}` : 'period'} <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>(biweekly pay period)</span></div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
+          <span style={{ fontWeight: 600 }}>Paid hours — {sel ? `${fmtD(sel.from)} – ${fmtD(sel.to)}` : 'period'} <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>(biweekly pay period)</span></span>
+          {(data.stat_holidays || []).length > 0 && (
+            <span style={{ fontSize: '12px', color: 'var(--warning)', marginLeft: 'auto' }}>
+              🎌 Stat holiday{data.stat_holidays.length > 1 ? 's' : ''} this period: {data.stat_holidays.map((h) => `${h.name} (${fmtD(h.date)})`).join(', ')}
+            </span>
+          )}
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '10px' }}>
           {people.map((p) => (
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px' }}>
@@ -172,6 +179,7 @@ function ClockAdmin({ locId }) {
                 <div style={{ fontWeight: 600 }}>{p.name}</div>
                 <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
                   {summary[p.id] != null ? `${summary[p.id]} h this period` : 'no punches this period'}
+                  {(data.off_days || {})[p.id] ? ` · 🏖 ${data.off_days[p.id]} day${data.off_days[p.id] === 1 ? '' : 's'} off this period` : ''}
                   {totals[p.id] ? ` · ${totals[p.id]} day${totals[p.id] === 1 ? '' : 's'} off this year` : ''}
                 </div>
               </div>
@@ -188,7 +196,7 @@ function ClockAdmin({ locId }) {
           {upcoming.map((r) => (
             <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', marginBottom: '4px' }}>
               <span style={{ fontWeight: 600 }}>{r.person_name}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{OFF_LABEL[r.type] || r.type} · {fmtD(r.start_date)} – {fmtD(r.end_date)}</span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{OFF_LABEL[r.type] || r.type} · {fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'} used</b></span>
               {r.sm_appointment_id && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>📅 on Shopmonkey</span>}
               <button disabled={busy} onClick={() => cancelOff(r)} style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px', color: 'var(--danger)' }}>Cancel</button>
             </div>

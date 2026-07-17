@@ -15,6 +15,9 @@ module.exports = (pool) => {
     // Per-board toggle: show the all-locations revenue standings on this
     // location's shop-floor display, or keep the board to its own numbers.
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS display_show_leaderboard BOOLEAN DEFAULT true');
+    // Which weekdays this shop is open — drives holiday day-counting and the
+    // bonus schedule denominator (see timeClock/bonus routes).
+    await pool.query("ALTER TABLE locations ADD COLUMN IF NOT EXISTS open_days VARCHAR(40) DEFAULT 'mon,tue,wed,thu,fri'");
     _colInit = true;
   };
 
@@ -99,13 +102,15 @@ module.exports = (pool) => {
   // the live Shopmonkey roster (see routes/technicians.js) and must not be
   // clobbered by an edit-location save.
   router.put('/:id', authenticateToken, requireOwner, async (req, res) => {
-    const { name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin, weekly_hours, display_show_leaderboard } = req.body;
+    const { name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin, weekly_hours, display_show_leaderboard, open_days } = req.body;
+    // open_days: CSV of weekday slugs, validated so a bad payload can't break day counting.
+    const validOpenDays = typeof open_days === 'string' && open_days.split(',').every((d) => ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].includes(d.trim().toLowerCase())) && open_days.trim() !== '' ? open_days.toLowerCase() : null;
     try {
       await ensureColumns();
       const result = await pool.query(
-        `UPDATE locations SET name=$1, address=$2, city=$3, province=$4, shopmonkey_location_id=$5, qbo_company_id=$6, qbo_slug=$7, slack_channel=$8, labour_rate=$9, stale_threshold_days=$10, parts_margin_target=$11, efficiency_target=$12, pph_target=$13, active=$14, display_pin=$15, weekly_hours=$16, display_show_leaderboard=COALESCE($17, display_show_leaderboard), updated_at=NOW()
-         WHERE id=$18 RETURNING *`,
-        [name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug || null, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin || null, weekly_hours || 40, typeof display_show_leaderboard === 'boolean' ? display_show_leaderboard : null, req.params.id]
+        `UPDATE locations SET name=$1, address=$2, city=$3, province=$4, shopmonkey_location_id=$5, qbo_company_id=$6, qbo_slug=$7, slack_channel=$8, labour_rate=$9, stale_threshold_days=$10, parts_margin_target=$11, efficiency_target=$12, pph_target=$13, active=$14, display_pin=$15, weekly_hours=$16, display_show_leaderboard=COALESCE($17, display_show_leaderboard), open_days=COALESCE($18, open_days), updated_at=NOW()
+         WHERE id=$19 RETURNING *`,
+        [name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug || null, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin || null, weekly_hours || 40, typeof display_show_leaderboard === 'boolean' ? display_show_leaderboard : null, validOpenDays, req.params.id]
       );
       if (!result.rows.length) return res.status(404).json({ error: 'Location not found' });
       res.json(result.rows[0]);
