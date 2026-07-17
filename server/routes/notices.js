@@ -232,6 +232,7 @@ Return ONLY a JSON array of exactly 4 ideas — no prose, no markdown fences:
 The mix: one SAFETY reminder, one team ENCOURAGEMENT/celebration, one seasonal or shop-culture piece for the given month, one wildcard.
 Safety rules: only universally-accepted, non-procedural shop safety (housekeeping, PPE, eye protection, lifting posture, hydration, slow-down-when-tired, spill cleanup). NEVER specific repair procedures, lift/jack instructions, electrical steps, or any torque/spec/technical claim.
 Encouragement rules: if metrics are provided, ground the praise in them — cite ONLY numbers actually given, never invent or extrapolate. If no metrics, keep it genuine and general.
+Financial privacy (hard rule): the ONLY business numbers allowed on the board are month-to-date REVENUE, CAR COUNT, LABOUR HOURS SOLD, and TECH EFFICIENCY vs its target. NEVER mention profit, margins, parts margin, profit-per-hour, costs, or average repair-order value — internal financial detail stays off the shop floor, even if it appears in the data you're given.
 Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fluff, no CTAs.`;
 
   router.post('/poster-ideas', syncAuth, requireOwnerOrPartner, async (req, res) => {
@@ -241,23 +242,30 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
       const { location_id } = req.body || {};
       await ensureTable();
       // Freshest metrics row (for the chosen board, else the freshest anywhere).
+      // Deliberately narrow SELECT: revenue, cars, hours and efficiency ONLY.
+      // Margin/profit economics are owner-level numbers and never reach the
+      // model, so they can't leak onto the shop floor.
       let m = null;
       try {
         const q = location_id
           ? await pool.query(
-              `SELECT m.revenue_mtd, m.car_count_mtd, m.pph, m.parts_margin, m.created_at, l.name
+              `SELECT m.revenue_mtd, m.car_count_mtd, m.labour_hours_sold, m.efficiency_avg, m.created_at, l.name, l.efficiency_target
                  FROM metrics_cache m JOIN locations l ON l.id = m.location_id
                 WHERE m.location_id = $1 ORDER BY m.created_at DESC LIMIT 1`, [location_id])
           : await pool.query(
-              `SELECT m.revenue_mtd, m.car_count_mtd, m.pph, m.parts_margin, m.created_at, l.name
+              `SELECT m.revenue_mtd, m.car_count_mtd, m.labour_hours_sold, m.efficiency_avg, m.created_at, l.name, l.efficiency_target
                  FROM metrics_cache m JOIN locations l ON l.id = m.location_id
                 ORDER BY m.created_at DESC LIMIT 1`);
         m = q.rows[0] || null;
       } catch (_) { /* metrics are garnish, never a blocker */ }
       const month = new Date().toLocaleDateString('en-CA', { month: 'long', timeZone: 'America/Edmonton' });
-      const ctx = m && Number(m.revenue_mtd) > 0
-        ? `Latest shop metrics for ${String(m.name || '').trim()} (as of ${new Date(m.created_at).toISOString().slice(0, 10)}): revenue MTD $${Math.round(m.revenue_mtd).toLocaleString('en-CA')}, ${m.car_count_mtd} cars, profit/hr $${Math.round(m.pph)}, parts margin ${Math.round(m.parts_margin)}%.`
-        : 'No metrics available — keep encouragement general.';
+      let ctx = 'No metrics available — keep encouragement general.';
+      if (m && Number(m.revenue_mtd) > 0) {
+        ctx = `Latest shop metrics for ${String(m.name || '').trim()} (as of ${new Date(m.created_at).toISOString().slice(0, 10)}): revenue MTD $${Math.round(m.revenue_mtd).toLocaleString('en-CA')} across ${m.car_count_mtd} cars`;
+        if (Number(m.labour_hours_sold) > 0) ctx += `, ${Math.round(m.labour_hours_sold)} labour hours sold`;
+        if (m.efficiency_avg != null) ctx += `, avg tech efficiency ${Math.round(m.efficiency_avg)}%${m.efficiency_target ? ` vs ${Math.round(m.efficiency_target)}% target` : ''}`;
+        ctx += '.';
+      }
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
