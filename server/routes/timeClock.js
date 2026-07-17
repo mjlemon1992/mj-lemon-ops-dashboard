@@ -724,7 +724,11 @@ module.exports = (pool) => {
       if (!user || !pass) return fail(res, 'Email not configured (GMAIL_IMAP_USER / GMAIL_IMAP_PASS)', 400);
       const buf = await buildTimesheetPdf(req.params.locationId, from, to, person);
       const nodemailer = require('nodemailer');
-      const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user, pass } });
+      // Railway has no IPv6 route to Google — resolve Gmail's IPv4 explicitly
+      // and keep the hostname for TLS certificate validation.
+      const dns = require('dns').promises;
+      const { address } = await dns.lookup('smtp.gmail.com', { family: 4 });
+      const transporter = nodemailer.createTransport({ host: address, port: 465, secure: true, auth: { user, pass }, tls: { servername: 'smtp.gmail.com' } });
       await transporter.sendMail({
         from: user, to: email,
         subject: `Timesheet ${from} to ${to}${person && person !== 'all' ? ' (individual)' : ' (crew)'}`,
