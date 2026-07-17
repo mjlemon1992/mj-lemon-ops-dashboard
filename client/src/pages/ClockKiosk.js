@@ -247,9 +247,10 @@ export default function ClockKiosk() {
           </>}
         </div>
         <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
-          <button disabled={busy || pin.length < 4} onClick={openTimesheet} style={{ fontSize: '14px', padding: '9px 16px' }}>📋 My timesheet</button>
-          <button disabled={busy || pin.length < 4} onClick={openProfile} style={{ fontSize: '14px', padding: '9px 16px' }}>🎨 My profile</button>
+          <button disabled={busy} onClick={() => (pin.length < 4 ? setError('Enter your PIN first, then tap again') : openTimesheet())} style={{ fontSize: '14px', padding: '9px 16px' }}>📋 My timesheet</button>
+          <button disabled={busy} onClick={() => (pin.length < 4 ? setError('Enter your PIN first, then tap again') : openProfile())} style={{ fontSize: '14px', padding: '9px 16px' }}>🎨 My profile</button>
         </div>
+        {pin.length < 4 && <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '8px' }}>Punching, timesheet, and profile all unlock with your PIN.</div>}
       </div>
     );
   }
