@@ -102,11 +102,11 @@ export default function ClockKiosk() {
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
           {s === 'off' && <button className="primary" disabled={busy || pin.length < 4} onClick={() => punch('in')} style={bigBtn}>Clock in</button>}
           {s === 'on' && <>
-            <button disabled={busy || pin.length < 4} onClick={() => punch('break_start')} style={{ ...bigBtn, background: 'var(--warning)' }}>Start break</button>
+            <button disabled={busy || pin.length < 4} onClick={() => punch('break_start')} style={{ ...bigBtn, background: 'var(--warning)', color: '#000', fontWeight: 700 }}>Start break</button>
             <button className="primary" disabled={busy || pin.length < 4} onClick={() => punch('out')} style={bigBtn}>Clock out</button>
           </>}
           {s === 'break' && <>
-            <button disabled={busy || pin.length < 4} onClick={() => punch('break_end')} style={{ ...bigBtn, background: 'var(--success)' }}>End break</button>
+            <button disabled={busy || pin.length < 4} onClick={() => punch('break_end')} style={{ ...bigBtn, background: 'var(--success)', color: '#000', fontWeight: 700 }}>End break</button>
             <button className="primary" disabled={busy || pin.length < 4} onClick={() => punch('out')} style={bigBtn}>Clock out</button>
           </>}
         </div>
