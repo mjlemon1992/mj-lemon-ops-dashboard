@@ -19,6 +19,47 @@ const EXPIRY = [
   { value: '30', label: '30 days' }
 ];
 
+// ── AI poster rendering (Claude designs the SVG server-side; we brand + rasterize) ──
+const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+
+// Archivo embedded as base64 @font-face so the rasterized SVG uses the real
+// brand font (a canvas-rendered SVG can't see webfonts). Best-effort; falls
+// back to system sans. Not negatively cached — a transient failure retries.
+let _fontCss;
+async function getFontCss() {
+  if (_fontCss !== undefined) return _fontCss;
+  try {
+    const css = await (await fetch('https://fonts.googleapis.com/css2?family=Archivo:wght@800')).text();
+    const url = (css.match(/url\((https:\/\/[^)]+\.woff2)\)/) || [])[1];
+    if (!url) return '';
+    const blob = await (await fetch(url)).blob();
+    const data = await new Promise((r, j) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = j; fr.readAsDataURL(blob); });
+    _fontCss = `@font-face{font-family:'Archivo';font-style:normal;font-weight:800;src:url(${data}) format('woff2')}`;
+    return _fontCss;
+  } catch { return ''; }
+}
+
+// Brand the raw SVG (embed font, overlay the real logo) and rasterize to JPEG.
+async function renderNoticePoster(svg, S = 1080) {
+  const fontCss = await getFontCss();
+  if (fontCss) svg = svg.replace(/<svg([^>]*)>/, (m, attrs) => `<svg${attrs}><defs><style>${fontCss}</style></defs>`);
+  try {
+    const blob = await (await fetch('/mt-logo-v2.png')).blob();
+    const logoData = await new Promise((r, j) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = j; fr.readAsDataURL(blob); });
+    const im = await loadImg(logoData);
+    const w = 230, h = Math.round(w * (im.height / im.width));
+    svg = svg.replace('</svg>', `<image href="${logoData}" x="44" y="44" width="${w}" height="${h}"/></svg>`);
+  } catch { /* logo overlay is best-effort */ }
+  const img = await loadImg('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+  const c = document.createElement('canvas'); c.width = S; c.height = S;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#0A0B0D'; ctx.fillRect(0, 0, S, S);
+  ctx.drawImage(img, 0, 0, S, S);
+  const out = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+  if (!out) throw new Error('Poster render failed');
+  return out;
+}
+
 export default function Notices() {
   const { api } = useAuth();
   const [locations, setLocations] = useState([]);
@@ -26,7 +67,30 @@ export default function Notices() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [file, setFile] = useState(null);
+  const [designing, setDesigning] = useState(false);
+  const [genBlob, setGenBlob] = useState(null);       // AI-designed poster, ready to upload
+  const [genPreview, setGenPreview] = useState(null); // object URL for the preview <img>
   const [form, setForm] = useState({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '' });
+
+  const clearGenerated = () => {
+    if (genPreview) URL.revokeObjectURL(genPreview);
+    setGenBlob(null); setGenPreview(null);
+  };
+
+  // Claude designs the poster from the title/message/type above; we brand it
+  // (font + real logo), rasterize, and hold it as the pending upload.
+  const generatePoster = async () => {
+    if (!form.title.trim()) { setError('Give the poster a title first — that becomes the headline.'); return; }
+    setDesigning(true); setError('');
+    try {
+      const d = await api('/notices/design-poster', { method: 'POST', body: JSON.stringify({ title: form.title, body: form.body, kind: form.kind }) });
+      const blob = await renderNoticePoster(d.svg);
+      if (genPreview) URL.revokeObjectURL(genPreview);
+      setGenBlob(blob); setGenPreview(URL.createObjectURL(blob));
+      setFile(null);   // generated poster replaces any picked file
+    } catch (e2) { setError(e2.message || 'Poster generation failed — try again'); }
+    setDesigning(false);
+  };
 
   const load = useCallback(() => {
     api('/notices').then(setItems).catch(e => setError(e.message || 'Failed to load'));
@@ -41,7 +105,14 @@ export default function Notices() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.title && !form.body && !form.image_url && !file) { setError('Add a title, message, image URL or upload a poster'); return; }
+    const upload = genBlob || file;   // AI-designed poster or a picked file
+    if (!form.title && !form.body && !form.image_url && !upload) { setError('Add a title, message, image URL or upload a poster'); return; }
+    // A poster with no image renders as a text banner on the board — the exact
+    // confusion this guard prevents. Require an image (or generate one) first.
+    if (form.kind === 'poster' && !upload && !form.image_url) {
+      setError('A poster needs an image — upload one, paste a URL, or hit ✨ Generate poster.');
+      return;
+    }
     setSaving(true); setError('');
     try {
       const expires_at = form.expires_days
@@ -51,21 +122,23 @@ export default function Notices() {
         method: 'POST',
         body: JSON.stringify({
           location_id: form.location_id || null,
-          kind: form.kind,
+          // A generated image is a full poster: publish as kind 'poster' so the
+          // board page-flips it full-screen (the chosen kind still set its mood).
+          kind: genBlob ? 'poster' : form.kind,
           title: form.title || null,
           body: form.body || null,
           image_url: form.image_url || null,
-          pending_image: !!file,
+          pending_image: !!upload,
           expires_at
         })
       });
-      // Poster file uploads as a raw image body (same pattern as marketing intake).
-      if (file && created && created.id) {
+      // Poster bytes upload as a raw image body (same pattern as marketing intake).
+      if (upload && created && created.id) {
         try {
           await api(`/notices/${created.id}/image`, {
             method: 'POST',
-            headers: { 'Content-Type': file.type || 'image/jpeg' },
-            body: file
+            headers: { 'Content-Type': (upload.type || 'image/jpeg') },
+            body: upload
           });
         } catch (upErr) {
           // Don't leave an empty notice on the board if the file didn't make it.
@@ -75,6 +148,7 @@ export default function Notices() {
       }
       setForm({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '' });
       setFile(null);
+      clearGenerated();
       load();
     } catch (e2) { setError(e2.message || 'Failed to save'); }
     setSaving(false);
@@ -125,11 +199,37 @@ export default function Notices() {
           <span style={label}>Message</span>
           <textarea value={form.body} onChange={e => set('body', e.target.value)} rows={3} placeholder="Optional detail shown under the title" style={{ ...input, resize: 'vertical' }} />
         </div>
+        <div style={{ padding: '12px 14px', background: 'var(--bg3)', border: '0.5px solid var(--border)', borderRadius: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+            <button type="button" className="primary" onClick={generatePoster} disabled={designing || !form.title.trim()}
+              style={{ padding: '9px 18px', fontSize: '14px' }}>
+              {designing ? 'Designing…' : '✨ Generate poster'}
+            </button>
+            <span style={{ fontSize: '12px', color: 'var(--text3)' }}>
+              Claude designs a board poster from the title, message and type above — no upload needed.
+            </span>
+          </div>
+          {genPreview && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginTop: '12px' }}>
+              <img src={genPreview} alt="Generated poster preview"
+                style={{ width: '220px', height: '220px', objectFit: 'cover', borderRadius: '10px', border: '0.5px solid var(--border)' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <button type="button" onClick={generatePoster} disabled={designing} style={{ padding: '7px 14px', fontSize: '13px' }}>
+                  {designing ? 'Designing…' : '↻ Regenerate'}
+                </button>
+                <button type="button" onClick={clearGenerated} style={{ padding: '7px 14px', fontSize: '13px', color: 'var(--danger)' }}>✕ Discard</button>
+                <span style={{ fontSize: '12px', color: 'var(--text3)', maxWidth: '260px' }}>
+                  Happy with it? Hit “Post to board” — it publishes full-screen on the shop display.
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
           <div>
-            <span style={label}>Upload poster {form.kind === 'poster' ? '(shown full size)' : '(optional, shown small)'}</span>
+            <span style={label}>…or upload a poster {form.kind === 'poster' ? '(shown full size)' : '(optional, shown small)'}</span>
             <input type="file" accept="image/jpeg,image/png,image/webp,image/gif"
-              onChange={e => setFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+              onChange={e => { const f = e.target.files && e.target.files[0] ? e.target.files[0] : null; setFile(f); if (f) clearGenerated(); }}
               style={{ ...input, padding: '8px 12px' }} />
             {file && <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '4px' }}>{file.name} · {Math.round(file.size / 1024)} KB</div>}
           </div>

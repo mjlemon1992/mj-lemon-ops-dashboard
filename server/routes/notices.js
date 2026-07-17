@@ -101,6 +101,62 @@ module.exports = (pool) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── AI poster design (Claude designs the layout as SVG) ──
+  // Claude can't paint photos, but it's strong at design-as-code. It returns a
+  // bespoke 1080×1080 SVG per poster (composition, type, accents) under hard
+  // guardrails: brand palette prompt, all text is REAL text (spelling can't
+  // break), the logo is injected client-side (never drawn by the model), and
+  // the SVG is sanitized here — scripts/foreignObject/event handlers/external
+  // refs stripped. The client rasterizes to JPEG and uploads via /:id/image.
+  const DESIGN_MODEL = 'claude-sonnet-4-6';
+  const designSystem = `You are a poster designer for the shop-floor notice board of Mister Transmission (Parkland Transmission), an automotive transmission repair shop. You output ONE complete 1080x1080 SVG poster and nothing else — no markdown fences, no commentary.
+
+Brand system (use ONLY these):
+- Orange #F05423 (primary), #F8703B (light accent), #E14313 (deep accent)
+- Charcoal #16181B, near-black #0A0B0D, off-white #F6F5F3, white #FFFFFF
+- Display font: font-family="Archivo, Helvetica Neue, Arial, sans-serif" font-weight="800" (tight letter-spacing, e.g. -1)
+- Body font: font-family="Helvetica Neue, Arial, sans-serif"
+
+Rules:
+- viewBox="0 0 1080 1080", width/height 1080. Vector shapes + text ONLY.
+- The TITLE I give you must appear VERBATIM as the dominant headline — big and readable from across a garage bay (headline 72-110px). Break long titles across multiple lines using <tspan x="..." dy="...">.
+- If BODY text is given, set it smaller (30-40px) below the headline, wrapped to lines of ~40 characters max via tspans.
+- Leave the top-left area (x 0-320, y 0-170) visually calm — the brand logo is overlaid there afterward. No text there; background color/shapes are fine.
+- Mood by KIND: celebration = energetic, bold diagonal shapes/rays/confetti dots, orange-dominant; safety = high-contrast, hazard chevrons or bold stripes, charcoal+orange, serious; notice = clean, minimal, informational.
+- Fill the full canvas (no white page margins). Strong contrast: light text on dark, or charcoal on light.
+- NO <script>, NO <image>, NO <foreignObject>, NO external URLs, NO event handlers, NO CTA phrases like "book now"/"call today".`;
+
+  router.post('/design-poster', syncAuth, requireOwnerOrPartner, async (req, res) => {
+    try {
+      const KEY = process.env.ANTHROPIC_API_KEY;
+      if (!KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set' });
+      const { title, body, kind } = req.body || {};
+      if (!title || !String(title).trim()) return res.status(400).json({ error: 'title required' });
+      const mood = ['celebration', 'safety', 'notice', 'poster'].includes(kind) ? kind : 'notice';
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: DESIGN_MODEL, max_tokens: 4096, system: designSystem,
+          messages: [{ role: 'user', content: `KIND: ${mood}\nTITLE: ${String(title).slice(0, 200)}\n${body ? `BODY: ${String(body).slice(0, 400)}` : 'BODY: (none)'}` }],
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) return res.status(502).json({ error: `Anthropic ${r.status}: ${JSON.stringify(data).slice(0, 200)}` });
+      let raw = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+      const s = raw.indexOf('<svg'), e = raw.lastIndexOf('</svg>');
+      if (s < 0 || e < 0) return res.status(502).json({ error: 'Model returned no SVG — try again' });
+      let svg = raw.slice(s, e + 6);
+      // Sanitize: no scripts, embedded docs, bitmap refs, handlers, or external URLs.
+      svg = svg.replace(/<script[\s\S]*?<\/script>/gi, '')
+               .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
+               .replace(/<image[\s\S]*?(\/>|<\/image>)/gi, '')
+               .replace(/\son\w+="[^"]*"/gi, '')
+               .replace(/(xlink:href|href)="(?!#)[^"]*"/gi, '');
+      res.json({ svg, kind: mood });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // Create (no id) or update (with id). syncAuth: the CoS agent may post
   // notices with the machine key; it acts as owner.
   router.post('/', syncAuth, requireOwnerOrPartner, async (req, res) => {
