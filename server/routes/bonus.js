@@ -2,7 +2,7 @@ const express = require('express');
 const { authenticateToken, requireRole, requireOwner, canAccessLocation } = require('../middleware/auth');
 const { ensureBonusFuelTables } = require('../lib/bonusFuelSchema');
 const { computeRun, round2 } = require('../lib/bonusCalc');
-const { workingPaceFrac } = require('../lib/workdays');
+const { workingPaceFrac, workingDaysInMonth } = require('../lib/workdays');
 
 // Bonus module (spec: lemonops-bonus-fuelcard-spec-FULL.md). Owner-only
 // mutations; owner+partner reads. Everything location-scoped; managers have no
@@ -371,29 +371,41 @@ module.exports = (pool) => {
       await ensure();
       const { month } = req.params;
       if (!validMonth(month)) return fail(res, 'month must be YYYY-MM', 400);
-      const { rows: locRows } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [req.params.locationId]);
+      const { rows: locRows } = await pool.query('SELECT shopmonkey_location_id, province, weekly_hours FROM locations WHERE id=$1', [req.params.locationId]);
       const smId = locRows[0] && locRows[0].shopmonkey_location_id;
       if (!smId) return fail(res, 'Location not connected to Shopmonkey', 400);
+      // Scheduled ("clocked") hours for the month = the SAME 40h/week-minus-
+      // stat-holidays formula the Technicians page uses (workdays.js): full
+      // working days in the month × (weekly hours / 5). Until Connecteam's API
+      // feeds real punch in/out, this is the honest denominator; the operator
+      // can still override any tech who was part-time or on leave.
+      // ── CONNECTEAM SEAM: when the time clock is connected, replace this
+      //    formula figure with each tech's real clocked hours for the month. ──
+      const monthDate = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1);
+      const weekly = Number(locRows[0] && locRows[0].weekly_hours) || 40;
+      const scheduledMonth = round2(workingDaysInMonth((locRows[0] && locRows[0].province) || 'ab', monthDate) * (weekly / 5));
       // PREFERRED SOURCE: the last MTD tech snapshot inside the month — the
       // pipeline validated penny-exact against Shopmonkey's tech report, and it
       // costs zero API calls (the live crawl kept rate-limiting AND undercounted
       // whenever fetches failed). Live crawl remains only as a fallback for
       // months that predate snapshots.
-      let entries = [];   // [{ name, hours }]
+      let entries = [];   // [{ name, hours, scheduled }]
       let source = null;
       const { rows: snap } = await pool.query(
-        `SELECT DISTINCT ON (tech_id) tech_id, tech_name, hours_billed, snapshot_date::text AS snapshot_date
+        `SELECT DISTINCT ON (tech_id) tech_id, tech_name, hours_billed, hours_worked, snapshot_date::text AS snapshot_date
            FROM tech_efficiency
           WHERE location_id = $1 AND period_type = 'mtd'
             AND snapshot_date >= ($2 || '-01')::date AND snapshot_date < ($3 || '-01')::date
           ORDER BY tech_id, snapshot_date DESC, hours_billed DESC`,
         [req.params.locationId, month, nextMonth(month)]);
       if (snap.length) {
-        entries = snap.map((r) => ({ name: (r.tech_name || '').trim(), hours: round2(Number(r.hours_billed) || 0) }));
+        // hours_worked already holds the formula figure per the sync; fall back
+        // to the freshly computed month figure if a row somehow lacks it.
+        entries = snap.map((r) => ({ name: (r.tech_name || '').trim(), hours: round2(Number(r.hours_billed) || 0), scheduled: round2(Number(r.hours_worked) || scheduledMonth) }));
         source = { kind: 'snapshot', date: String(snap[0].snapshot_date).slice(0, 10) };
       } else {
         const { byTech, names, orders_scanned } = await monthBilledHours(pool, req.params.locationId, smId, month);
-        entries = Object.entries(byTech).map(([techId, hours]) => ({ name: (names[techId] || '').trim() || techId, hours }));
+        entries = Object.entries(byTech).map(([techId, hours]) => ({ name: (names[techId] || '').trim() || techId, hours, scheduled: scheduledMonth }));
         source = { kind: 'live', orders_scanned };
       }
       const crew = await activePeople(req.params.locationId);
@@ -407,12 +419,12 @@ module.exports = (pool) => {
         const person = crew.find((p) => p.role === 'tech' && nm && nm.startsWith(normName(p.name).split(' ')[0]));
         if (person && !claimed.has(person.id)) {
           claimed.add(person.id);
-          matched.push({ person_id: person.id, person_name: person.name, tech_name: e.name, billed_hours: e.hours });
+          matched.push({ person_id: person.id, person_name: person.name, tech_name: e.name, billed_hours: e.hours, clocked_hours: e.scheduled });
         } else {
           unmatched.push({ tech_name: e.name, billed_hours: e.hours });
         }
       }
-      res.json({ month, matched, unmatched, source });
+      res.json({ month, matched, unmatched, source, scheduled_hours: scheduledMonth });
     } catch (e) { fail(res, e, /incomplete|rate-limit/i.test(String(e.message)) ? 502 : 500); }
   });
 

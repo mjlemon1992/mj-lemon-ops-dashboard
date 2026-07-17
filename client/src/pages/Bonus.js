@@ -121,20 +121,23 @@ function BonusView({ locId }) {
     setBusy(false);
   };
 
-  // Auto-fill the BILLED side from Shopmonkey (flagged hours on revenue lines).
-  // Clocked stays manual — payroll is the honest denominator.
+  // Auto-fill BOTH sides: billed hours from Shopmonkey, and clocked hours from
+  // the 40h/week-minus-holidays schedule formula (same as the Technicians page).
+  // The operator overrides clocked for anyone part-time or on leave; when
+  // Connecteam is wired in, clocked will come from real punch data instead.
   const pullBilled = async () => {
     setPulling(true); setErr(null); setPullNote(null);
     try {
       const d = await api(`/bonus/${locId}/billed-hours/${month}`);
       setEffEdits((s) => {
         const next = { ...s };
-        for (const m of d.matched) next[m.person_id] = { ...next[m.person_id], billed_hours: m.billed_hours };
+        for (const m of d.matched) next[m.person_id] = { ...next[m.person_id], billed_hours: m.billed_hours, clocked_hours: m.clocked_hours };
         return next;
       });
       const src = d.source && d.source.kind === 'snapshot'
         ? `the ${d.source.date} tech snapshot` : `${(d.source && d.source.orders_scanned) || '?'} orders`;
       const note = `Filled ${d.matched.length} tech${d.matched.length === 1 ? '' : 's'} from ${src}` +
+        (d.scheduled_hours ? ` · clocked set to the ${d.scheduled_hours}h monthly schedule (40h/wk less stat holidays) — adjust anyone part-time or on leave` : '') +
         (d.unmatched.length ? ` · unmatched: ${d.unmatched.map((u) => `${u.tech_name} (${u.billed_hours}h)`).join(', ')}` : '');
       setPullNote(note);
     } catch (e) { setErr(e.message); }
@@ -349,7 +352,7 @@ function BonusView({ locId }) {
         <div className="card" style={{ marginBottom: '16px' }}>
           <div style={{ fontWeight: 600, marginBottom: '4px' }}>Import hours for {monthLabel(month)}</div>
           <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '10px' }}>
-            Pull each tech's billed hours from Shopmonkey and enter their clocked hours from payroll. This saves the data ready for the owner to run the bonus — you're not setting anyone's pay here.
+            Pull the hours from Shopmonkey — billed hours plus the monthly schedule (40h/wk less stat holidays) as clocked. Adjust clocked for anyone part-time or on leave, then save. This readies the data for the owner to run the bonus — you're not setting anyone's pay here.
           </div>
           <EfficiencyEditor techs={techs} month={month} efficiency={efficiency} effEdits={effEdits} setEffEdits={setEffEdits} onSave={saveEfficiency} busy={busy}
             onPullBilled={pullBilled} pulling={pulling} pullNote={pullNote} />
@@ -417,14 +420,14 @@ function EfficiencyEditor({ techs, month, efficiency, effEdits, setEffEdits, onS
   return (
     <div style={{ marginBottom: '14px', padding: '12px 14px', background: 'var(--bg3)', borderRadius: '10px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
-        <span style={{ fontSize: '12px', fontWeight: 600 }}>Efficiency inputs — {monthLabel(month)} <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(billed ÷ clocked; comeback hours in clocked only)</span></span>
+        <span style={{ fontSize: '12px', fontWeight: 600 }}>Efficiency inputs — {monthLabel(month)} <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(billed ÷ clocked; clocked = 40h/wk schedule until Connecteam is connected)</span></span>
         {onPullBilled && (
           <button type="button" onClick={onPullBilled} disabled={pulling} style={{ fontSize: '12px', padding: '5px 12px', marginLeft: 'auto' }}>
-            {pulling ? 'Pulling… (~15s)' : '⚡ Pull billed from Shopmonkey'}
+            {pulling ? 'Pulling… (~15s)' : '⚡ Pull hours from Shopmonkey'}
           </button>
         )}
       </div>
-      {pullNote && <div style={{ fontSize: '11px', color: 'var(--success)', marginBottom: '8px' }}>{pullNote} — now add clocked hours from payroll.</div>}
+      {pullNote && <div style={{ fontSize: '11px', color: 'var(--success)', marginBottom: '8px' }}>{pullNote}.</div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px' }}>
         {techs.map((t) => (
           <div key={t.id} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
