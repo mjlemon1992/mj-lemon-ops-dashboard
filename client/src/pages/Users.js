@@ -65,7 +65,7 @@ export default function Users() {
               <select value={form.role} onChange={e => setForm(f=>({...f,role:e.target.value}))}>
                 <option value="owner">Owner — full admin (locations, users, everything)</option>
                 <option value="partner">Partner — all locations, no admin settings</option>
-                <option value="manager">Shop operator — their location only: marketing + targets</option>
+                <option value="manager">Shop operator — their location only: reports, finance, marketing, notices, targets</option>
               </select>
             </div>
             {form.role === 'manager' && (

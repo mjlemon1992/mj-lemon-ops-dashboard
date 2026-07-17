@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, canAccessLocation } = require('../middleware/auth');
 
 // GET /api/technicians/:locationId
 // Live technician roster from Shopmonkey (/v3/user, assignedTechnician===true),
@@ -24,6 +24,7 @@ module.exports = (pool) => {
   };
 
   router.post('/:locationId/weekly-hours', authenticateToken, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     try {
       await ensureWeeklyHoursTable();
       const { tech_id, tech_name, hours_per_week } = req.body || {};
@@ -57,6 +58,7 @@ module.exports = (pool) => {
 
   // List hidden techs for a location
   router.get('/:locationId/hidden-techs', authenticateToken, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     try {
       await ensureHiddenTechsTable();
       const r = await pool.query('SELECT tech_id, tech_name FROM hidden_techs WHERE location_id = $1', [req.params.locationId]);
@@ -68,6 +70,7 @@ module.exports = (pool) => {
 
   // Toggle a tech hidden/shown. body: { tech_id, tech_name, hidden: true|false }
   router.post('/:locationId/hidden-techs', authenticateToken, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     try {
       await ensureHiddenTechsTable();
       const { tech_id, tech_name, hidden } = req.body || {};
@@ -90,6 +93,7 @@ module.exports = (pool) => {
   });
 
   router.get('/:locationId', authenticateToken, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const apiKey = process.env.SHOPMONKEY_API_KEY;
     try {
       if (req.user.role === 'manager' && req.user.location_id !== req.params.locationId) {

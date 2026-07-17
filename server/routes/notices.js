@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, syncAuth, requireOwnerOrPartner } = require('../middleware/auth');
+const { authenticateToken, syncAuth, requireRole, canAccessLocation } = require('../middleware/auth');
 
 // Shop-floor notices: short updates, celebrations, safety notes, or full-image
 // posters that rotate on the PIN-gated /display board so techs actually see
@@ -45,6 +45,20 @@ module.exports = (pool) => {
 
   const OK_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
+  // Managers (shop operators) manage ONLY their own location's notices. Global
+  // (all-locations) notices are owner/partner territory: managers see them on
+  // their board and in the list, but can't create, edit, toggle or delete them.
+  const manages = (user, noticeLocId) =>
+    ['owner', 'partner'].includes(user.role) || (user.role === 'manager' && noticeLocId && noticeLocId === user.location_id);
+  const assertManages = async (req, res) => {
+    if (['owner', 'partner'].includes(req.user.role)) return true;
+    const r = await pool.query('SELECT location_id FROM shop_notices WHERE id = $1', [req.params.id]);
+    if (!r.rows.length) { res.status(404).json({ error: 'Notice not found' }); return false; }
+    if (!manages(req.user, r.rows[0].location_id)) { res.status(403).json({ error: 'Access denied for this notice' }); return false; }
+    return true;
+  };
+
+
   const KINDS = ['notice', 'celebration', 'safety', 'poster'];
 
   // Active notices for one location's board (used by display.js too).
@@ -65,14 +79,18 @@ module.exports = (pool) => {
 
   // Admin list (all notices incl. inactive/expired, newest first). Image bytes
   // stay out of the list; has_image + the /:id/image endpoint cover previews.
-  router.get('/', authenticateToken, requireOwnerOrPartner, async (req, res) => {
+  router.get('/', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     try {
       await ensureTable();
+      const mgrFilter = req.user.role === 'manager';
       const r = await pool.query(
         `SELECT id, location_id, kind, title, body, image_url, priority, active,
                 expires_at, created_by, created_at, updated_at,
                 (image_data IS NOT NULL) AS has_image
-           FROM shop_notices ORDER BY active DESC, priority ASC, created_at DESC LIMIT 100`
+           FROM shop_notices
+          ${mgrFilter ? 'WHERE (location_id IS NULL OR location_id = $1)' : ''}
+          ORDER BY active DESC, priority ASC, created_at DESC LIMIT 100`,
+        mgrFilter ? [req.user.location_id] : []
       );
       res.json(r.rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -81,11 +99,12 @@ module.exports = (pool) => {
   // Upload a poster/graphic for a notice: raw image body (Content-Type: image/*).
   // Mirrors the marketing intake pattern — no multipart, works from the phone.
   router.post('/:id/image',
-    syncAuth, requireOwnerOrPartner,
+    syncAuth, requireRole('owner', 'partner', 'manager'),
     express.raw({ type: ['image/*', 'application/octet-stream'], limit: '15mb' }),
     async (req, res) => {
       try {
         await ensureTable();
+        if (!(await assertManages(req, res))) return;
         if (!req.body || !req.body.length) return res.status(400).json({ error: 'No image body. POST the file with Content-Type: image/png (or jpeg/webp/gif).' });
         let mime = (req.get('content-type') || '').split(';')[0].trim().toLowerCase();
         if (mime === 'application/octet-stream') mime = 'image/jpeg';
@@ -101,11 +120,14 @@ module.exports = (pool) => {
 
   // Serve a stored image (admin preview). The display board gets images inlined
   // as data URIs in its own payload, so this stays JWT-only.
-  router.get('/:id/image', authenticateToken, requireOwnerOrPartner, async (req, res) => {
+  router.get('/:id/image', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     try {
       await ensureTable();
-      const r = await pool.query('SELECT image_data, image_mime FROM shop_notices WHERE id = $1', [req.params.id]);
+      const r = await pool.query('SELECT image_data, image_mime, location_id FROM shop_notices WHERE id = $1', [req.params.id]);
       if (!r.rows.length || !r.rows[0].image_data) return res.status(404).json({ error: 'No image' });
+      if (req.user.role === 'manager' && r.rows[0].location_id && r.rows[0].location_id !== req.user.location_id) {
+        return res.status(403).json({ error: 'Access denied for this notice' });
+      }
       res.set('Content-Type', r.rows[0].image_mime || 'image/jpeg');
       res.set('Cache-Control', 'private, max-age=300');
       res.send(r.rows[0].image_data);
@@ -157,11 +179,12 @@ Rules:
     } catch { return 'Mister Transmission'; }
   };
 
-  router.post('/design-poster', syncAuth, requireOwnerOrPartner, async (req, res) => {
+  router.post('/design-poster', syncAuth, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     try {
       const KEY = process.env.ANTHROPIC_API_KEY;
       if (!KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set' });
-      const { title, body, kind, location_id } = req.body || {};
+      let { title, body, kind, location_id } = req.body || {};
+      if (req.user.role === 'manager') location_id = req.user.location_id;
       if (!title || !String(title).trim()) return res.status(400).json({ error: 'title required' });
       const mood = ['celebration', 'safety', 'notice', 'poster'].includes(kind) ? kind : 'notice';
       await ensureTable();
@@ -204,7 +227,7 @@ Rules:
 
   // 👍/👎 on a generated design. Stored with the SVG; recent rows steer the
   // next generations (see the taste block in design-poster).
-  router.post('/poster-feedback', syncAuth, requireOwnerOrPartner, async (req, res) => {
+  router.post('/poster-feedback', syncAuth, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     try {
       await ensureTable();
       const { rating, kind, title, svg } = req.body || {};
@@ -235,11 +258,12 @@ Encouragement rules: if metrics are provided, ground the praise in them — cite
 Financial privacy (hard rule): the ONLY business numbers allowed on the board are month-to-date REVENUE, CAR COUNT, LABOUR HOURS SOLD, and TECH EFFICIENCY vs its target. NEVER mention profit, margins, parts margin, profit-per-hour, costs, or average repair-order value — internal financial detail stays off the shop floor, even if it appears in the data you're given.
 Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fluff, no CTAs.`;
 
-  router.post('/poster-ideas', syncAuth, requireOwnerOrPartner, async (req, res) => {
+  router.post('/poster-ideas', syncAuth, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     try {
       const KEY = process.env.ANTHROPIC_API_KEY;
       if (!KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set' });
-      const { location_id } = req.body || {};
+      let { location_id } = req.body || {};
+      if (req.user.role === 'manager') location_id = req.user.location_id;
       await ensureTable();
       // Freshest metrics row (for the chosen board, else the freshest anywhere).
       // Deliberately narrow SELECT: revenue, cars, hours and efficiency ONLY.
@@ -294,10 +318,12 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
 
   // Create (no id) or update (with id). syncAuth: the CoS agent may post
   // notices with the machine key; it acts as owner.
-  router.post('/', syncAuth, requireOwnerOrPartner, async (req, res) => {
+  router.post('/', syncAuth, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     try {
       await ensureTable();
-      const { id, location_id, kind, title, body, image_url, priority, active, expires_at, pending_image } = req.body || {};
+      let { id, location_id, kind, title, body, image_url, priority, active, expires_at, pending_image } = req.body || {};
+      // A shop operator always posts to their own board — never global/others'.
+      if (req.user.role === 'manager') location_id = req.user.location_id;
       const k = KINDS.includes(kind) ? kind : 'notice';
       // pending_image: the client creates first, then uploads the file to
       // /:id/image — an image-only poster has no title/body/url at this point.
@@ -305,6 +331,11 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
         return res.status(400).json({ error: 'title, body or image_url required' });
       }
       if (id) {
+        if (req.user.role === 'manager') {
+          const own = await pool.query('SELECT location_id FROM shop_notices WHERE id = $1', [id]);
+          if (!own.rows.length) return res.status(404).json({ error: 'Notice not found' });
+          if (!manages(req.user, own.rows[0].location_id)) return res.status(403).json({ error: 'Access denied for this notice' });
+        }
         const r = await pool.query(
           `UPDATE shop_notices SET
              location_id = COALESCE($2, location_id),
@@ -334,9 +365,10 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
   });
 
   // Quick on/off from the admin list.
-  router.post('/:id/toggle', syncAuth, requireOwnerOrPartner, async (req, res) => {
+  router.post('/:id/toggle', syncAuth, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     try {
       await ensureTable();
+      if (!(await assertManages(req, res))) return;
       const r = await pool.query(
         'UPDATE shop_notices SET active = NOT active, updated_at = NOW() WHERE id = $1 RETURNING *',
         [req.params.id]
@@ -346,9 +378,10 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  router.delete('/:id', authenticateToken, requireOwnerOrPartner, async (req, res) => {
+  router.delete('/:id', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     try {
       await ensureTable();
+      if (!(await assertManages(req, res))) return;
       await pool.query('DELETE FROM shop_notices WHERE id = $1', [req.params.id]);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
