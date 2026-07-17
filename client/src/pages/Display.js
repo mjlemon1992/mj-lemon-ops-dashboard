@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 
-const REFRESH_MS = 5 * 60 * 1000;      // data is DB-only server-side — cheap to poll
+const REFRESH_MS = 60 * 1000;          // DB-only server-side — cheap to poll, and the
+                                       // live clock chips need to track the bay closely
 const PERIOD_FLIP_MS = 15 * 1000;      // tech panel holds each of MTD / YTD this long
 const NOTICE_FLIP_MS = 10 * 1000;      // text-banner rotation on the board page
 const BOARD_MS = 40 * 1000;            // revenue/tech page holds this long...
