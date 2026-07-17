@@ -56,8 +56,8 @@ export default function App() {
             <Route path="marketing" element={<Marketing />} />
             <Route path="marketing/approvals" element={<ApprovalsPage />} />
             <Route path="comebacks" element={<Comebacks />} />
-            <Route path="bonus" element={<ProtectedRoute ownerOrPartner><Bonus /></ProtectedRoute>} />
-            <Route path="fuel-card" element={<ProtectedRoute ownerOrPartner><FuelCard /></ProtectedRoute>} />
+            <Route path="bonus" element={<Bonus />} />
+            <Route path="fuel-card" element={<FuelCard />} />
   <Route path="wip" element={<Wip />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />
             <Route path="targets" element={<Targets />} />

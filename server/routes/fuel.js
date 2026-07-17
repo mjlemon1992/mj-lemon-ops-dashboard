@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, requireRole, requireOwner } = require('../middleware/auth');
+const { authenticateToken, requireRole, requireOwner, canAccessLocation } = require('../middleware/auth');
 const { ensureBonusFuelTables } = require('../lib/bonusFuelSchema');
 const { round2 } = require('../lib/bonusCalc');
 
@@ -12,12 +12,16 @@ module.exports = (pool) => {
   const router = express.Router();
   const ensure = () => ensureBonusFuelTables(pool);
   const who = (req) => req.user.email || req.user.name || req.user.role;
-  const read = [authenticateToken, requireRole('owner', 'partner')];
+  // Managers get their own location's card: viewing + day-to-day ledger logging
+  // (purchases, top-ups, assigning). Reconcile and settings stay owner-only.
+  const read = [authenticateToken, requireRole('owner', 'partner', 'manager')];
   const write = [authenticateToken, requireOwner];
+  const scoped = (req, res, next) => canAccessLocation(req.user, req.params.locationId)
+    ? next() : res.status(403).json({ error: 'Access denied for this location' });
   const fail = (res, e, code = 500) => res.status(code).json({ error: String(e.message || e) });
 
   // ── Summary: tiles + per-person + activity in one call ──
-  router.get('/:locationId/summary', ...read, async (req, res) => {
+  router.get('/:locationId/summary', ...read, scoped, async (req, res) => {
     try {
       await ensure();
       const locationId = req.params.locationId;
@@ -67,7 +71,7 @@ module.exports = (pool) => {
   });
 
   // ── Log a ledger row: purchase / top-up / adjustment ──
-  router.post('/:locationId/ledger', ...write, async (req, res) => {
+  router.post('/:locationId/ledger', ...read, scoped, async (req, res) => {
     try {
       await ensure();
       const { type, person_id, amount, occurred_on, memo } = req.body || {};
@@ -86,11 +90,14 @@ module.exports = (pool) => {
   });
 
   // ── Assign an unassigned purchase to a person (logged update) ──
-  router.put('/ledger/:id/assign', ...write, async (req, res) => {
+  router.put('/ledger/:id/assign', ...read, async (req, res) => {
     try {
       await ensure();
       const { person_id } = req.body || {};
       if (!person_id) return fail(res, 'person_id required', 400);
+      const { rows: lr } = await pool.query('SELECT location_id FROM fuel_ledger WHERE id=$1', [req.params.id]);
+      if (!lr.length) return fail(res, 'Ledger row not found', 404);
+      if (!canAccessLocation(req.user, lr[0].location_id)) return fail(res, 'Access denied for this location', 403);
       const { rows } = await pool.query(
         `UPDATE fuel_ledger SET person_id=$2, memo = COALESCE(memo,'') || ' · assigned by ' || $3 WHERE id=$1 RETURNING *`,
         [req.params.id, person_id, who(req)]);
@@ -127,7 +134,7 @@ module.exports = (pool) => {
   });
 
   // ── Export: full ledger + per-person summary + latest snapshot (§5) ──
-  router.get('/:locationId/export', ...read, async (req, res) => {
+  router.get('/:locationId/export', ...read, scoped, async (req, res) => {
     try {
       await ensure();
       const locationId = req.params.locationId;

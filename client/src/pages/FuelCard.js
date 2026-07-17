@@ -42,6 +42,9 @@ function FuelView({ locId }) {
 
   const { tiles, people, ledger } = data;
   const owner = user?.role === 'owner';
+  // Managers run the shop floor: they log purchases/top-ups and assign them.
+  // Reconciling against the card statement stays an owner job.
+  const canLog = ['owner', 'partner', 'manager'].includes(user?.role);
   const activePeople = people.filter((p) => p.active);
   const reconciled = tiles.variance != null && Math.abs(tiles.variance) < 0.005;
 
@@ -100,11 +103,11 @@ function FuelView({ locId }) {
           : reconciled
             ? <span className="badge success">✓ Reconciled</span>
             : <span className="badge warning">⚠ Variance {money(tiles.variance)}{tiles.unassigned_count ? ` — ${tiles.unassigned_count} purchase${tiles.unassigned_count > 1 ? 's' : ''} need assigning` : ''}</span>}
-        {owner && (
+        {canLog && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button onClick={logPurchase}>＋ Log purchase</button>
             <button onClick={topUp}>＋ Top-up</button>
-            <button className="primary" onClick={reconcile}>⇄ Reconcile card</button>
+            {owner && <button className="primary" onClick={reconcile}>⇄ Reconcile card</button>}
           </div>
         )}
       </div>
@@ -211,7 +214,7 @@ function FuelView({ locId }) {
                   <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: Number(l.amount) < 0 ? 'var(--text)' : 'var(--success)' }}>
                     {Number(l.amount) < 0 ? '−' : '+'}{money(Math.abs(l.amount))}
                   </span>
-                  {unassigned && owner && (
+                  {unassigned && canLog && (
                     assigning === l.id ? (
                       <select autoFocus onBlur={() => setAssigning(null)} onChange={(e) => e.target.value && assign(l.id, e.target.value)} defaultValue="">
                         <option value="">assign to…</option>
