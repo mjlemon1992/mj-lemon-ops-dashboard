@@ -179,6 +179,72 @@ Rules:
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ── AI poster ideas ("💡 Suggest ideas", board-flavoured) ──
+  // Proposes 4 internal posters for the techs: a safety reminder, a team
+  // encouragement piece (metrics-aware — reads the shop's OWN numbers from
+  // metrics_cache so praise has substance), a seasonal/culture piece, and a
+  // wildcard. Safety ideas are constrained to universal, non-procedural
+  // reminders — the model must never write repair procedures or spec claims.
+  const IDEAS_SYSTEM = `You suggest posters for the shop-floor notice board of Mister Transmission (Parkland Transmission), an automotive transmission repair shop in Alberta/BC, Canada. The audience is the TECHNICIANS and shop staff (internal) — never customers.
+
+Return ONLY a JSON array of exactly 4 ideas — no prose, no markdown fences:
+[{"kind":"safety|celebration|notice","title":"poster headline, max 8 words","body":"supporting line, max 160 chars","why":"max 60 chars — why this, now"}]
+
+The mix: one SAFETY reminder, one team ENCOURAGEMENT/celebration, one seasonal or shop-culture piece for the given month, one wildcard.
+Safety rules: only universally-accepted, non-procedural shop safety (housekeeping, PPE, eye protection, lifting posture, hydration, slow-down-when-tired, spill cleanup). NEVER specific repair procedures, lift/jack instructions, electrical steps, or any torque/spec/technical claim.
+Encouragement rules: if metrics are provided, ground the praise in them — cite ONLY numbers actually given, never invent or extrapolate. If no metrics, keep it genuine and general.
+Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fluff, no CTAs.`;
+
+  router.post('/poster-ideas', syncAuth, requireOwnerOrPartner, async (req, res) => {
+    try {
+      const KEY = process.env.ANTHROPIC_API_KEY;
+      if (!KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set' });
+      const { location_id } = req.body || {};
+      await ensureTable();
+      // Freshest metrics row (for the chosen board, else the freshest anywhere).
+      let m = null;
+      try {
+        const q = location_id
+          ? await pool.query(
+              `SELECT m.revenue_mtd, m.car_count_mtd, m.pph, m.parts_margin, m.created_at, l.name
+                 FROM metrics_cache m JOIN locations l ON l.id = m.location_id
+                WHERE m.location_id = $1 ORDER BY m.created_at DESC LIMIT 1`, [location_id])
+          : await pool.query(
+              `SELECT m.revenue_mtd, m.car_count_mtd, m.pph, m.parts_margin, m.created_at, l.name
+                 FROM metrics_cache m JOIN locations l ON l.id = m.location_id
+                ORDER BY m.created_at DESC LIMIT 1`);
+        m = q.rows[0] || null;
+      } catch (_) { /* metrics are garnish, never a blocker */ }
+      const month = new Date().toLocaleDateString('en-CA', { month: 'long', timeZone: 'America/Edmonton' });
+      const ctx = m && Number(m.revenue_mtd) > 0
+        ? `Latest shop metrics for ${String(m.name || '').trim()} (as of ${new Date(m.created_at).toISOString().slice(0, 10)}): revenue MTD $${Math.round(m.revenue_mtd).toLocaleString('en-CA')}, ${m.car_count_mtd} cars, profit/hr $${Math.round(m.pph)}, parts margin ${Math.round(m.parts_margin)}%.`
+        : 'No metrics available — keep encouragement general.';
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: DESIGN_MODEL, max_tokens: 900, system: IDEAS_SYSTEM,
+          messages: [{ role: 'user', content: `Month: ${month}. ${ctx} Suggest 4 board poster ideas.` }],
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) return res.status(502).json({ error: `Anthropic ${r.status}` });
+      let raw = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').replace(/```json|```/g, '').trim();
+      const s = raw.indexOf('['), e = raw.lastIndexOf(']');
+      if (s >= 0 && e > s) raw = raw.slice(s, e + 1);
+      const ideas = JSON.parse(raw);
+      const KIND_OK = ['safety', 'celebration', 'notice'];
+      res.json({
+        ideas: (Array.isArray(ideas) ? ideas : []).slice(0, 6).map(i => ({
+          kind: KIND_OK.includes(i.kind) ? i.kind : 'notice',
+          title: String(i.title || '').slice(0, 120),
+          body: String(i.body || '').slice(0, 200),
+          why: String(i.why || '').slice(0, 80),
+        })).filter(i => i.title),
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // Create (no id) or update (with id). syncAuth: the CoS agent may post
   // notices with the machine key; it acts as owner.
   router.post('/', syncAuth, requireOwnerOrPartner, async (req, res) => {
