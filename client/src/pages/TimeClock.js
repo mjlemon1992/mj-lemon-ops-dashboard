@@ -30,7 +30,7 @@ export default function TimeClock() {
 }
 
 function ClockAdmin({ locId }) {
-  const { api, user } = useAuth();
+  const { api, user, token } = useAuth();
   const [periods, setPeriods] = useState(null);   // biweekly pay periods (techs paid biweekly)
   const [sel, setSel] = useState(null);           // selected period {from,to}
   const [data, setData] = useState(null);
@@ -187,6 +187,30 @@ function ClockAdmin({ locId }) {
     setBusy(false);
   };
 
+  // Period exports: the current tech/period selection as a PDF — download or email.
+  const exportPdf = async () => {
+    setErr(null);
+    try {
+      const res = await fetch(`/api/clock/${locId}/export-pdf?from=${sel.from}&to=${sel.to}&person=${personFilter}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `timesheet-${sel.from}-to-${sel.to}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch (e) { setErr(e.message); }
+  };
+  const emailPdf = async () => {
+    const to = window.prompt('Email the timesheet PDF to:', user?.email || '');
+    if (!to) return;
+    setBusy(true); setErr(null);
+    try {
+      const out = await api(`/clock/${locId}/email-timesheet`, { method: 'POST', body: JSON.stringify({ from: sel.from, to: sel.to, person: personFilter, email: to.trim() }) });
+      setHolNote(`Timesheet PDF sent to ${out.sent_to}`);
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
   // Returns true on success so the edit row can close itself.
   const saveEntry = async (id, body) => {
     setBusy(true); setErr(null);
@@ -287,20 +311,30 @@ function ClockAdmin({ locId }) {
       {editReqs.length > 0 && (
         <div className="card" style={{ marginBottom: '16px', border: '1px solid var(--accent)' }}>
           <div style={{ fontWeight: 600, marginBottom: '10px' }}>✋ Timesheet change requests</div>
-          {editReqs.map((r) => (
-            <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px', marginBottom: '6px' }}>
-              <span style={{ fontWeight: 700 }}>{r.person_name}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>
-                {r.entry_id ? `Punch ${fmtDT(r.clock_in)}${r.clock_out ? ` → ${fmtDT(r.clock_out)}` : ''}` : 'Missing punch'}
-              </span>
-              <span style={{ fontSize: '13px', fontStyle: 'italic', color: 'var(--text2)' }}>"{r.note}"</span>
-              <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
-                <button className="primary" disabled={busy} onClick={() => resolveEditReq(r, 'resolved')} title="Mark done after fixing the punch below" style={{ fontSize: '12px', padding: '5px 12px' }}>✓ Resolved</button>
-                <button disabled={busy} onClick={() => resolveEditReq(r, 'dismissed')} style={{ fontSize: '12px', padding: '5px 12px', color: 'var(--danger)' }}>Dismiss</button>
-              </span>
-            </div>
-          ))}
-          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Fix the punch in the list below (edit/add), then mark the request resolved.</div>
+          {editReqs.map((r) => {
+            const hasProposal = r.proposed_clock_in || r.proposed_clock_out || r.proposed_break_minutes != null;
+            return (
+              <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px', marginBottom: '6px' }}>
+                <span style={{ fontWeight: 700 }}>{r.person_name}</span>
+                <span style={{ fontSize: '13px', color: 'var(--text2)' }}>
+                  {r.entry_id ? `Punch ${fmtDT(r.clock_in)}${r.clock_out ? ` → ${fmtDT(r.clock_out)}` : ''}` : 'Missing punch'}
+                </span>
+                <span style={{ fontSize: '13px', fontStyle: 'italic', color: 'var(--text2)' }}>"{r.note}"</span>
+                {hasProposal && (
+                  <span style={{ fontSize: '13px', color: 'var(--accent)', fontWeight: 600 }}>
+                    proposes {r.proposed_clock_in ? fmtDT(r.proposed_clock_in) : '—'} → {r.proposed_clock_out ? fmtDT(r.proposed_clock_out) : '—'}
+                    {r.proposed_break_minutes != null ? ` · break ${r.proposed_break_minutes} min` : ''}
+                  </span>
+                )}
+                <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+                  {hasProposal && <button className="primary" disabled={busy} onClick={() => resolveEditReq(r, 'apply')} title="Apply the proposed times and mark resolved" style={{ fontSize: '12px', padding: '5px 12px' }}>✓ Apply & resolve</button>}
+                  <button disabled={busy} onClick={() => resolveEditReq(r, 'resolved')} title="Mark done after fixing the punch by hand below" style={{ fontSize: '12px', padding: '5px 12px' }}>Resolved</button>
+                  <button disabled={busy} onClick={() => resolveEditReq(r, 'dismissed')} style={{ fontSize: '12px', padding: '5px 12px', color: 'var(--danger)' }}>Dismiss</button>
+                </span>
+              </div>
+            );
+          })}
+          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>"Apply & resolve" uses the tech's proposed times in one tap; otherwise fix the punch below and mark resolved.</div>
         </div>
       )}
 
@@ -388,7 +422,11 @@ function ClockAdmin({ locId }) {
               <option key={p.from} value={p.from}>{fmtD(p.from)} – {fmtD(p.to)}{p.current ? ' (current)' : ''}</option>
             ))}
           </select>
-          <button onClick={() => setAdding(true)} style={{ marginLeft: 'auto', fontSize: '12px', padding: '5px 12px' }}>＋ Add manual entry</button>
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+            <button onClick={exportPdf} disabled={busy || !sel} title="Download this selection as a PDF" style={{ fontSize: '12px', padding: '5px 12px' }}>⬇ PDF</button>
+            <button onClick={emailPdf} disabled={busy || !sel} title="Email this selection as a PDF" style={{ fontSize: '12px', padding: '5px 12px' }}>📧 Email</button>
+            <button onClick={() => setAdding(true)} style={{ fontSize: '12px', padding: '5px 12px' }}>＋ Add manual entry</button>
+          </span>
         </div>
         {adding && <AddRow people={people} onCancel={() => setAdding(false)} onSave={addEntry} busy={busy} />}
         <div style={{ overflowX: 'auto' }}>
@@ -492,7 +530,10 @@ function EntryRow({ e, onSave, onDelete, busy }) {
       <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)' }}>{e.person_name}{e.source === 'manual' ? ' ✎' : ''}</td>
       <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)' }}>{fmtDT(e.clock_in)}</td>
       <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)' }}>{e.clock_out ? fmtDT(e.clock_out) : <span style={{ color: 'var(--warning)' }}>on shift</span>}</td>
-      <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)' }}>{Math.round((e.break_seconds || 0) / 60)} min</td>
+      <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)' }}
+        title={Array.isArray(e.breaks) && e.breaks.length ? e.breaks.map((b) => `${fmtDT(b.start)} → ${b.end ? fmtDT(b.end) : 'open'}`).join('\n') : undefined}>
+        {Math.round((e.break_seconds || 0) / 60)} min{Array.isArray(e.breaks) && e.breaks.length > 1 ? ` (${e.breaks.length})` : ''}
+      </td>
       <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>{e.paid_hours != null ? `${e.paid_hours} h` : '—'}</td>
       <td style={{ padding: '9px 12px', borderBottom: '0.5px solid var(--border)', whiteSpace: 'nowrap' }}>
         <button onClick={beginEdit} style={{ fontSize: '11px', padding: '3px 8px' }}>Edit</button>{' '}

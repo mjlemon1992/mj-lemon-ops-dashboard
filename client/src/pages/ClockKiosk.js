@@ -28,6 +28,32 @@ const resizePhoto = (file) => new Promise((resolve, reject) => {
   img.onerror = reject;
   img.src = URL.createObjectURL(file);
 });
+// Compact hour/minute/AM-PM selects for proposing corrected punch times.
+const p2 = (n) => String(n).padStart(2, '0');
+function TimeSel({ v, onChange }) {
+  const set = (patch) => onChange({ ...v, ...patch });
+  return (
+    <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+      <select value={v.h} onChange={(e) => set({ h: Number(e.target.value) })} style={{ width: 'auto', fontSize: '15px' }}>
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((h) => <option key={h} value={h}>{h}</option>)}
+      </select>:
+      <select value={v.m} onChange={(e) => set({ m: Number(e.target.value) })} style={{ width: 'auto', fontSize: '15px' }}>
+        {Array.from({ length: 60 }, (_, i) => i).map((m) => <option key={m} value={m}>{p2(m)}</option>)}
+      </select>
+      <select value={v.ap} onChange={(e) => set({ ap: e.target.value })} style={{ width: 'auto', fontSize: '15px', fontWeight: 600 }}>
+        <option>AM</option><option>PM</option>
+      </select>
+    </span>
+  );
+}
+const timeToIso = (dateStr, t) => new Date(`${dateStr}T${p2((t.h % 12) + (t.ap === 'PM' ? 12 : 0))}:${p2(t.m)}:00`).toISOString();
+const isoToTime = (iso, fallback) => {
+  if (!iso) return fallback;
+  const d = new Date(iso);
+  return { h: ((d.getHours() + 11) % 12) + 1, m: d.getMinutes(), ap: d.getHours() >= 12 ? 'PM' : 'AM' };
+};
+const localDateOf = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; };
+
 // Photo if they have one, otherwise initials in their colour.
 function Avatar({ p, size = 44 }) {
   const st = { width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 };
@@ -109,17 +135,36 @@ export default function ClockKiosk() {
     } catch { setError('Network error'); }
     setBusy(false);
   };
-  const requestEdit = async (entryId) => {
-    const note = window.prompt(entryId ? 'What needs changing on this punch?' : 'Describe the missing punch (day and times):', '');
-    if (!note || !note.trim()) return;
+  // Change-request form state: which entry (null = missing punch), note, and
+  // optionally the corrected times the tech proposes.
+  const [editReq, setEditReq] = useState(null);
+  const openEditReq = (entry) => {
+    const date = entry ? localDateOf(entry.clock_in) : new Date().toLocaleDateString('en-CA');
+    setEditReq({
+      entry: entry || null, note: '', date, useTimes: !entry,
+      tin: isoToTime(entry && entry.clock_in, { h: 8, m: 0, ap: 'AM' }),
+      tout: isoToTime(entry && entry.clock_out, { h: 4, m: 30, ap: 'PM' }),
+      brk: entry ? Math.round((entry.break_seconds || 0) / 60) : 0,
+    });
+    setError('');
+  };
+  const submitEditReq = async () => {
+    const f = editReq;
+    if (!f.note.trim()) { setError('Say what needs changing'); return; }
     setBusy(true); setError('');
     try {
+      const body = { loc_pin: locPin, person_id: sheet.person.id, pin: sheet.pin, entry_id: f.entry ? f.entry.id : null, note: f.note };
+      if (f.useTimes) {
+        body.proposed_clock_in = timeToIso(f.date, f.tin);
+        body.proposed_clock_out = timeToIso(f.date, f.tout);
+        body.proposed_break_minutes = Number(f.brk) || 0;
+      }
       const res = await fetch(`/api/clock/${locationId}/edit-request`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loc_pin: locPin, person_id: sheet.person.id, pin: sheet.pin, entry_id: entryId || null, note }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(out.error || 'Failed'); setBusy(false); return; }
+      setEditReq(null);
       setFlash('Change requested — the owner will review it');
       setTimeout(() => setFlash(''), 3000);
     } catch { setError('Network error'); }
@@ -268,20 +313,61 @@ export default function ClockKiosk() {
           {fmtDay(sheet.from + 'T12:00:00')} → {fmtDay(sheet.to + 'T12:00:00')} (this pay period) · <b style={{ color: 'var(--text1)' }}>{sheet.total_paid} h paid</b>
         </div>
         {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', marginBottom: '10px' }}>✓ {flash}</div>}
-        <div style={{ width: '100%', maxWidth: '620px' }}>
+        <div style={{ width: '100%', maxWidth: '640px' }}>
           {(sheet.entries || []).length === 0 && <div style={{ color: 'var(--text3)', textAlign: 'center', padding: '20px' }}>No punches this period yet.</div>}
           {(sheet.entries || []).map((e) => (
-            <div key={e.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '10px 14px', background: 'var(--bg2)', borderRadius: '10px', marginBottom: '6px', flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 600, minWidth: '110px' }}>{fmtDay(e.clock_in)}</span>
-              <span style={{ color: 'var(--text2)', fontSize: '14px' }}>
-                {fmtTime(e.clock_in)} → {e.clock_out ? fmtTime(e.clock_out) : 'on shift'}
-                {e.break_seconds > 0 ? ` · break ${Math.round(e.break_seconds / 60)} min` : ''}
-              </span>
-              <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{e.paid_hours != null ? `${e.paid_hours} h` : '—'}</span>
-              <button disabled={busy} onClick={() => requestEdit(e.id)} style={{ fontSize: '11px', padding: '4px 10px' }}>✋ Request change</button>
+            <div key={e.id} style={{ background: 'var(--bg2)', borderRadius: '10px', marginBottom: '6px', padding: '10px 14px' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600, minWidth: '110px' }}>{fmtDay(e.clock_in)}</span>
+                <span style={{ color: 'var(--text2)', fontSize: '14px' }}>
+                  {fmtTime(e.clock_in)} → {e.clock_out ? fmtTime(e.clock_out) : 'on shift'}
+                  {Array.isArray(e.breaks) && e.breaks.length
+                    ? ` · break${e.breaks.length > 1 ? 's' : ''} ${e.breaks.map((b) => `${fmtTime(b.start)}–${b.end ? fmtTime(b.end) : '…'}`).join(', ')}`
+                    : (e.break_seconds > 0 ? ` · break ${Math.round(e.break_seconds / 60)} min` : '')}
+                </span>
+                <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{e.paid_hours != null ? `${e.paid_hours} h` : '—'}</span>
+                <button disabled={busy} onClick={() => (editReq && editReq.entry && editReq.entry.id === e.id ? setEditReq(null) : openEditReq(e))} style={{ fontSize: '11px', padding: '4px 10px' }}>✋ Request change</button>
+              </div>
+              {editReq && editReq.entry && editReq.entry.id === e.id && (
+                <div style={{ marginTop: '10px', padding: '10px', background: 'var(--bg3)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <input placeholder="What needs changing?" value={editReq.note} onChange={(ev) => setEditReq((s) => ({ ...s, note: ev.target.value }))} style={{ fontSize: '15px', padding: '8px' }} />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={editReq.useTimes} onChange={(ev) => setEditReq((s) => ({ ...s, useTimes: ev.target.checked }))} />
+                    Suggest the corrected times
+                  </label>
+                  {editReq.useTimes && (
+                    <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'center', fontSize: '13px', color: 'var(--text3)' }}>
+                      <span>In <TimeSel v={editReq.tin} onChange={(v) => setEditReq((s) => ({ ...s, tin: v }))} /></span>
+                      <span>Out <TimeSel v={editReq.tout} onChange={(v) => setEditReq((s) => ({ ...s, tout: v }))} /></span>
+                      <span>Break <input type="number" min="0" value={editReq.brk} onChange={(ev) => setEditReq((s) => ({ ...s, brk: ev.target.value }))} style={{ width: '58px' }} /> min</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="primary" disabled={busy} onClick={submitEditReq} style={{ fontSize: '13px', padding: '7px 16px' }}>Send request</button>
+                    <button onClick={() => setEditReq(null)} style={{ fontSize: '13px', padding: '7px 14px' }}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
-          <button disabled={busy} onClick={() => requestEdit(null)} style={{ fontSize: '13px', padding: '8px 14px', marginTop: '6px' }}>＋ Report a missing punch</button>
+          {editReq && !editReq.entry ? (
+            <div style={{ marginTop: '8px', padding: '12px', background: 'var(--bg3)', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ fontWeight: 600, fontSize: '14px' }}>＋ Report a missing punch</div>
+              <input placeholder="What happened? (e.g. forgot to clock in Tuesday)" value={editReq.note} onChange={(ev) => setEditReq((s) => ({ ...s, note: ev.target.value }))} style={{ fontSize: '15px', padding: '8px' }} />
+              <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'center', fontSize: '13px', color: 'var(--text3)' }}>
+                <span>Day <input type="date" value={editReq.date} onClick={openPicker} onFocus={openPicker} onChange={(ev) => setEditReq((s) => ({ ...s, date: ev.target.value }))} /></span>
+                <span>In <TimeSel v={editReq.tin} onChange={(v) => setEditReq((s) => ({ ...s, tin: v }))} /></span>
+                <span>Out <TimeSel v={editReq.tout} onChange={(v) => setEditReq((s) => ({ ...s, tout: v }))} /></span>
+                <span>Break <input type="number" min="0" value={editReq.brk} onChange={(ev) => setEditReq((s) => ({ ...s, brk: ev.target.value }))} style={{ width: '58px' }} /> min</span>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="primary" disabled={busy} onClick={submitEditReq} style={{ fontSize: '13px', padding: '7px 16px' }}>Send request</button>
+                <button onClick={() => setEditReq(null)} style={{ fontSize: '13px', padding: '7px 14px' }}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button disabled={busy} onClick={() => openEditReq(null)} style={{ fontSize: '13px', padding: '8px 14px', marginTop: '6px' }}>＋ Report a missing punch</button>
+          )}
         </div>
         {error && <div style={{ color: 'var(--danger)', marginTop: '12px' }}>{error}</div>}
         <button onClick={() => { setView('roster'); setSheet(null); setActive(null); setPin(''); setError(''); }} style={{ marginTop: '18px', fontSize: '15px', padding: '10px 18px' }}>← Done</button>
