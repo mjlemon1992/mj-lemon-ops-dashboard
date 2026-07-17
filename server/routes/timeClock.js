@@ -64,6 +64,7 @@ module.exports = (pool) => {
         people: people.map((p) => ({
           id: p.id, name: p.name, role: p.role, has_pin: p.has_pin,
           status: statusOf(byId[p.id]), since: byId[p.id] ? (byId[p.id].break_started_at || byId[p.id].clock_in) : null,
+          clock_in: byId[p.id] ? byId[p.id].clock_in : null,   // original in-time, always
         })),
       });
     } catch (e) { fail(res, e); }
@@ -102,15 +103,17 @@ module.exports = (pool) => {
       if (action === 'break_end') {
         if (!open.break_started_at) return fail(res, 'Not on break', 409);
         await pool.query("UPDATE time_clock_entry SET break_seconds = break_seconds + EXTRACT(EPOCH FROM (now() - break_started_at)), break_started_at = NULL WHERE id=$1", [open.id]);
-        return res.json({ status: 'on', name: person.name });
+        // clock_in returned so the kiosk can reassure: the original shift is intact.
+        return res.json({ status: 'on', name: person.name, clock_in: open.clock_in });
       }
-      // out — auto-close an open break first
-      await pool.query(
+      // out — auto-close an open break first; report the day's paid hours back.
+      const { rows: closed } = await pool.query(
         `UPDATE time_clock_entry
             SET break_seconds = break_seconds + COALESCE(EXTRACT(EPOCH FROM (now() - break_started_at)), 0),
                 break_started_at = NULL, clock_out = now()
-          WHERE id=$1`, [open.id]);
-      return res.json({ status: 'off', name: person.name });
+          WHERE id=$1
+          RETURNING ROUND((EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2) AS paid_hours`, [open.id]);
+      return res.json({ status: 'off', name: person.name, paid_hours: Number(closed[0].paid_hours) });
     } catch (e) { fail(res, e); }
   });
 
