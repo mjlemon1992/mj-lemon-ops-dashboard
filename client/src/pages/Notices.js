@@ -83,7 +83,9 @@ export default function Notices() {
     if (!form.title.trim()) { setError('Give the poster a title first — that becomes the headline.'); return; }
     setDesigning(true); setError('');
     try {
-      const d = await api('/notices/design-poster', { method: 'POST', body: JSON.stringify({ title: form.title, body: form.body, kind: form.kind }) });
+      // Board selection drives the branding: one location -> that shop's line,
+      // All locations -> the combined Red Deer & Kelowna line.
+      const d = await api('/notices/design-poster', { method: 'POST', body: JSON.stringify({ title: form.title, body: form.body, kind: form.kind, location_id: form.location_id || null }) });
       const blob = await renderNoticePoster(d.svg);
       if (genPreview) URL.revokeObjectURL(genPreview);
       setGenBlob(blob); setGenPreview(URL.createObjectURL(blob));
@@ -206,7 +208,7 @@ export default function Notices() {
               {designing ? 'Designing…' : '✨ Generate poster'}
             </button>
             <span style={{ fontSize: '12px', color: 'var(--text3)' }}>
-              Claude designs a board poster from the title, message and type above — no upload needed.
+              Claude designs a board poster from the title, message and type above. Branding follows the Board choice — one shop gets its own line, “All locations” gets the combined brand.
             </span>
           </div>
           {genPreview && (
