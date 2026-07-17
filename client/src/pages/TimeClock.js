@@ -417,28 +417,9 @@ function ClockAdmin({ locId }) {
         )}
       </div>
 
-      {/* Upcoming approved time off */}
-      {upcoming.length > 0 && (
-        <div className="card" style={{ marginBottom: '16px' }}>
-          <div style={{ fontWeight: 600, marginBottom: '10px' }}>Upcoming time off</div>
-          {upcoming.map((r) => (
-            <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', marginBottom: '4px' }}>
-              <span style={{ fontWeight: 600 }}>{r.type === 'closure' ? '🚪 Shop closed' : r.person_name}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{r.type === 'closure' ? '' : (OFF_LABEL[r.type] || r.type) + ' · '}{fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'}{r.type === 'closure' ? '' : ` = ${r.hours} h`}</b></span>
-              {r.type !== 'closure' && (
-                <button disabled={busy} onClick={() => setPaidFlag(r, !(r.paid === true))}
-                  style={{ fontSize: '11px', padding: '3px 10px', fontWeight: 700, color: r.paid === true ? 'var(--success)' : r.paid === false ? 'var(--text3)' : 'var(--warning)' }}>
-                  {r.paid === true ? '💰 PAID' : r.paid === false ? 'UNPAID' : '❓ paid?'}
-                </button>
-              )}
-              {r.sm_appointment_id && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>📅 on Shopmonkey</span>}
-              <button disabled={busy} onClick={() => cancelOff(r)} style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px', color: 'var(--danger)' }}>Cancel</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Entries — filterable by technician and pay period */}
+      {/* Entries — filterable by technician and pay period. Sits right under
+          the paid-hours summary: the payroll number and its punch detail read
+          together; time-off admin follows below. */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '12px 16px', borderBottom: '0.5px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <span style={{ fontWeight: 600 }}>Punches</span>
@@ -485,6 +466,27 @@ function ClockAdmin({ locId }) {
           </table>
         </div>
       </div>
+
+      {/* Upcoming approved time off */}
+      {upcoming.length > 0 && (
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <div style={{ fontWeight: 600, marginBottom: '10px' }}>Upcoming time off</div>
+          {upcoming.map((r) => (
+            <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', marginBottom: '4px' }}>
+              <span style={{ fontWeight: 600 }}>{r.type === 'closure' ? '🚪 Shop closed' : r.person_name}</span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{r.type === 'closure' ? '' : (OFF_LABEL[r.type] || r.type) + ' · '}{fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'}{r.type === 'closure' ? '' : ` = ${r.hours} h`}</b></span>
+              {r.type !== 'closure' && (
+                <button disabled={busy} onClick={() => setPaidFlag(r, !(r.paid === true))}
+                  style={{ fontSize: '11px', padding: '3px 10px', fontWeight: 700, color: r.paid === true ? 'var(--success)' : r.paid === false ? 'var(--text3)' : 'var(--warning)' }}>
+                  {r.paid === true ? '💰 PAID' : r.paid === false ? 'UNPAID' : '❓ paid?'}
+                </button>
+              )}
+              {r.sm_appointment_id && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>📅 on Shopmonkey</span>}
+              <button disabled={busy} onClick={() => cancelOff(r)} style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px', color: 'var(--danger)' }}>Cancel</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
