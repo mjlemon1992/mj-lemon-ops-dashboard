@@ -129,7 +129,7 @@ module.exports = (pool) => {
       const iso = (t) => new Date(t).toISOString().slice(0, 10);
       const from = iso(a + idx * 14 * DAY), to = iso(a + idx * 14 * DAY + 13 * DAY);
       const { rows: entries } = await pool.query(
-        `SELECT id, clock_in, clock_out, break_seconds,
+        `SELECT id, clock_in, clock_out, break_seconds, breaks,
                 CASE WHEN clock_out IS NULL THEN NULL ELSE ${paidExpr} END AS paid_hours
            FROM time_clock_entry e
           WHERE location_id=$1 AND person_id=$2
@@ -147,15 +147,21 @@ module.exports = (pool) => {
       if (!(await checkLocPin(req, res))) return;
       const person = await personAuth(req, res);
       if (!person) return;
-      const { entry_id, note } = req.body || {};
+      const { entry_id, note, proposed_clock_in, proposed_clock_out, proposed_break_minutes } = req.body || {};
       if (!note || !String(note).trim()) return fail(res, 'Say what needs changing', 400);
+      if (proposed_clock_in && proposed_clock_out && new Date(proposed_clock_out) <= new Date(proposed_clock_in)) {
+        return fail(res, 'Proposed clock-out must be after clock-in', 400);
+      }
       const { rows: dup } = await pool.query(
         "SELECT 1 FROM time_edit_request WHERE person_id=$1 AND status='pending' AND COALESCE(entry_id::text,'') = COALESCE($2,'') LIMIT 1",
         [person.id, entry_id || null]);
       if (dup.length) return fail(res, 'Already requested — the owner will review it', 409);
       await pool.query(
-        'INSERT INTO time_edit_request (location_id, person_id, entry_id, note) VALUES ($1,$2,$3,$4)',
-        [req.params.locationId, person.id, entry_id || null, String(note).slice(0, 400)]);
+        `INSERT INTO time_edit_request (location_id, person_id, entry_id, note, proposed_clock_in, proposed_clock_out, proposed_break_minutes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [req.params.locationId, person.id, entry_id || null, String(note).slice(0, 400),
+         proposed_clock_in || null, proposed_clock_out || null,
+         proposed_break_minutes != null ? Math.max(0, Math.round(Number(proposed_break_minutes))) : null]);
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
@@ -185,14 +191,23 @@ module.exports = (pool) => {
         return res.json({ status: 'on', name: person.name });
       }
       if (!open) return fail(res, `${person.name} is not clocked in`, 409);
+      // Break SEGMENTS ([{start,end}]) are recorded alongside the break_seconds
+      // total, so timesheets can show when each break actually happened.
+      const segs = Array.isArray(open && open.breaks) ? open.breaks : [];
       if (action === 'break_start') {
         if (open.break_started_at) return fail(res, 'Already on break', 409);
-        await pool.query('UPDATE time_clock_entry SET break_started_at=now() WHERE id=$1', [open.id]);
+        await pool.query('UPDATE time_clock_entry SET break_started_at=now(), breaks=$2 WHERE id=$1',
+          [open.id, JSON.stringify([...segs, { start: new Date().toISOString() }])]);
         return res.json({ status: 'break', name: person.name });
       }
+      const closeSegs = () => {
+        if (!segs.length || segs[segs.length - 1].end) return segs;
+        return [...segs.slice(0, -1), { ...segs[segs.length - 1], end: new Date().toISOString() }];
+      };
       if (action === 'break_end') {
         if (!open.break_started_at) return fail(res, 'Not on break', 409);
-        await pool.query("UPDATE time_clock_entry SET break_seconds = break_seconds + EXTRACT(EPOCH FROM (now() - break_started_at)), break_started_at = NULL WHERE id=$1", [open.id]);
+        await pool.query("UPDATE time_clock_entry SET break_seconds = break_seconds + EXTRACT(EPOCH FROM (now() - break_started_at)), break_started_at = NULL, breaks=$2 WHERE id=$1",
+          [open.id, JSON.stringify(closeSegs())]);
         // clock_in returned so the kiosk can reassure: the original shift is intact.
         return res.json({ status: 'on', name: person.name, clock_in: open.clock_in });
       }
@@ -200,9 +215,10 @@ module.exports = (pool) => {
       const { rows: closed } = await pool.query(
         `UPDATE time_clock_entry
             SET break_seconds = break_seconds + COALESCE(EXTRACT(EPOCH FROM (now() - break_started_at)), 0),
-                break_started_at = NULL, clock_out = now()
+                break_started_at = NULL, breaks=$2, clock_out = now()
           WHERE id=$1
-          RETURNING ROUND((EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2) AS paid_hours`, [open.id]);
+          RETURNING ROUND((EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2) AS paid_hours`,
+        [open.id, JSON.stringify(open.break_started_at ? closeSegs() : segs)]);
       return res.json({ status: 'off', name: person.name, paid_hours: Number(closed[0].paid_hours) });
     } catch (e) { fail(res, e); }
   });
@@ -591,12 +607,131 @@ module.exports = (pool) => {
     try {
       await ensure();
       const action = (req.body || {}).action;
-      if (!['resolved', 'dismissed'].includes(action)) return fail(res, 'action must be resolved|dismissed', 400);
-      const { rows: rr } = await pool.query('SELECT location_id FROM time_edit_request WHERE id=$1', [req.params.id]);
+      if (!['resolved', 'dismissed', 'apply'].includes(action)) return fail(res, 'action must be resolved|dismissed|apply', 400);
+      const { rows: rr } = await pool.query('SELECT * FROM time_edit_request WHERE id=$1', [req.params.id]);
       if (!rr.length) return fail(res, 'Request not found', 404);
-      if (!canAccessLocation(req.user, rr[0].location_id)) return fail(res, 'Access denied for this location', 403);
-      await pool.query('UPDATE time_edit_request SET status=$2, resolved_by=$3, resolved_at=now() WHERE id=$1', [req.params.id, action, who(req)]);
-      res.json({ ok: true });
+      const r = rr[0];
+      if (!canAccessLocation(req.user, r.location_id)) return fail(res, 'Access denied for this location', 403);
+      // "Apply": put the tech's proposed times straight onto the entry (or
+      // create the missing punch), then mark resolved — one tap.
+      if (action === 'apply') {
+        if (!r.proposed_clock_in && !r.proposed_clock_out && r.proposed_break_minutes == null) {
+          return fail(res, 'No proposed times on this request — fix the punch by hand and mark it resolved', 400);
+        }
+        if (r.entry_id) {
+          const { rows: er } = await pool.query('SELECT * FROM time_clock_entry WHERE id=$1', [r.entry_id]);
+          if (!er.length) return fail(res, 'The punch this request refers to no longer exists', 404);
+          const ci = r.proposed_clock_in || er[0].clock_in;
+          const co = r.proposed_clock_out || er[0].clock_out;
+          if (co && new Date(co) <= new Date(ci)) return fail(res, 'Proposed times are inverted', 400);
+          await pool.query(
+            `UPDATE time_clock_entry SET clock_in=$2, clock_out=$3,
+                    break_seconds=COALESCE($4, break_seconds), break_started_at=NULL,
+                    corrected_by=$5, corrected_at=now() WHERE id=$1`,
+            [r.entry_id, ci, co, r.proposed_break_minutes != null ? r.proposed_break_minutes * 60 : null, who(req)]);
+        } else {
+          if (!r.proposed_clock_in || !r.proposed_clock_out) return fail(res, 'A missing punch needs both proposed times — add it by hand instead', 400);
+          await pool.query(
+            `INSERT INTO time_clock_entry (location_id, person_id, clock_in, clock_out, break_seconds, note, source, created_by, corrected_by, corrected_at)
+             VALUES ($1,$2,$3,$4,$5,$6,'manual',$7,$7,now())`,
+            [r.location_id, r.person_id, r.proposed_clock_in, r.proposed_clock_out,
+             (r.proposed_break_minutes || 0) * 60, `from change request: ${r.note}`.slice(0, 300), who(req)]);
+        }
+      }
+      await pool.query('UPDATE time_edit_request SET status=$2, resolved_by=$3, resolved_at=now() WHERE id=$1',
+        [req.params.id, action === 'dismissed' ? 'dismissed' : 'resolved', who(req)]);
+      res.json({ ok: true, applied: action === 'apply' });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ── Pay-period timesheet PDF (individual or whole crew) + email ────────
+  const buildTimesheetPdf = async (locationId, from, to, personId) => {
+    const PDFDocument = require('pdfkit');
+    const { rows: lr } = await pool.query('SELECT name FROM locations WHERE id=$1', [locationId]);
+    const locName = (lr[0] && lr[0].name) || 'Location';
+    const params = [locationId, from, to];
+    let personSql = '';
+    if (personId && personId !== 'all') { params.push(personId); personSql = ' AND e.person_id=$4'; }
+    const { rows } = await pool.query(
+      `SELECT e.*, p.name AS person_name,
+              CASE WHEN e.clock_out IS NULL THEN NULL ELSE ${paidExpr} END AS paid_hours
+         FROM time_clock_entry e JOIN bonus_person p ON p.id=e.person_id
+        WHERE e.location_id=$1 AND (e.clock_in AT TIME ZONE 'America/Edmonton')::date BETWEEN $2::date AND $3::date${personSql}
+        ORDER BY p.name, e.clock_in`, params);
+    const tz = { timeZone: 'America/Edmonton' };
+    const fD = (t) => new Date(t).toLocaleDateString('en-CA', { ...tz, weekday: 'short', month: 'short', day: 'numeric' });
+    const fT = (t) => new Date(t).toLocaleTimeString('en-CA', { ...tz, hour: 'numeric', minute: '2-digit' });
+    const doc = new PDFDocument({ margin: 40, size: 'LETTER' });
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    const done = new Promise((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+    doc.fontSize(16).font('Helvetica-Bold').text(`${locName} — Timesheet`);
+    doc.fontSize(11).font('Helvetica').fillColor('#555').text(`Pay period ${from} to ${to} · generated ${new Date().toLocaleDateString('en-CA', tz)}`);
+    doc.moveDown(1);
+    const byPerson = {};
+    for (const e of rows) (byPerson[e.person_name] = byPerson[e.person_name] || []).push(e);
+    let grand = 0;
+    for (const [name, list] of Object.entries(byPerson)) {
+      doc.fillColor('#000').fontSize(13).font('Helvetica-Bold').text(name);
+      doc.moveDown(0.3);
+      doc.fontSize(9).font('Helvetica');
+      let personTotal = 0;
+      for (const e of list) {
+        const breaks = Array.isArray(e.breaks) && e.breaks.length
+          ? e.breaks.map((b) => `${fT(b.start)}–${b.end ? fT(b.end) : '…'}`).join(', ')
+          : (e.break_seconds > 0 ? `${Math.round(e.break_seconds / 60)} min` : '—');
+        const paid = e.paid_hours != null ? Number(e.paid_hours) : null;
+        if (paid != null) personTotal += paid;
+        doc.fillColor('#333').text(
+          `${fD(e.clock_in)}    ${fT(e.clock_in)} → ${e.clock_out ? fT(e.clock_out) : 'on shift'}    breaks: ${breaks}    paid: ${paid != null ? paid.toFixed(2) + ' h' : '—'}${e.source === 'manual' ? '    (manual)' : ''}`,
+          { indent: 12 });
+      }
+      personTotal = Math.round(personTotal * 100) / 100;
+      grand += personTotal;
+      doc.moveDown(0.2);
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#000').text(`Total: ${personTotal.toFixed(2)} h`, { indent: 12 });
+      doc.moveDown(0.8);
+    }
+    if (!rows.length) doc.fontSize(11).fillColor('#555').text('No punches in this period.');
+    if (Object.keys(byPerson).length > 1) {
+      doc.moveDown(0.5);
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#000').text(`Crew total: ${(Math.round(grand * 100) / 100).toFixed(2)} h`);
+    }
+    doc.end();
+    return done;
+  };
+
+  router.get('/:locationId/export-pdf', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { from, to, person } = req.query;
+      if (!isDate(from) || !isDate(to)) return fail(res, 'from + to (YYYY-MM-DD) required', 400);
+      const buf = await buildTimesheetPdf(req.params.locationId, from, to, person);
+      res.set('Content-Type', 'application/pdf');
+      res.set('Content-Disposition', `attachment; filename="timesheet-${from}-to-${to}.pdf"`);
+      res.send(buf);
+    } catch (e) { fail(res, e); }
+  });
+
+  // Email the period PDF (uses the same Gmail app password the brief reads with).
+  router.post('/:locationId/email-timesheet', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { from, to, person, email } = req.body || {};
+      if (!isDate(from) || !isDate(to)) return fail(res, 'from + to required', 400);
+      if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail(res, 'Valid recipient email required', 400);
+      const user = process.env.GMAIL_IMAP_USER, pass = process.env.GMAIL_IMAP_PASS;
+      if (!user || !pass) return fail(res, 'Email not configured (GMAIL_IMAP_USER / GMAIL_IMAP_PASS)', 400);
+      const buf = await buildTimesheetPdf(req.params.locationId, from, to, person);
+      const nodemailer = require('nodemailer');
+      const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user, pass } });
+      await transporter.sendMail({
+        from: user, to: email,
+        subject: `Timesheet ${from} to ${to}${person && person !== 'all' ? ' (individual)' : ' (crew)'}`,
+        text: `Attached: the timesheet PDF for the pay period ${from} to ${to}. Generated by the ops dashboard.`,
+        attachments: [{ filename: `timesheet-${from}-to-${to}.pdf`, content: buf }],
+      });
+      res.json({ ok: true, sent_to: email });
     } catch (e) { fail(res, e); }
   });
 

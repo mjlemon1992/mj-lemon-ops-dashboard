@@ -33,6 +33,14 @@ function ensureTimeClockTables(pool) {
       resolved_at TIMESTAMPTZ
     )`);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_ter_loc_status ON time_edit_request (location_id, status)');
+    // Individual break segments [{start, end}] — break_seconds stays the
+    // canonical figure for pay math; this records WHEN each break happened.
+    await pool.query("ALTER TABLE time_clock_entry ADD COLUMN IF NOT EXISTS breaks JSONB DEFAULT '[]'");
+    // A change request can carry the tech's PROPOSED corrected times, which the
+    // admin can apply in one tap.
+    await pool.query('ALTER TABLE time_edit_request ADD COLUMN IF NOT EXISTS proposed_clock_in TIMESTAMPTZ');
+    await pool.query('ALTER TABLE time_edit_request ADD COLUMN IF NOT EXISTS proposed_clock_out TIMESTAMPTZ');
+    await pool.query('ALTER TABLE time_edit_request ADD COLUMN IF NOT EXISTS proposed_break_minutes INTEGER');
     await pool.query(`CREATE TABLE IF NOT EXISTS time_clock_entry (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       location_id UUID NOT NULL,
