@@ -8,6 +8,9 @@ import { useParams } from 'react-router-dom';
 
 const REFRESH_MS = 20 * 1000;
 const fmtTime = (t) => t ? new Date(t).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : '';
+// Tapping anywhere in a date field pops the native calendar (tablet-friendly);
+// browsers without showPicker() just fall back to the field's own behaviour.
+const openPicker = (e) => { try { e.target.showPicker(); } catch { /* unsupported */ } };
 const STATUS = {
   off:   { label: 'Off',       color: 'var(--text3)',   bg: 'var(--bg3)' },
   on:    { label: 'On the clock', color: 'var(--success)', bg: 'rgba(52,199,89,0.14)' },
@@ -87,7 +90,10 @@ export default function ClockKiosk() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
-      const verb = action === 'in' ? 'clocked in' : action === 'out' ? 'clocked out' : action === 'break_start' ? 'on break' : 'back from break';
+      const verb = action === 'in' ? 'clocked in'
+        : action === 'out' ? `clocked out · ${body.paid_hours} h today`
+        : action === 'break_start' ? 'on break — your shift keeps counting from your clock-in'
+        : `back from break — still on your ${fmtTime(body.clock_in)} clock-in`;
       setFlash(`${active.name} — ${verb}`);
       setActive(null); setPin('');
       await loadRoster(locPin);
@@ -118,7 +124,11 @@ export default function ClockKiosk() {
     return (
       <div style={wrap}>
         <div style={{ fontSize: '24px', fontWeight: 700 }}>{active.name}</div>
-        <div style={{ ...pill, background: STATUS[s].bg, color: STATUS[s].color, marginTop: '8px' }}>{STATUS[s].label}{active.since ? ` · since ${fmtTime(active.since)}` : ''}</div>
+        <div style={{ ...pill, background: STATUS[s].bg, color: STATUS[s].color, marginTop: '8px' }}>
+          {s === 'break'
+            ? `On break since ${fmtTime(active.since)} · clocked in ${fmtTime(active.clock_in)}`
+            : `${STATUS[s].label}${active.since ? ` · since ${fmtTime(active.since)}` : ''}`}
+        </div>
         <div style={{ fontSize: '15px', color: 'var(--text3)', margin: '18px 0 8px' }}>Enter your PIN</div>
         <div style={{ fontSize: '30px', letterSpacing: '10px', height: '38px', fontFamily: 'monospace' }}>{pin.replace(/./g, '•')}</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 72px)', gap: '10px', margin: '14px 0' }}>
@@ -195,8 +205,8 @@ export default function ClockKiosk() {
         ) : (
           <div style={{ width: '100%', maxWidth: '420px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div style={{ fontWeight: 700, fontSize: '18px', textAlign: 'center' }}>{f.person.name}</div>
-            <label style={lbl}>First day off<input type="date" value={f.start} onChange={(e) => setReqForm((s) => ({ ...s, start: e.target.value, end: s.end || e.target.value }))} style={inp} /></label>
-            <label style={lbl}>Last day off<input type="date" value={f.end} min={f.start} onChange={(e) => setReqForm((s) => ({ ...s, end: e.target.value }))} style={inp} /></label>
+            <label style={lbl}>First day off<input type="date" value={f.start} onClick={openPicker} onFocus={openPicker} onChange={(e) => setReqForm((s) => ({ ...s, start: e.target.value, end: s.end || e.target.value }))} style={inp} /></label>
+            <label style={lbl}>Last day off<input type="date" value={f.end} min={f.start} onClick={openPicker} onFocus={openPicker} onChange={(e) => setReqForm((s) => ({ ...s, end: e.target.value }))} style={inp} /></label>
             <label style={lbl}>Type
               <select value={f.type} onChange={(e) => setReqForm((s) => ({ ...s, type: e.target.value }))} style={inp}>
                 <option value="vacation">Holiday / vacation</option>
@@ -229,7 +239,9 @@ export default function ClockKiosk() {
             style={{ ...card, opacity: p.has_pin ? 1 : 0.5, borderColor: STATUS[p.status].color }}>
             <div style={{ fontSize: '18px', fontWeight: 700 }}>{p.name}</div>
             <div style={{ ...pill, background: STATUS[p.status].bg, color: STATUS[p.status].color, marginTop: '8px' }}>
-              {STATUS[p.status].label}{p.status !== 'off' && p.since ? ` · ${fmtTime(p.since)}` : ''}
+              {p.status === 'break'
+                ? `On break · in at ${fmtTime(p.clock_in)}`
+                : `${STATUS[p.status].label}${p.status !== 'off' && p.since ? ` · ${fmtTime(p.since)}` : ''}`}
             </div>
             {!p.has_pin && <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '6px' }}>no PIN set</div>}
           </button>
