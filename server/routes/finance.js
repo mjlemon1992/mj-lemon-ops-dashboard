@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, requireOwnerOrPartner } = require('../middleware/auth');
+const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
 
 // Read-only proxy to the standalone Parkland QBO connector.
 // The dashboard never embeds QBO logic — it consumes the connector over REST,
@@ -77,7 +77,14 @@ module.exports = (pool) => {
     return { start, end };
   };
 
-  const gate = [authenticateToken, requireOwnerOrPartner];
+  // Owner/partner read any location's books; a shop operator (manager) only
+  // their own — asserted on every :locationId route below.
+  const gate = [authenticateToken, requireRole('owner', 'partner', 'manager')];
+  const assertLoc = (req, res) => {
+    if (canAccessLocation(req.user, req.params.locationId)) return true;
+    res.status(403).json({ error: 'Access denied for this location' });
+    return false;
+  };
 
   // Whether the connector is wired up (drives the UI's "not configured" state).
   router.get('/status', ...gate, (req, res) => {
@@ -87,6 +94,7 @@ module.exports = (pool) => {
   // P&L — primary surface. Returns { headline, summaries, start, end }.
   router.get('/:locationId/pnl', ...gate, async (req, res) => {
     try {
+      if (!assertLoc(req, res)) return;
       const slug = await slugFor(req.params.locationId);
       const { start, end } = window(req.query);
       const data = await connectorGet(`/qbo/${slug}/pnl?start=${start}&end=${end}`);
@@ -96,6 +104,7 @@ module.exports = (pool) => {
 
   router.get('/:locationId/balance-sheet', ...gate, async (req, res) => {
     try {
+      if (!assertLoc(req, res)) return;
       const slug = await slugFor(req.params.locationId);
       const { start, end } = window(req.query);
       res.json(await connectorGet(`/qbo/${slug}/balance-sheet?start=${start}&end=${end}`));
@@ -104,6 +113,7 @@ module.exports = (pool) => {
 
   router.get('/:locationId/cash-flow', ...gate, async (req, res) => {
     try {
+      if (!assertLoc(req, res)) return;
       const slug = await slugFor(req.params.locationId);
       const { start, end } = window(req.query);
       res.json(await connectorGet(`/qbo/${slug}/cash-flow?start=${start}&end=${end}`));
@@ -112,6 +122,7 @@ module.exports = (pool) => {
 
   router.get('/:locationId/aged-receivables', ...gate, async (req, res) => {
     try {
+      if (!assertLoc(req, res)) return;
       const slug = await slugFor(req.params.locationId);
       const date = req.query.date || new Date().toISOString().slice(0, 10);
       res.json(await connectorGet(`/qbo/${slug}/aged-receivables?date=${date}`));
@@ -120,6 +131,7 @@ module.exports = (pool) => {
 
   router.get('/:locationId/aged-payables', ...gate, async (req, res) => {
     try {
+      if (!assertLoc(req, res)) return;
       const slug = await slugFor(req.params.locationId);
       const date = req.query.date || new Date().toISOString().slice(0, 10);
       res.json(await connectorGet(`/qbo/${slug}/aged-payables?date=${date}`));
