@@ -21,6 +21,23 @@ const HOLIDAYS = {
   }
 };
 
+// Display names for the stat-holiday dates above (payroll views show these).
+const HOLIDAY_NAMES = {
+  '2026-01-01': "New Year's Day", '2026-02-16': 'Family Day', '2026-04-03': 'Good Friday',
+  '2026-05-18': 'Victoria Day', '2026-07-01': 'Canada Day', '2026-08-03': 'BC Day',
+  '2026-09-07': 'Labour Day', '2026-09-30': 'Truth & Reconciliation Day',
+  '2026-10-12': 'Thanksgiving', '2026-11-11': 'Remembrance Day',
+  '2026-12-25': 'Christmas Day', '2026-12-28': 'Boxing Day (observed)'
+};
+
+// A shop's open days as a Set of JS weekday numbers (0=Sun..6=Sat), from the
+// locations.open_days CSV ('mon,tue,...'). Default: Mon–Fri.
+const DOW = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+function openDaySet(csv) {
+  const parts = String(csv || '').toLowerCase().split(',').map((s) => s.trim()).filter((s) => DOW[s] != null);
+  return parts.length ? new Set(parts.map((s) => DOW[s])) : new Set([1, 2, 3, 4, 5]);
+}
+
 function holidaySet(province, year) {
   const prov = (province || 'ab').toLowerCase();
   const list = (HOLIDAYS[prov] && HOLIDAYS[prov][year]) || (HOLIDAYS.ab[year] || []);
@@ -78,17 +95,48 @@ function efficiencyPct(hoursSold, province, hoursPerWeek = 40, today = new Date(
   return Math.round((Number(hoursSold) / avail) * 1000) / 10;
 }
 
-// Working days (Mon–Fri minus stat holidays) in [from..to], dates as 'YYYY-MM-DD'.
-// Used to size time-off requests and holiday-adjust the schedule denominator.
-function workingDaysBetween(province, from, to) {
+// Working days (shop's open days minus stat holidays) in [from..to], dates as
+// 'YYYY-MM-DD'. openDays: Set of JS weekday numbers (default Mon–Fri). Sizes
+// time-off requests and holiday-adjusts the schedule denominator.
+function workingDaysBetween(province, from, to, openDays) {
+  const open = openDays || new Set([1, 2, 3, 4, 5]);
   const start = new Date(from + 'T12:00:00');
   const end = new Date(to + 'T12:00:00');
   let n = 0;
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
+    if (!open.has(d.getDay())) continue;
     const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     if (holidaySet(province, d.getFullYear()).has(iso)) continue;
+    n++;
+  }
+  return n;
+}
+
+// Stat holidays falling inside [from..to] for a province → [{date, name}].
+function holidaysBetween(province, from, to) {
+  const years = new Set([Number(from.slice(0, 4)), Number(to.slice(0, 4))]);
+  const out = [];
+  for (const y of years) {
+    for (const d of holidaySet(province, y)) {
+      if (d >= from && d <= to) out.push({ date: d, name: HOLIDAY_NAMES[d] || 'Stat holiday' });
+    }
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// Open-days-aware month working-day count (bonus schedule denominator). The
+// Mon–Fri variants above stay untouched — pace/display keep their behaviour.
+function workingDaysInMonthOpen(province, monthDate, openDays) {
+  const year = monthDate.getFullYear(), month = monthDate.getMonth();
+  const open = openDays || new Set([1, 2, 3, 4, 5]);
+  const hols = holidaySet(province, year);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  let n = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dt = new Date(year, month, d);
+    if (!open.has(dt.getDay())) continue;
+    const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (hols.has(iso)) continue;
     n++;
   }
   return n;
@@ -100,5 +148,8 @@ module.exports = {
   workingPaceFrac,
   availableHoursMTD,
   efficiencyPct,
-  workingDaysBetween
+  workingDaysBetween,
+  holidaysBetween,
+  workingDaysInMonthOpen,
+  openDaySet
 };
