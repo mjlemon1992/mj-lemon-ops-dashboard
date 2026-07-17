@@ -369,7 +369,7 @@ module.exports = (pool) => {
       let entries = [];   // [{ name, hours }]
       let source = null;
       const { rows: snap } = await pool.query(
-        `SELECT DISTINCT ON (tech_id) tech_id, tech_name, hours_billed, snapshot_date
+        `SELECT DISTINCT ON (tech_id) tech_id, tech_name, hours_billed, snapshot_date::text AS snapshot_date
            FROM tech_efficiency
           WHERE location_id = $1 AND period_type = 'mtd'
             AND snapshot_date >= ($2 || '-01')::date AND snapshot_date < ($3 || '-01')::date
