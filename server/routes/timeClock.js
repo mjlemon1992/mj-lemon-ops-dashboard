@@ -348,17 +348,23 @@ module.exports = (pool) => {
         WHERE location_id=$1 AND status='approved' AND paid=true AND person_id IS NOT NULL
           AND start_date <= $3::date AND end_date >= $2::date`, [locationId, from, to]);
     const paidOffDays = {};
+    const paidOffRows = [];   // per-request, clipped to the period — punch-list display
     for (const r of reqs) {
       const s = r.s < from ? from : r.s, e = r.e > to ? to : r.e;
+      let days = 0;
       for (let d = new Date(s + 'T12:00:00'); d <= new Date(e + 'T12:00:00'); d.setDate(d.getDate() + 1)) {
         const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         if (!openSet.has(d.getDay()) || holSet.has(iso)) continue;
-        paidOffDays[r.person_id] = (paidOffDays[r.person_id] || 0) + 1;
+        days++;
+      }
+      if (days > 0) {
+        paidOffDays[r.person_id] = (paidOffDays[r.person_id] || 0) + days;
+        paidOffRows.push({ person_id: r.person_id, from: s, to: e, days, hours: Math.round(days * perDay * 100) / 100 });
       }
     }
     const paidOffHours = {};
     for (const [pid, days] of Object.entries(paidOffDays)) paidOffHours[pid] = Math.round(days * perDay * 100) / 100;
-    return { perDay, statDays, statHours: Math.round(statDays.length * perDay * 100) / 100, paidOffDays, paidOffHours };
+    return { perDay, statDays, statHours: Math.round(statDays.length * perDay * 100) / 100, paidOffDays, paidOffHours, paidOffRows };
   };
 
   // Entries for review + correction, with computed paid hours. Accepts either
@@ -402,6 +408,7 @@ module.exports = (pool) => {
         stat_pay_hours: pay ? pay.statHours : 0,             // added to EVERY tech (stat on an open day = paid day)
         stat_pay_days: pay ? pay.statDays : [],
         paid_timeoff_hours: pay ? pay.paidOffHours : {},     // per person: approved PAID holiday hours in period
+        paid_timeoff_rows: pay ? pay.paidOffRows : [],       // per request (clipped) — shown as rows in the punch list
       });
     } catch (e) { fail(res, e); }
   });
