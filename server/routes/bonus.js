@@ -154,7 +154,9 @@ const normName = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
 
 module.exports = (pool) => {
   const router = express.Router();
-  const ensure = () => ensureBonusFuelTables(pool);
+  // Clock schema included: bonus queries read bonus_person.in_bonus and the
+  // time-off/clock tables, so both must exist before any bonus route runs.
+  const ensure = () => Promise.all([ensureBonusFuelTables(pool), ensureTimeClockTables(pool)]);
   const who = (req) => req.user.email || req.user.name || req.user.role;
   // Managers may VIEW the program for their own location (Jamie, 2026-07-17);
   // every money decision (calculate, approve, formula, people, targets) stays owner-only.
@@ -175,8 +177,10 @@ module.exports = (pool) => {
         ORDER BY effective_from_month DESC, version_no DESC LIMIT 1`, [locationId, month]);
     return rows[0] || null;
   };
+  // Bonus participants only — clock-only crew (in_bonus=false, e.g. probation
+  // hires) are excluded from every calculation and payout.
   const activePeople = async (locationId) => (await pool.query(
-    'SELECT id, name, role, efficiency_floor FROM bonus_person WHERE location_id=$1 AND active=true ORDER BY role, name', [locationId])).rows;
+    'SELECT id, name, role, efficiency_floor FROM bonus_person WHERE location_id=$1 AND active=true AND in_bonus IS NOT FALSE ORDER BY role, name', [locationId])).rows;
   const effInputs = async (locationId, month) => {
     const { rows } = await pool.query('SELECT person_id, billed_hours, clocked_hours FROM efficiency_input WHERE location_id=$1 AND month=$2', [locationId, month]);
     const map = {};
@@ -300,16 +304,17 @@ module.exports = (pool) => {
   router.post('/:locationId/people', ...write, async (req, res) => {
     try {
       await ensure();
-      const { name, role } = req.body || {};
+      const { name, role, in_bonus } = req.body || {};
       if (!name || !['tech', 'advisor'].includes(role)) return fail(res, 'name and role (tech|advisor) required', 400);
-      const { rows } = await pool.query('INSERT INTO bonus_person (location_id, name, role) VALUES ($1,$2,$3) RETURNING *', [req.params.locationId, String(name).slice(0, 120), role]);
+      const { rows } = await pool.query('INSERT INTO bonus_person (location_id, name, role, in_bonus) VALUES ($1,$2,$3,$4) RETURNING *',
+        [req.params.locationId, String(name).slice(0, 120), role, in_bonus === false ? false : true]);
       res.json(rows[0]);
     } catch (e) { fail(res, e); }
   });
   router.put('/people/:personId', ...write, async (req, res) => {
     try {
       await ensure();
-      const { name, active, efficiency_floor, role } = req.body || {};
+      const { name, active, efficiency_floor, role, in_bonus } = req.body || {};
       if (role && !['tech', 'advisor'].includes(role)) return fail(res, 'Invalid role', 400);
       if (efficiency_floor != null && !(efficiency_floor > 0 && efficiency_floor <= 1.5)) return fail(res, 'efficiency_floor must be a fraction like 0.9', 400);
       // Only touch the floor when the key is actually in the body — an
@@ -318,9 +323,11 @@ module.exports = (pool) => {
       const hasFloor = Object.prototype.hasOwnProperty.call(req.body || {}, 'efficiency_floor');
       const { rows } = await pool.query(
         `UPDATE bonus_person SET name=COALESCE($2,name), role=COALESCE($3,role), active=COALESCE($4,active),
+                in_bonus=COALESCE($7,in_bonus),
                 efficiency_floor = CASE WHEN $6 THEN $5::numeric ELSE efficiency_floor END WHERE id=$1 RETURNING *`,
         [req.params.personId, name || null, role || null, typeof active === 'boolean' ? active : null,
-         efficiency_floor === undefined ? null : efficiency_floor, hasFloor]);
+         efficiency_floor === undefined ? null : efficiency_floor, hasFloor,
+         typeof in_bonus === 'boolean' ? in_bonus : null]);
       if (!rows.length) return fail(res, 'Person not found', 404);
       res.json(rows[0]);
     } catch (e) { fail(res, e); }

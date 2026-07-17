@@ -88,7 +88,8 @@ function BonusView({ locId }) {
   // their location; only the owner enters net profit / calculates / approves.
   const canImport = ['owner', 'partner', 'manager'].includes(user?.role);
   const targetRow = (targets || []).find((t) => t.month === month);
-  const techs = (people || []).filter((p) => p.active && p.role === 'tech');
+  // Bonus participants only — clock-only crew never appear in the calc inputs.
+  const techs = (people || []).filter((p) => p.active && p.role === 'tech' && p.in_bonus !== false);
   const overrides = (lines || []).filter((l) => Number(l.paid) !== Number(l.calculated));
   const totalCalc = (lines || []).reduce((s, l) => s + Number(l.calculated), 0);
   const totalPaid = (lines || []).reduce((s, l) => s + Number(l.paid), 0);
@@ -512,9 +513,16 @@ function SettingsPanel({ api, locId, formula, versions, people, onClose, onSaved
     setCrewBusy(false);
   };
   const setPersonActive = async (p, active) => {
-    if (!active && !window.confirm(`Remove ${p.name} from the bonus program? Locked months keep their history — this only affects future calculations.`)) return;
+    if (!active && !window.confirm(`Remove ${p.name} entirely (time clock too)? Locked months keep their history.`)) return;
     setCrewBusy(true); setErr(null);
     try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ active }) }); onCrewChanged(); }
+    catch (e) { setErr(e.message); }
+    setCrewBusy(false);
+  };
+  // Clock-only ↔ bonus participant (probation ends, owner-tech opts out, …).
+  const setPersonBonus = async (p, inBonus) => {
+    setCrewBusy(true); setErr(null);
+    try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ in_bonus: inBonus }) }); onCrewChanged(); }
     catch (e) { setErr(e.message); }
     setCrewBusy(false);
   };
@@ -545,7 +553,7 @@ function SettingsPanel({ api, locId, formula, versions, people, onClose, onSaved
       </div>
       <div style={{ fontSize: '12px', fontWeight: 600, margin: '6px 0' }}>Per-person floors <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(blank = group default; advisor exempt)</span></div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', marginBottom: '12px' }}>
-        {(people || []).filter((p) => p.active).map((p) => p.role === 'advisor'
+        {(people || []).filter((p) => p.active && p.in_bonus !== false).map((p) => p.role === 'advisor'
           ? <div key={p.id} style={{ fontSize: '12px', color: 'var(--text3)', alignSelf: 'center' }}>{p.name}: exempt — flat share</div>
           : (
             <div key={p.id} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -563,10 +571,17 @@ function SettingsPanel({ api, locId, formula, versions, people, onClose, onSaved
           <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0', opacity: p.active ? 1 : 0.55 }}>
             <span style={{ minWidth: '110px', fontSize: '13px' }}>{p.name}</span>
             <span className="badge" style={{ fontSize: '10px' }}>{p.role}</span>
-            {!p.active && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>not in program</span>}
+            {p.active && p.in_bonus === false && <span style={{ fontSize: '11px', color: 'var(--warning)' }}>clock only — not in bonus</span>}
+            {!p.active && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>removed</span>}
+            {p.active && (
+              <button onClick={() => setPersonBonus(p, p.in_bonus === false)} disabled={crewBusy}
+                style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px' }}>
+                {p.in_bonus === false ? 'Include in bonus' : 'Exclude from bonus (clock only)'}
+              </button>
+            )}
             <button onClick={() => setPersonActive(p, !p.active)} disabled={crewBusy}
-              style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px' }}>
-              {p.active ? 'Remove from program' : 'Add back to program'}
+              style={{ marginLeft: p.active ? 0 : 'auto', fontSize: '11px', padding: '3px 10px' }}>
+              {p.active ? 'Remove' : 'Add back'}
             </button>
           </div>
         ))}

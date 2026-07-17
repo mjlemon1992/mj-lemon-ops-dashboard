@@ -9,6 +9,10 @@ function ensureTimeClockTables(pool) {
   _init = (async () => {
     // Per-person 4–6 digit kiosk PIN (on the existing bonus crew roster).
     await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS clock_pin VARCHAR(8)');
+    // The roster serves two systems: everyone active is on the TIME CLOCK, but
+    // only in_bonus people participate in the profit-share (probation hires and
+    // owner-techs can clock without joining the program).
+    await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS in_bonus BOOLEAN DEFAULT true');
     await pool.query(`CREATE TABLE IF NOT EXISTS time_clock_entry (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       location_id UUID NOT NULL,
