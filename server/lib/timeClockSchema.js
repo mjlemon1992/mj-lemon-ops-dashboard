@@ -41,6 +41,10 @@ function ensureTimeClockTables(pool) {
     await pool.query('ALTER TABLE time_edit_request ADD COLUMN IF NOT EXISTS proposed_clock_in TIMESTAMPTZ');
     await pool.query('ALTER TABLE time_edit_request ADD COLUMN IF NOT EXISTS proposed_clock_out TIMESTAMPTZ');
     await pool.query('ALTER TABLE time_edit_request ADD COLUMN IF NOT EXISTS proposed_break_minutes INTEGER');
+    // Paid or unpaid time off: the tech chooses on the kiosk (owner can flip it
+    // on the request card). Paid days pay the contractual daily hours in the
+    // period totals; NULL = not chosen yet.
+    await pool.query('ALTER TABLE time_off_request ADD COLUMN IF NOT EXISTS paid BOOLEAN');
     await pool.query(`CREATE TABLE IF NOT EXISTS time_clock_entry (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       location_id UUID NOT NULL,

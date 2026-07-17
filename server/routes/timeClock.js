@@ -255,7 +255,7 @@ module.exports = (pool) => {
     try {
       await ensure();
       if (!(await checkLocPin(req, res))) return;
-      const { person_id, pin, start_date, end_date, type, note } = req.body || {};
+      const { person_id, pin, start_date, end_date, type, note, paid } = req.body || {};
       if (!person_id || !isDate(start_date) || !isDate(end_date)) return fail(res, 'person_id + start_date + end_date required', 400);
       if (end_date < start_date) return fail(res, 'End date is before start date', 400);
       if (!OFF_TYPES.includes(type || 'vacation')) return fail(res, 'Invalid type', 400);
@@ -275,9 +275,10 @@ module.exports = (pool) => {
       // Saturdays/Sundays (or whatever the shop is closed) never count.
       const days = workingDaysBetween((locRows[0] || {}).province || 'ab', start_date, end_date, openDaySet((locRows[0] || {}).open_days));
       const { rows } = await pool.query(
-        `INSERT INTO time_off_request (location_id, person_id, start_date, end_date, type, note, working_days)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-        [req.params.locationId, person_id, start_date, end_date, type || 'vacation', String(note || '').slice(0, 300), days]);
+        `INSERT INTO time_off_request (location_id, person_id, start_date, end_date, type, note, working_days, paid)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [req.params.locationId, person_id, start_date, end_date, type || 'vacation', String(note || '').slice(0, 300), days,
+         typeof paid === 'boolean' ? paid : null]);
       res.json({ ok: true, id: rows[0].id, working_days: days, name: pr[0].name });
     } catch (e) { fail(res, e); }
   });
@@ -329,6 +330,37 @@ module.exports = (pool) => {
   const scoped = (req, res, next) => canAccessLocation(req.user, req.params.locationId) ? next() : res.status(403).json({ error: 'Access denied for this location' });
   const paidExpr = "ROUND((EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2)";
 
+  // Payroll components beyond punches (Jamie's contractual rules):
+  //  • a stat holiday landing on an OPEN day pays every tech the contractual
+  //    daily hours (weekly ÷ open days) without punching;
+  //  • approved PAID time off pays the same daily hours per open day taken
+  //    (stat holidays inside a holiday never double-pay).
+  const periodPayContext = async (locationId, from, to) => {
+    const { rows: lr } = await pool.query('SELECT province, open_days, weekly_hours FROM locations WHERE id=$1', [locationId]);
+    const loc = lr[0] || {};
+    const openSet = openDaySet(loc.open_days);
+    const perDay = Math.round(((Number(loc.weekly_hours) || 40) / openSet.size) * 100) / 100;
+    const hols = holidaysBetween(loc.province || 'ab', from, to);
+    const holSet = new Set(hols.map((h) => h.date));
+    const statDays = hols.filter((h) => openSet.has(new Date(h.date + 'T12:00:00').getDay()));
+    const { rows: reqs } = await pool.query(
+      `SELECT person_id, start_date::text AS s, end_date::text AS e FROM time_off_request
+        WHERE location_id=$1 AND status='approved' AND paid=true AND person_id IS NOT NULL
+          AND start_date <= $3::date AND end_date >= $2::date`, [locationId, from, to]);
+    const paidOffDays = {};
+    for (const r of reqs) {
+      const s = r.s < from ? from : r.s, e = r.e > to ? to : r.e;
+      for (let d = new Date(s + 'T12:00:00'); d <= new Date(e + 'T12:00:00'); d.setDate(d.getDate() + 1)) {
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        if (!openSet.has(d.getDay()) || holSet.has(iso)) continue;
+        paidOffDays[r.person_id] = (paidOffDays[r.person_id] || 0) + 1;
+      }
+    }
+    const paidOffHours = {};
+    for (const [pid, days] of Object.entries(paidOffDays)) paidOffHours[pid] = Math.round(days * perDay * 100) / 100;
+    return { perDay, statDays, statHours: Math.round(statDays.length * perDay * 100) / 100, paidOffDays, paidOffHours };
+  };
+
   // Entries for review + correction, with computed paid hours. Accepts either
   // ?from=YYYY-MM-DD&to=YYYY-MM-DD (payroll periods) or ?month=YYYY-MM.
   router.get('/:locationId/entries', ...authed, scoped, async (req, res) => {
@@ -354,15 +386,23 @@ module.exports = (pool) => {
         : await paidHoursByMonth(pool, req.params.locationId, month);
       // Payroll context for the period: per-person approved days off (open days
       // only) and any stat holidays falling inside it (province-based).
-      let off_days = {}, closure_days = 0, stat_holidays = [];
+      let off_days = {}, closure_days = 0, stat_holidays = [], pay = null;
       if (range) {
         const { rows: lr } = await pool.query('SELECT province, open_days FROM locations WHERE id=$1', [req.params.locationId]);
         const loc = lr[0] || {};
         const off = await approvedOffDaysByRange(pool, req.params.locationId, range[0], range[1], toIsodow(openDaySet(loc.open_days)));
         off_days = off.byPerson; closure_days = off.closure;
         stat_holidays = holidaysBetween(loc.province || 'ab', range[0], range[1]);
+        pay = await periodPayContext(req.params.locationId, range[0], range[1]);
       }
-      res.json({ month: month || null, from: range ? range[0] : null, to: range ? range[1] : null, entries: rows, summary, off_days, closure_days, stat_holidays });
+      res.json({
+        month: month || null, from: range ? range[0] : null, to: range ? range[1] : null, entries: rows, summary,
+        off_days, closure_days, stat_holidays,
+        per_day_hours: pay ? pay.perDay : null,
+        stat_pay_hours: pay ? pay.statHours : 0,             // added to EVERY tech (stat on an open day = paid day)
+        stat_pay_days: pay ? pay.statDays : [],
+        paid_timeoff_hours: pay ? pay.paidOffHours : {},     // per person: approved PAID holiday hours in period
+      });
     } catch (e) { fail(res, e); }
   });
 
@@ -411,7 +451,12 @@ module.exports = (pool) => {
           ORDER BY r.status='pending' DESC, r.start_date DESC`, [req.params.locationId, year]);
       const totals = {};
       for (const r of requests) if (r.status === 'approved' && r.person_id) totals[r.person_id] = (totals[r.person_id] || 0) + (r.working_days || 0);
-      res.json({ year, requests, totals });
+      // Requests as HOURS too — days × the contractual daily hours.
+      const { rows: lr } = await pool.query('SELECT open_days, weekly_hours FROM locations WHERE id=$1', [req.params.locationId]);
+      const openSet = openDaySet((lr[0] || {}).open_days);
+      const perDay = Math.round(((Number((lr[0] || {}).weekly_hours) || 40) / openSet.size) * 100) / 100;
+      for (const r of requests) r.hours = Math.round((r.working_days || 0) * perDay * 100) / 100;
+      res.json({ year, requests, totals, per_day_hours: perDay });
     } catch (e) { fail(res, e); }
   });
 
@@ -433,6 +478,20 @@ module.exports = (pool) => {
       const sm = await smPush(req.params.locationId, 'Shop closed', rows[0]);
       if (sm && sm.ok) await pool.query('UPDATE time_off_request SET sm_appointment_id=$2 WHERE id=$1', [rows[0].id, sm.id]);
       res.json({ ok: true, id: rows[0].id, working_days: days, shopmonkey: sm ? (sm.ok ? 'calendar entry created' : `push failed: ${sm.error}`) : null });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Paid ↔ unpaid on a request (asked of the tech; owner/manager records it).
+  router.put('/timeoff/:id/paid', ...authed, async (req, res) => {
+    try {
+      await ensure();
+      const paid = (req.body || {}).paid;
+      if (typeof paid !== 'boolean') return fail(res, 'paid must be true/false', 400);
+      const { rows: rr } = await pool.query('SELECT location_id FROM time_off_request WHERE id=$1', [req.params.id]);
+      if (!rr.length) return fail(res, 'Request not found', 404);
+      if (!canAccessLocation(req.user, rr[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      await pool.query('UPDATE time_off_request SET paid=$2 WHERE id=$1', [req.params.id, paid]);
+      res.json({ ok: true, paid });
     } catch (e) { fail(res, e); }
   });
 
@@ -661,39 +720,54 @@ module.exports = (pool) => {
     const tz = { timeZone: 'America/Edmonton' };
     const fD = (t) => new Date(t).toLocaleDateString('en-CA', { ...tz, weekday: 'short', month: 'short', day: 'numeric' });
     const fT = (t) => new Date(t).toLocaleTimeString('en-CA', { ...tz, hour: 'numeric', minute: '2-digit' });
+    // Pay beyond punches: stat holidays on open days + approved paid time off.
+    const pay = await periodPayContext(locationId, from, to);
+    const { rows: crew } = await pool.query(
+      'SELECT id, name FROM bonus_person WHERE location_id=$1 AND active=true' + (personId && personId !== 'all' ? ' AND id=$2' : ''),
+      personId && personId !== 'all' ? [locationId, personId] : [locationId]);
     const doc = new PDFDocument({ margin: 40, size: 'LETTER' });
     const chunks = [];
     doc.on('data', (c) => chunks.push(c));
     const done = new Promise((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
     doc.fontSize(16).font('Helvetica-Bold').text(`${locName} — Timesheet`);
     doc.fontSize(11).font('Helvetica').fillColor('#555').text(`Pay period ${from} to ${to} · generated ${new Date().toLocaleDateString('en-CA', tz)}`);
+    if (pay.statDays.length) doc.text(`Stat holiday${pay.statDays.length > 1 ? 's' : ''} in period: ${pay.statDays.map((h) => `${h.name} (${h.date})`).join(', ')} — paid ${pay.perDay} h each`);
     doc.moveDown(1);
-    const byPerson = {};
-    for (const e of rows) (byPerson[e.person_name] = byPerson[e.person_name] || []).push(e);
-    let grand = 0;
-    for (const [name, list] of Object.entries(byPerson)) {
-      doc.fillColor('#000').fontSize(13).font('Helvetica-Bold').text(name);
+    const byId = {};
+    for (const e of rows) (byId[e.person_id] = byId[e.person_id] || []).push(e);
+    let grand = 0, anyRows = false;
+    for (const person of crew) {
+      const list = byId[person.id] || [];
+      const statH = pay.statHours;
+      const offH = pay.paidOffHours[person.id] || 0;
+      if (!list.length && !statH && !offH) continue;
+      anyRows = true;
+      doc.fillColor('#000').fontSize(13).font('Helvetica-Bold').text(person.name);
       doc.moveDown(0.3);
       doc.fontSize(9).font('Helvetica');
-      let personTotal = 0;
+      let clocked = 0;
       for (const e of list) {
         const breaks = Array.isArray(e.breaks) && e.breaks.length
           ? e.breaks.map((b) => `${fT(b.start)}–${b.end ? fT(b.end) : '…'}`).join(', ')
           : (e.break_seconds > 0 ? `${Math.round(e.break_seconds / 60)} min` : '—');
         const paid = e.paid_hours != null ? Number(e.paid_hours) : null;
-        if (paid != null) personTotal += paid;
+        if (paid != null) clocked += paid;
         doc.fillColor('#333').text(
           `${fD(e.clock_in)}    ${fT(e.clock_in)} → ${e.clock_out ? fT(e.clock_out) : 'on shift'}    breaks: ${breaks}    paid: ${paid != null ? paid.toFixed(2) + ' h' : '—'}${e.source === 'manual' ? '    (manual)' : ''}`,
           { indent: 12 });
       }
-      personTotal = Math.round(personTotal * 100) / 100;
+      clocked = Math.round(clocked * 100) / 100;
+      if (statH) doc.fillColor('#333').text(`Stat holiday pay: ${pay.statDays.map((h) => h.name).join(', ')}    ${statH.toFixed(2)} h`, { indent: 12 });
+      if (offH) doc.fillColor('#333').text(`Paid holiday: ${offH.toFixed(2)} h`, { indent: 12 });
+      const personTotal = Math.round((clocked + statH + offH) * 100) / 100;
       grand += personTotal;
       doc.moveDown(0.2);
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#000').text(`Total: ${personTotal.toFixed(2)} h`, { indent: 12 });
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#000')
+        .text(`Total: ${personTotal.toFixed(2)} h${(statH || offH) ? `  (clocked ${clocked.toFixed(2)} + stat ${statH.toFixed(2)} + holiday ${offH.toFixed(2)})` : ''}`, { indent: 12 });
       doc.moveDown(0.8);
     }
-    if (!rows.length) doc.fontSize(11).fillColor('#555').text('No punches in this period.');
-    if (Object.keys(byPerson).length > 1) {
+    if (!anyRows) doc.fontSize(11).fillColor('#555').text('No punches or paid days in this period.');
+    if (crew.length > 1) {
       doc.moveDown(0.5);
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#000').text(`Crew total: ${(Math.round(grand * 100) / 100).toFixed(2)} h`);
     }

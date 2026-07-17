@@ -83,6 +83,14 @@ function ClockAdmin({ locId }) {
     } catch (e) { setErr(e.message); }
     setBusy(false);
   };
+  // Paid vs unpaid on a time-off request (asked of the tech, recorded here).
+  const setPaidFlag = async (r, paid) => {
+    setBusy(true); setErr(null);
+    try { await api(`/clock/timeoff/${r.id}/paid`, { method: 'PUT', body: JSON.stringify({ paid }) }); load(); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
   const cancelOff = async (r) => {
     const what = r.type === 'closure' ? 'the shop closure' : `${r.person_name}'s time off`;
     if (!window.confirm(`Cancel ${what} ${fmtD(r.start_date)}–${fmtD(r.end_date)}? Removes the calendar entry too.`)) return;
@@ -296,8 +304,13 @@ function ClockAdmin({ locId }) {
           {pending.map((r) => (
             <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px', marginBottom: '6px' }}>
               <span style={{ fontWeight: 700 }}>{r.person_name}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{OFF_LABEL[r.type] || r.type} · {fmtD(r.start_date)} – {fmtD(r.end_date)} · {r.working_days} working day{r.working_days === 1 ? '' : 's'}</span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{OFF_LABEL[r.type] || r.type} · {fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'} = {r.hours} h</b></span>
               {r.note && <span style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic' }}>"{r.note}"</span>}
+              {/* Paid or unpaid — the tech chose on the kiosk; flip it here after talking to them */}
+              <button disabled={busy} onClick={() => setPaidFlag(r, !(r.paid === true))}
+                style={{ fontSize: '11px', padding: '4px 10px', fontWeight: 700, color: r.paid === true ? 'var(--success)' : r.paid === false ? 'var(--text3)' : 'var(--warning)' }}>
+                {r.paid === true ? '💰 PAID' : r.paid === false ? 'UNPAID' : '❓ paid? tap to set'}
+              </button>
               <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
                 <button className="primary" disabled={busy} onClick={() => decide(r, 'approve')} style={{ fontSize: '12px', padding: '5px 14px' }}>✓ Approve</button>
                 <button disabled={busy} onClick={() => decide(r, 'deny')} style={{ fontSize: '12px', padding: '5px 14px', color: 'var(--danger)' }}>Deny</button>
@@ -368,21 +381,31 @@ function ClockAdmin({ locId }) {
           </div>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '10px' }}>
-          {people.map((p) => (
+          {people.map((p) => {
+            const clocked = summary[p.id] != null ? Number(summary[p.id]) : 0;
+            const stat = Number(data.stat_pay_hours || 0);
+            const holiday = Number((data.paid_timeoff_hours || {})[p.id] || 0);
+            const totalPay = Math.round((clocked + stat + holiday) * 100) / 100;
+            return (
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px' }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600 }}>{p.name}{p.in_bonus === false && <span style={{ fontSize: '10px', color: 'var(--text3)', fontWeight: 400 }}> · clock only</span>}</div>
+                <div style={{ fontWeight: 600 }}>{p.name}{p.in_bonus === false && <span style={{ fontSize: '10px', color: 'var(--text3)', fontWeight: 400 }}> · clock only</span>}
+                  {(stat > 0 || holiday > 0 || clocked > 0) && <span style={{ float: 'right', fontVariantNumeric: 'tabular-nums' }}>{totalPay} h</span>}
+                </div>
                 <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
-                  {summary[p.id] != null ? `${summary[p.id]} h this period` : 'no punches this period'}
-                  {(data.off_days || {})[p.id] ? ` · 🏖 ${data.off_days[p.id]} day${data.off_days[p.id] === 1 ? '' : 's'} off this period` : ''}
-                  {totals[p.id] ? ` · ${totals[p.id]} day${totals[p.id] === 1 ? '' : 's'} off this year` : ''}
+                  {clocked ? `${clocked} h clocked` : 'no punches'}
+                  {stat > 0 ? ` + ${stat} h stat` : ''}
+                  {holiday > 0 ? ` + ${holiday} h paid holiday` : ''}
+                  {(data.off_days || {})[p.id] ? ` · 🏖 ${data.off_days[p.id]} day${data.off_days[p.id] === 1 ? '' : 's'} off` : ''}
+                  {totals[p.id] ? ` · ${totals[p.id]} day${totals[p.id] === 1 ? '' : 's'} this year` : ''}
                 </div>
               </div>
               <button onClick={() => setPin(p)} disabled={busy} style={{ fontSize: '11px', padding: '4px 10px' }}>Set PIN</button>
               <button onClick={() => uploadPhoto(p)} disabled={busy} title="Upload a profile photo" style={{ fontSize: '11px', padding: '4px 8px' }}>📷</button>
               <button onClick={() => setPersonActive(p, false)} disabled={busy} title="Remove from the time clock" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)' }}>✕</button>
             </div>
-          ))}
+            );
+          })}
         </div>
         {allPeople.some((p) => !p.active) && (
           <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '10px' }}>
@@ -401,7 +424,13 @@ function ClockAdmin({ locId }) {
           {upcoming.map((r) => (
             <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', marginBottom: '4px' }}>
               <span style={{ fontWeight: 600 }}>{r.type === 'closure' ? '🚪 Shop closed' : r.person_name}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{r.type === 'closure' ? '' : (OFF_LABEL[r.type] || r.type) + ' · '}{fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'}{r.type === 'closure' ? '' : ' used'}</b></span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{r.type === 'closure' ? '' : (OFF_LABEL[r.type] || r.type) + ' · '}{fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'}{r.type === 'closure' ? '' : ` = ${r.hours} h`}</b></span>
+              {r.type !== 'closure' && (
+                <button disabled={busy} onClick={() => setPaidFlag(r, !(r.paid === true))}
+                  style={{ fontSize: '11px', padding: '3px 10px', fontWeight: 700, color: r.paid === true ? 'var(--success)' : r.paid === false ? 'var(--text3)' : 'var(--warning)' }}>
+                  {r.paid === true ? '💰 PAID' : r.paid === false ? 'UNPAID' : '❓ paid?'}
+                </button>
+              )}
               {r.sm_appointment_id && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>📅 on Shopmonkey</span>}
               <button disabled={busy} onClick={() => cancelOff(r)} style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px', color: 'var(--danger)' }}>Cancel</button>
             </div>
