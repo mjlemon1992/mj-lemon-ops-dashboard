@@ -39,7 +39,8 @@ function Gauge({ label, value, sub, tone, rail, onClick, soon }) {
 }
 
 function MarketingView({ locId }) {
-  const { api, token } = useAuth();
+  const { api, token, user } = useAuth();
+  const isManager = user?.role === 'manager';   // operators don't get the Calls (Marchex) section
   const { locations } = useLocations();
   const navigate = useNavigate();
   const [status, setStatus] = useState({ configured: true, slack: false });
@@ -58,16 +59,17 @@ function MarketingView({ locId }) {
   const shotsRef = useRef(null);
   const detailRef = useRef(null);
 
-  useEffect(() => { api('/marketing/calls/status').then(setStatus).catch(() => {}); }, [api]);
+  useEffect(() => { if (isManager) return; api('/marketing/calls/status').then(setStatus).catch(() => {}); }, [api, isManager]);
 
   const refresh = useCallback(() => {
     if (!locId) return;
+    if (isManager) { setSummary(null); setPeriods([]); setLoading(false); return; }
     setLoading(true); setErr(null);
     Promise.all([
       api(`/marketing/calls/${locId}/summary`).catch(() => null),
       api(`/marketing/calls/${locId}/periods`).catch(() => []),
     ]).then(([s, p]) => { setSummary(s); setPeriods(p || []); setLoading(false); });
-  }, [locId, api]);
+  }, [locId, api, isManager]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -148,8 +150,9 @@ function MarketingView({ locId }) {
             <ShotsList locId={locId} onCount={setShotsCount} onUse={useShot} />
           </div>
 
-          {/* Calls glance — the read; full tables behind "View detail" */}
-          <div className="card">
+          {/* Calls glance — the read; full tables behind "View detail".
+              Hidden for shop operators (owner/partner tool). */}
+          {!isManager && <div className="card">
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '9px' }}>
               <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Calls</span>
               <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{summary ? `${monthLabel(summary.period_start)} · Marchex` : 'Marchex'}</span>
@@ -193,7 +196,7 @@ function MarketingView({ locId }) {
                 </div>
               </>
             )}
-          </div>
+          </div>}
 
           {/* Live Google review scorecard (self-hides until configured) */}
           <ReviewsScorecard locId={locId} />
@@ -201,7 +204,7 @@ function MarketingView({ locId }) {
       </div>
 
       {/* Calls detail — upload + full tables, on demand */}
-      {showDetail && (
+      {showDetail && !isManager && (
         <div ref={detailRef} style={{ marginTop: '20px', borderTop: '0.5px solid var(--border)', paddingTop: '18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
             <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>Call tracking detail</div>

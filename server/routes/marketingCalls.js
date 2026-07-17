@@ -219,7 +219,7 @@ module.exports = (pool) => {
   };
 
   // Shop operators (managers) may use this for THEIR location; asserted below.
-  const gate = [authenticateToken, requireRole('owner', 'partner', 'manager')];
+  const gate = [authenticateToken, requireRole('owner', 'partner')];
   const assertLoc = (req, res) => {
     if (canAccessLocation(req.user, req.params.locationId)) return true;
     res.status(403).json({ error: 'Access denied for this location' });
