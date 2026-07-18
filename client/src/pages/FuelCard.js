@@ -11,18 +11,12 @@ const money = (n) => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFract
 
 export default function FuelCard() {
   const { isAll, selectedId, scopeLocations, select } = useLocations();
-  if (isAll) {
-    return (
-      <div>
-        <h1 style={{ marginBottom: '6px' }}>Group Fuel Card</h1>
-        <div style={{ color: 'var(--text3)', marginBottom: '16px' }}>Each location has its own card — pick a shop:</div>
-        {(scopeLocations || []).map((l) => (
-          <button key={l.id} onClick={() => select(l.id)} style={{ display: 'block', marginBottom: '8px', padding: '10px 18px' }}>{l.name}</button>
-        ))}
-      </div>
-    );
-  }
-  if (!selectedId) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Select a location.</div>;
+  // Per-location page: follow the global selector. "All" auto-selects the
+  // first shop so there's never a dead-end picker page.
+  useEffect(() => {
+    if (isAll && (scopeLocations || []).length) select(scopeLocations[0].id);
+  }, [isAll, scopeLocations, select]);
+  if (isAll || !selectedId) return null;
   return <FuelView locId={selectedId} />;
 }
 
