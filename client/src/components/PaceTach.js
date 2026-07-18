@@ -9,6 +9,12 @@ export default function PaceTach({ pct, size = 140 }) {
     if (!c) return undefined;
     const x = c.getContext('2d');
     const W = size, H = Math.round(size * 0.86);
+    // Render at the device's real pixel density — without this the gauge is
+    // drawn at 1x and upscaled (blurry on every Retina screen).
+    const dpr = window.devicePixelRatio || 1;
+    c.width = W * dpr; c.height = H * dpr;
+    c.style.width = `${W}px`; c.style.height = `${H}px`;
+    x.setTransform(dpr, 0, 0, dpr, 0, 0);
     const cx = W / 2, cy = H * 0.6, R = W * 0.37;
     const A0 = Math.PI * 0.75, A1 = Math.PI * 2.25;
     const ang = (f) => A0 + (A1 - A0) * f;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import PerLocationPage from '../components/PerLocationPage';
+import { money, money0, monthLabel as sharedMonthLabel } from '../utils/format';
 import { showToast, askConfirm, askInput, Skeleton } from '../components/Feedback';
 
 // Profit-Share Bonus tab (spec: lemonops-bonus-fuelcard-spec-FULL.md §3).
@@ -8,10 +9,8 @@ import { showToast, askConfirm, askInput, Skeleton } from '../components/Feedbac
 // (locked) → superseded. All guardrails are server-side — this UI just renders
 // the errors it gets back (missing inputs, net-profit sanity confirm, locks).
 
-const money = (n) => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const money0 = (n) => '$' + Math.round(Number(n || 0)).toLocaleString('en-CA');
 const pctTxt = (f) => (f == null ? '—' : Math.round(Number(f) * 100) + '%');
-const monthLabel = (m) => m ? new Date(m + '-15T12:00:00Z').toLocaleDateString('en-CA', { month: 'long', year: 'numeric' }) : '';
+const monthLabel = (m) => sharedMonthLabel(m, { year: true });
 
 function EffBar({ eff, floor }) {
   if (eff == null) return <span style={{ color: 'var(--text3)', fontSize: '12px' }}>n/a — flat share</span>;
