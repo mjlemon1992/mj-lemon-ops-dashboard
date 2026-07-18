@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { pacePct as wdPacePct, workingPaceFrac, workingDaysLeftInMonth, nextStatHoliday, holidayDatesBetween } from '../utils/pace';
+import { pacePct as wdPacePct, workingPaceFrac, workingDaysLeftInMonth, shopTodayIso } from '../utils/pace';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
@@ -47,6 +47,14 @@ export default function Home() {
   const [clockByLoc, setClockByLoc] = useState({});
   const [offByLoc, setOffByLoc] = useState({});
   const [paidByLoc, setPaidByLoc] = useState({});
+  const [holidays, setHolidays] = useState([]);   // [{date,name}] next 12 months, shop province
+  useEffect(() => {
+    const first = locations.find(l => l.active);
+    if (!first) return;
+    api(`/meta/holidays/${first.province || 'ab'}`)
+      .then(d => setHolidays(d.holidays || []))
+      .catch(() => {});
+  }, [locations, api]);
   useEffect(() => {
     const active = locations.filter(l => l.active);
     if (!active.length || !['owner', 'partner', 'manager'].includes(user?.role)) return undefined;
@@ -243,7 +251,7 @@ export default function Home() {
       {/* Live decks: crew now · efficiency · two weeks */}
       {Object.keys(clockByLoc).length > 0 && (() => {
         const scopeIds = activeLocations.map(l => l.id);
-        const todayIso = new Date().toLocaleDateString('en-CA');
+        const todayIso = shopTodayIso();
         const offToday = new Set();
         const upcoming = [];
         scopeIds.forEach(id => ((offByLoc[id] || {}).requests || []).forEach(r => {
@@ -259,15 +267,19 @@ export default function Home() {
         const effRows = activeLocations.flatMap(l => ((teff[l.id] || {}).technicians || []))
           .map(t => { const w = num(t.hours_worked), so = num(t.hours_sold); return w > 0 ? { name: t.tech_name, eff: Math.round((so / w) * 100) } : null; })
           .filter(Boolean);
-        const days = Array.from({ length: 14 }, (_, i) => { const dt = new Date(); dt.setDate(dt.getDate() + i); return dt; });
-        const hset = holidayDatesBetween(_groupProv, todayIso, days[13].toLocaleDateString('en-CA'));
+        // Build the 14-day strip from the SHOP's calendar day (noon-UTC stepping
+        // avoids DST edges); holidays come from the server's 13-province calendar.
+        const base = new Date(todayIso + 'T12:00:00Z');
+        const days = Array.from({ length: 14 }, (_, i) => new Date(base.getTime() + i * 86400000));
+        const hset = new Set(holidays.map(x => x.date));
         const offDates = (iso) => { let approved = false, pending = false;
           scopeIds.forEach(id => ((offByLoc[id] || {}).requests || []).forEach(r => {
             if (r.start_date <= iso && r.end_date >= iso) { if (r.status === 'approved') approved = true; else if (r.status === 'pending') pending = true; }
           }));
           return { approved, pending };
         };
-        const nextStat = nextStatHoliday(_groupProv);
+        const nh = holidays.find(x => x.date >= todayIso);
+        const nextStat = nh ? { label: `${nh.name} ${fmtD2(nh.date)}` } : null;
         const nextOff = upcoming.find(r => r.person_id);
         return (
           <div className="deck-row">
@@ -307,8 +319,8 @@ export default function Home() {
               <div className="deck-head"><span className="deck-title">Two weeks</span><span className="section-label">Off &amp; stats</span></div>
               <div className="tw-grid">
                 {days.map(dt => {
-                  const iso = dt.toLocaleDateString('en-CA');
-                  const dow = dt.getDay();
+                  const iso = dt.toISOString().slice(0, 10);
+                  const dow = dt.getUTCDay();
                   const o = offDates(iso);
                   const cls = ['tw-cell'];
                   if (dow === 0 || dow === 6) cls.push('dim');

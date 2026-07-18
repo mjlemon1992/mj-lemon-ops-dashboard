@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useLocations } from '../context/LocationContext';
+import PerLocationPage from '../components/PerLocationPage';
 import { showToast, askConfirm, askInput, Skeleton } from '../components/Feedback';
 
 // Profit-Share Bonus tab (spec: lemonops-bonus-fuelcard-spec-FULL.md §3).
@@ -30,14 +30,7 @@ function EffBar({ eff, floor }) {
 }
 
 export default function Bonus() {
-  const { isAll, selectedId, scopeLocations, select } = useLocations();
-  // Per-location page: follow the global selector. "All" auto-selects the
-  // first shop so there's never a dead-end picker page.
-  React.useEffect(() => {
-    if (isAll && (scopeLocations || []).length) select(scopeLocations[0].id);
-  }, [isAll, scopeLocations, select]);
-  if (isAll || !selectedId) return null;
-  return <BonusView locId={selectedId} />;
+  return <PerLocationPage>{(locId) => <BonusView locId={locId} />}</PerLocationPage>;
 }
 
 function BonusView({ locId }) {
