@@ -114,12 +114,6 @@ function openDaySet(csv) {
   return parts.length ? new Set(parts.map((s) => DOW[s])) : new Set([1, 2, 3, 4, 5]);
 }
 
-function holidaySet(province, year) {
-  const prov = (province || 'ab').toLowerCase();
-  const list = (HOLIDAYS[prov] && HOLIDAYS[prov][year]) || (HOLIDAYS.ab[year] || []);
-  return new Set(list);
-}
-
 // Count Mon-Fri days in [fromDay..toDay] (inclusive) that aren't holidays.
 function countWorkingDays(year, month, fromDay, toDay, hols) {
   let n = 0;
