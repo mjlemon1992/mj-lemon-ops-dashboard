@@ -24,34 +24,80 @@ module.exports = (pool) => {
       const ids = locs.map((l) => l.id);
       const nameOf = Object.fromEntries(locs.map((l) => [l.id, l.name]));
 
-      const [timeoff, edits, fuel] = await Promise.all([
+      const prevMonth = (() => {
+        const now = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' }) + 'T12:00:00Z');
+        const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+        return d.toISOString().slice(0, 7);
+      })();
+      const [timeoff, edits, fuel, bonusRuns] = await Promise.all([
         pool.query(
-          `SELECT location_id, COUNT(*)::int AS n FROM time_off_request
-            WHERE location_id = ANY($1) AND status = 'pending' AND person_id IS NOT NULL
-            GROUP BY location_id`, [ids]),
+          `SELECT r.id, r.location_id, r.person_id, r.type, r.paid, r.working_days,
+                  r.start_date::text AS start_date, r.end_date::text AS end_date,
+                  p.name AS person_name, p.vacation_days_per_year AS allowance,
+                  (SELECT COALESCE(SUM(a.working_days), 0)::int FROM time_off_request a
+                    WHERE a.person_id = r.person_id AND a.status = 'approved' AND a.type = 'vacation'
+                      AND to_char(a.start_date, 'YYYY') = to_char(now(), 'YYYY')) AS vacation_used
+             FROM time_off_request r JOIN bonus_person p ON p.id = r.person_id
+            WHERE r.location_id = ANY($1) AND r.status = 'pending'
+            ORDER BY r.requested_at`, [ids]),
         pool.query(
-          `SELECT location_id, COUNT(*)::int AS n FROM time_edit_request
-            WHERE location_id = ANY($1) AND status = 'pending'
-            GROUP BY location_id`, [ids]),
+          `SELECT r.id, r.location_id, r.person_id, r.entry_id, r.note,
+                  r.proposed_clock_in, r.proposed_clock_out, r.proposed_break_minutes,
+                  p.name AS person_name, e.clock_in, e.clock_out
+             FROM time_edit_request r
+             JOIN bonus_person p ON p.id = r.person_id
+             LEFT JOIN time_clock_entry e ON e.id = r.entry_id
+            WHERE r.location_id = ANY($1) AND r.status = 'pending'
+            ORDER BY r.requested_at`, [ids]),
         pool.query(
-          `SELECT location_id, COUNT(*)::int AS n FROM fuel_ledger
+          `SELECT location_id, COUNT(*)::int AS n, COALESCE(SUM(ABS(amount)), 0)::numeric(12,2) AS total
+             FROM fuel_ledger
             WHERE location_id = ANY($1) AND person_id IS NULL AND type = 'purchase'
             GROUP BY location_id`, [ids]),
+        // Last month's bonus not yet approved = the net-profit prompt (owner/partner).
+        ['owner', 'partner'].includes(req.user.role)
+          ? pool.query(
+            `SELECT location_id, status FROM bonus_run
+              WHERE location_id = ANY($1) AND month = $2 AND superseded_by IS NULL`, [ids, prevMonth])
+          : Promise.resolve({ rows: null }),
       ]);
 
+      // Bonus prompt: previous month with no approved (unsuperseded) run.
+      const bonus = [];
+      if (bonusRuns.rows) {
+        const runByLoc = Object.fromEntries(bonusRuns.rows.map((r) => [r.location_id, r.status]));
+        for (const l of locs) {
+          const st = runByLoc[l.id];
+          if (st !== 'approved') bonus.push({ location_id: l.id, location_name: l.name, month: prevMonth, status: st || 'none' });
+        }
+      }
+
+      const countByLoc = (rows) => {
+        const m = {};
+        for (const r of rows) m[r.location_id] = (m[r.location_id] || 0) + 1;
+        return m;
+      };
       const items = [];
-      const push = (rows, kind, label, path) => {
-        for (const r of rows) {
-          items.push({
-            kind, location_id: r.location_id, location_name: nameOf[r.location_id],
-            count: r.n, label: r.n === 1 ? label : `${label}s`, path,
-          });
+      const push = (byLoc, kind, label, path) => {
+        for (const [lid, n] of Object.entries(byLoc)) {
+          items.push({ kind, location_id: lid, location_name: nameOf[lid], count: n, label: n === 1 ? label : `${label}s`, path });
         }
       };
-      push(timeoff.rows, 'timeoff', 'holiday request', '/time-clock');
-      push(edits.rows, 'edit', 'punch change', '/time-clock');
-      push(fuel.rows, 'fuel', 'unassigned fuel purchase', '/fuel-card');
-      res.json({ items, total: items.reduce((s, i) => s + i.count, 0) });
+      push(countByLoc(timeoff.rows), 'timeoff', 'holiday request', '/time-clock');
+      push(countByLoc(edits.rows), 'edit', 'punch change', '/time-clock');
+      push(Object.fromEntries(fuel.rows.map((r) => [r.location_id, r.n])), 'fuel', 'unassigned fuel purchase', '/fuel-card');
+
+      const withName = (r) => ({ ...r, location_name: nameOf[r.location_id] });
+      res.json({
+        items,
+        total: items.reduce((s, i) => s + i.count, 0),
+        detail: {
+          timeoff: timeoff.rows.map(withName),
+          edits: edits.rows.map(withName),
+          fuel: fuel.rows.map(withName),
+          bonus,
+        },
+      });
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
   });
 

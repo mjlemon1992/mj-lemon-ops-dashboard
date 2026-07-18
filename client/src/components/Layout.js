@@ -5,6 +5,7 @@ import { useLocations } from '../context/LocationContext';
 import { parseAlerts, alertId } from '../utils/alerts';
 import Icon from './Icon';
 import { FeedbackHost } from './Feedback';
+import WaitingRail from './WaitingRail';
 
 // Grouped nav (2026-07-17 refresh): same items, same roles — organized into five
 // sections so the sidebar reads in blocks instead of a flat list. Every item
@@ -46,21 +47,32 @@ export default function Layout() {
   const [alertCount, setAlertCount] = useState(0);
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth <= 768);
   const [navOpen, setNavOpen] = useState(false);
-  const [attention, setAttention] = useState({ items: [], total: 0 });
+  const [attention, setAttention] = useState({ items: [], total: 0, detail: null });
   const [attnOpen, setAttnOpen] = useState(false);
+  const [railOpen, setRailOpen] = useState(() => localStorage.getItem('ops_rail') !== 'off');
 
   // "Waiting on you" — human queues (holiday requests, punch changes,
-  // unassigned fuel). One aggregate call, refreshed every minute.
-  useEffect(() => {
-    if (!user || !['owner', 'partner', 'manager'].includes(user.role)) return undefined;
-    let cancelled = false;
-    const load = () => api('/attention')
-      .then(d => { if (!cancelled && d && Array.isArray(d.items)) setAttention(d); })
+  // unassigned fuel, bonus prompt). One aggregate call, refreshed every minute.
+  const canQueue = user && ['owner', 'partner', 'manager'].includes(user.role);
+  const loadAttention = React.useCallback(() => {
+    if (!canQueue) return;
+    api('/attention')
+      .then(d => { if (d && Array.isArray(d.items)) setAttention(d); })
       .catch(() => {});
-    load();
-    const t = setInterval(load, 60000);
-    return () => { cancelled = true; clearInterval(t); };
-  }, [user, api]);
+  }, [api, canQueue]);
+  useEffect(() => {
+    if (!canQueue) return undefined;
+    loadAttention();
+    const t = setInterval(loadAttention, 60000);
+    return () => clearInterval(t);
+  }, [canQueue, loadAttention]);
+  const d = attention.detail || {};
+  const railCount = (d.timeoff || []).length + (d.edits || []).length + (d.fuel || []).length + (d.bonus || []).length;
+  const showRail = !isMobile && railOpen && railCount > 0;
+  const toggleRail = () => {
+    if (isMobile) { setAttnOpen(o => !o); return; }
+    setRailOpen(o => { localStorage.setItem('ops_rail', o ? 'off' : 'on'); return !o; });
+  };
 
   // Collapse the sidebar into a drawer on phones; restore it on wider screens.
   useEffect(() => {
@@ -206,12 +218,12 @@ export default function Layout() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, position: 'relative' }}>
-            {attention.total > 0 && (
+            {railCount > 0 && (
               <>
-                <div className="badge warning" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setAttnOpen(o => !o)}>
-                  ⏳ {attention.total}{isMobile ? '' : ' waiting on you'}
+                <div className="badge warning" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={toggleRail}>
+                  ⏳ {railCount}{isMobile ? '' : (showRail ? ' waiting on you' : ' waiting on you')}
                 </div>
-                {attnOpen && (
+                {isMobile && attnOpen && (
                   <>
                     <div onClick={() => setAttnOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
                     <div style={{ position: 'absolute', top: '40px', right: 0, zIndex: 61, minWidth: 260, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '10px', boxShadow: '0 8px 28px rgba(0,0,0,0.35)', padding: '6px', maxHeight: '60vh', overflowY: 'auto' }}>
@@ -245,8 +257,15 @@ export default function Layout() {
             </button>
           </div>
         </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 14px' : '20px 24px' }}>
-          <Outlet />
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 14px' : '20px 24px', minWidth: 0 }}>
+            <Outlet />
+          </div>
+          {showRail && (
+            <div style={{ width: 300, flexShrink: 0, overflowY: 'auto', borderLeft: '0.5px solid var(--border)', background: 'var(--bg2)' }}>
+              <WaitingRail detail={attention.detail} api={api} onAction={loadAttention} multiLoc={locations.length > 1} />
+            </div>
+          )}
         </div>
       </div>
       <FeedbackHost />

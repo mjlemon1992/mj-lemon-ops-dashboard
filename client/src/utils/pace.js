@@ -80,3 +80,41 @@ export function pacePct(actual, target, province, today = new Date()) {
   if (!frac || frac <= 0) return null;
   return Math.round((actual / (target * frac)) * 100);
 }
+
+// Working days left in the current month (after today), for the hero band.
+export function workingDaysLeftInMonth(province, today = new Date()) {
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const hols = holidaySet(province, year);
+  if (today.getDate() >= daysInMonth) return 0;
+  return countWorkingDays(year, month, today.getDate() + 1, daysInMonth, hols);
+}
+
+// Next statutory holiday on/after today: {date, label} or null.
+export function nextStatHoliday(province, today = new Date()) {
+  const prov = (province || 'ab').toLowerCase();
+  const iso = today.toLocaleDateString('en-CA');
+  for (const year of [today.getFullYear(), today.getFullYear() + 1]) {
+    const list = (HOLIDAYS[prov] && HOLIDAYS[prov][year]) || HOLIDAYS.ab[year] || [];
+    for (const d of list) {
+      if (d >= iso) {
+        const label = new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+        return { date: d, label };
+      }
+    }
+  }
+  return null;
+}
+
+// Set of stat-holiday ISO dates in a window (for the two-week deck).
+export function holidayDatesBetween(province, fromIso, toIso) {
+  const out = new Set();
+  const prov = (province || 'ab').toLowerCase();
+  for (const year of [Number(fromIso.slice(0, 4)), Number(toIso.slice(0, 4))]) {
+    for (const d of (HOLIDAYS[prov] && HOLIDAYS[prov][year]) || HOLIDAYS.ab[year] || []) {
+      if (d >= fromIso && d <= toIso) out.add(d);
+    }
+  }
+  return out;
+}
