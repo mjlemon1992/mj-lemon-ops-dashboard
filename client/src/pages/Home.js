@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
 import { parseAlerts } from '../utils/alerts';
+import PaceTach from '../components/PaceTach';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -150,6 +151,41 @@ export default function Home() {
             <span style={{ fontSize: '12px', color: 'var(--warning)' }}>{marginCount} job{marginCount > 1 ? 's' : ''} below {marginTarget}% parts margin</span>
           )}
           <span style={{ fontSize: '12px', color: 'var(--warning)', cursor: 'pointer', marginLeft: 'auto', textDecoration: 'underline' }} onClick={() => navigate('/alerts')}>View all</span>
+        </div>
+      )}
+
+      {/* Glance board: the one-look answer — revenue vs target on a tach, pace,
+          cars, efficiency. The detailed cards below stay untouched. */}
+      {gRevTarget > 0 && (
+        <div className="glance-board">
+          <div className="glance-main">
+            <div className="section-label">{isAll ? 'Group revenue · MTD' : 'Revenue · MTD'}</div>
+            <div className="glance-rev">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
+            <div className="glance-sub">
+              of {money0(gRevTarget)} target ·{' '}
+              <span style={{ color: pctColor(pacePct(groupRevenue, gRevTarget)) }}>
+                {pacePct(groupRevenue, gRevTarget) != null ? `${pacePct(groupRevenue, gRevTarget)}% of pace` : 'no pace data'}
+              </span>
+            </div>
+            <div className="glance-meter">
+              <div className="glance-meter-fill" style={{ width: `${Math.min(targetPct(groupRevenue, gRevTarget) || 0, 100)}%` }} />
+            </div>
+          </div>
+          <div className="glance-side">
+            <div>
+              <div className="section-label">Cars</div>
+              <div className="glance-num">{groupCarCount > 0 ? groupCarCount : '—'}</div>
+              <div className="glance-sub">{gCarTarget > 0 ? `of ${gCarTarget}` : ' '}</div>
+            </div>
+            <div>
+              <div className="section-label">Efficiency</div>
+              <div className="glance-num">{groupEff > 0 ? `${groupEff}%` : '—'}</div>
+              <div className="glance-sub">{gEffTarget > 0 ? `target ${Math.round(gEffTarget)}%` : ' '}</div>
+            </div>
+          </div>
+          <div className="glance-tach">
+            <PaceTach pct={targetPct(groupRevenue, gRevTarget)} />
+          </div>
         </div>
       )}
 

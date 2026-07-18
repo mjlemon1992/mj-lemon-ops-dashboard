@@ -1,4 +1,7 @@
 :root {
+  /* OPS display face: plate-condensed for headings and hero numbers.
+     Avenir Next Condensed on Apple devices, Barlow Condensed elsewhere. */
+  --font-disp: 'Avenir Next Condensed', 'Barlow Condensed', 'Archivo', 'Arial Narrow', sans-serif;
   --bg: #0a0a0a;
   --bg2: #111111;
   --bg3: #1a1a1a;
@@ -98,9 +101,9 @@ button.danger {
   padding: 14px 16px;
 }
 
-.metric-label { font-size: 11px; color: var(--text3); margin-bottom: 6px; }
+.metric-label { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 9.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text2); }
 /* Tabular figures so columns of KPI numbers align digit-for-digit. */
-.metric-value { font-family: 'Archivo', sans-serif; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; color: var(--text); font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.metric-value { font-family: var(--font-disp); font-size: 30px; font-weight: 700; letter-spacing: 0.01em; color: var(--text); font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 .metric-sub { font-size: 11px; margin-top: 4px; color: var(--text3); }
 .metric-sub.good { color: var(--success); }
 .metric-sub.warn { color: var(--warning); }
@@ -115,7 +118,7 @@ button.danger {
 .btn-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-.page-title-text { font-family: 'Archivo', sans-serif; font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--text); }
+.page-title-text { font-family: var(--font-disp); font-size: 21px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text); }
 
 .table-wrap { width: 100%; overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
@@ -168,12 +171,12 @@ td.strong { font-weight: 500; color: var(--text); }
 }
 
 /* Type scale — applies to semantic headings; inline styles still win where set. */
-h1 { font-family: 'Archivo', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.2; }
-h2 { font-family: 'Archivo', sans-serif; font-size: 16px; font-weight: 700; line-height: 1.3; }
-h3 { font-family: 'Archivo', sans-serif; font-size: 14px; font-weight: 700; line-height: 1.35; }
+h1 { font-family: var(--font-disp); font-size: 23px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.15; text-transform: uppercase; }
+h2 { font-family: var(--font-disp); font-size: 18px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.25; text-transform: uppercase; }
+h3 { font-family: var(--font-disp); font-size: 15px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.3; }
 
 /* The repeated "13px uppercase muted" section label, as one utility. */
-.section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); }
+.section-label { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text3); }
 
 /* Metric/stat grids reflow instead of breaking on tablet/phone. */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
@@ -193,3 +196,15 @@ h3 { font-family: 'Archivo', sans-serif; font-size: 14px; font-weight: 700; line
 .metric-card:has(.metric-sub.good)::before { width: 3px; background: var(--success); }
 .metric-card:has(.metric-sub.warn)::before { width: 3px; background: var(--warning); }
 .metric-card:has(.metric-sub.bad)::before  { width: 3px; background: var(--danger); }
+
+/* --- OPS glance board (Home hero) --- */
+.glance-board { display: flex; align-items: center; gap: 20px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 18px 22px; margin-bottom: 20px; flex-wrap: wrap; }
+.glance-main { flex: 1 1 260px; min-width: 220px; }
+.glance-rev { font-family: var(--font-disp); font-size: 44px; font-weight: 700; line-height: 1.05; letter-spacing: 0.01em; color: var(--text); font-variant-numeric: tabular-nums; }
+.glance-sub { font-size: 12px; color: var(--text3); margin-top: 4px; }
+.glance-meter { height: 6px; background: var(--bg3); border-radius: 3px; margin-top: 12px; overflow: hidden; max-width: 340px; }
+.glance-meter-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.6s ease; }
+.glance-side { display: flex; gap: 28px; align-items: flex-start; }
+.glance-num { font-family: var(--font-disp); font-size: 28px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.glance-tach { flex: 0 0 auto; }
+@media (max-width: 640px) { .glance-tach { display: none; } }
