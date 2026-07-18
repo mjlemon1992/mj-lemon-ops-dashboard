@@ -1,4 +1,5 @@
 const express = require('express');
+const { publishPost, ensurePublishTable, verifyImageSig } = require('../lib/publish');
 const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
 
 // Marketing module, piece 2: capture -> AI captions -> approval queue.
@@ -374,11 +375,19 @@ module.exports = (pool) => {
            ORDER BY COALESCE(deleted_at, created_at) DESC LIMIT 50`,
         params
       );
+      await ensurePublishTable(pool);
+      const ids = rows.map(r => r.id);
+      const pubBy = {};
+      if (ids.length) {
+        const { rows: pubs } = await pool.query('SELECT post_id, channel, status, error FROM marketing_post_publish WHERE post_id = ANY($1)', [ids]);
+        for (const p of pubs) (pubBy[p.post_id] = pubBy[p.post_id] || {})[p.channel] = { status: p.status, error: p.error };
+      }
       res.json(rows.map(r => ({
         id: r.id, location_name: r.location_name, status: r.status, note: r.note,
         captions: { ig: r.caption_ig, fb: r.caption_fb, gbp: r.caption_gbp },
         image: dataUri(r), created_at: r.created_at, actioned_at: r.actioned_at,
         deleted_at: r.deleted_at, deleted_via: r.deleted_via,
+        publish: pubBy[r.id] || null,
       })));
     } catch (e) { fail(res, e); }
   });
@@ -395,10 +404,36 @@ module.exports = (pool) => {
       res.json({ ok: true, id: rows[0].id, status });
     } catch (e) { fail(res, e); }
   };
-  // NOTE: "approve" marks ready-to-post; real publishing waits on Meta/GBP access.
-  router.post('/post/:postId/approve', ...gate, postGuard, setStatus('approved'));
+  // Public signed image URL — Meta/Google fetch post images from here. No JWT
+  // (they can't send one); the HMAC signature + expiry gate access instead.
+  router.get('/public-image/:postId', async (req, res) => {
+    try {
+      await ensureTables();
+      if (!verifyImageSig(req.params.postId, req.query.exp, req.query.sig)) return res.status(403).end();
+      const { rows } = await pool.query('SELECT image_data, image_mime FROM marketing_post WHERE id=$1 AND deleted_at IS NULL', [req.params.postId]);
+      if (!rows.length || !rows[0].image_data) return res.status(404).end();
+      res.set('Content-Type', rows[0].image_mime || 'image/jpeg').set('Cache-Control', 'private, max-age=3600');
+      res.send(rows[0].image_data);
+    } catch (e) { fail(res, e); }
+  });
+
+  // Approve = ready AND published: fire the publish engine after the status
+  // flips. Fire-and-forget — per-channel outcomes land on the card's chips;
+  // channels without credentials record not_connected and nothing goes out.
+  router.post('/post/:postId/approve', ...gate, postGuard, async (req, res) => {
+    await setStatus('approved')(req, res);
+    publishPost(pool, req.params.postId).catch(() => {});
+  });
+  // Manual (re)publish — retry failed channels from the queue card.
+  router.post('/post/:postId/publish', ...gate, postGuard, async (req, res) => {
+    try {
+      const out = await publishPost(pool, req.params.postId);
+      if (out.error) return res.status(400).json({ error: out.error });
+      res.json({ ok: true, ...out });
+    } catch (e) { fail(res, e); }
+  });
   router.post('/post/:postId/skip', ...gate, postGuard, setStatus('skipped'));
-  router.post('/post/:postId/unapprove', ...gate, postGuard, setStatus('draft'));
+  router.post('/post/:postId/unapprove', ...gate, postGuard, setStatus('draft'));   // note: does NOT retract anything already published
 
   // Soft delete (e.g. imported the wrong image). The row + image are KEPT and
   // hidden from the live queues; it lands in "Recently deleted" and can be

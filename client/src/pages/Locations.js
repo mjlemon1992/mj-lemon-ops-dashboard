@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', qbo_slug: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, display_show_leaderboard: true, open_days: 'mon,tue,wed,thu,fri', active: true };
+const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', qbo_slug: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, display_show_leaderboard: true, open_days: 'mon,tue,wed,thu,fri', active: true, fb_page_id: '', ig_user_id: '', gbp_location_name: '' };
 
 export default function Locations() {
   const { api } = useAuth();
@@ -109,6 +109,9 @@ export default function Locations() {
             <div className="form-row">
               {field('display_pin','Display PIN (techs enter this on the TV)','text',{maxLength:12})}
               {field('weekly_hours','On-clock hours / tech per week','number',{min:1,max:80})}
+              {field('fb_page_id','Facebook Page ID (social publishing)','text',{placeholder:'e.g. 1234567890'})}
+              {field('ig_user_id','Instagram Business account ID','text',{placeholder:'e.g. 178414...'})}
+              {field('gbp_location_name','Google Business Profile location (accounts/…/locations/…)','text',{placeholder:'accounts/123/locations/456'})}
             </div>
             <div className="form-group" style={{ marginTop: '10px' }}>
               <label className="form-label">Other locations' revenue on this board</label>
