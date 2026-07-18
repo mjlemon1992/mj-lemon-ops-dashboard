@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-// Live Google review scorecard (read-only). Pulls rating + count + recent reviews from the
-// /marketing/reviews endpoint (Google Places, cached server-side). No reply controls — those
-// live in Shopmonkey. Self-hides if the endpoint isn't configured yet (no API key / place_id),
-// so the rail stays clean until Google is wired up.
-const Stars = ({ rating }) => {
+// Live Google review scorecard (read-only), OPS-styled. Shows the honest
+// aggregate (rating, count, monthly delta) and FEATURES only 4★+ quotes —
+// the server filters them. Low-star recents surface as a count line so the
+// owner still knows to go handle them on the Google Business profile.
+// Self-hides if the endpoint isn't configured (no API key / place_id).
+const MONO = "ui-monospace, 'SF Mono', Menlo, monospace";
+
+const Stars = ({ rating, size = 14 }) => {
   const full = Math.round(rating || 0);
   return (
-    <span style={{ color: 'var(--accent)', fontSize: '13px', letterSpacing: '1px' }}>
-      {'★★★★★'.slice(0, full)}<span style={{ color: 'var(--border2)' }}>{'★★★★★'.slice(full)}</span>
+    <span style={{ color: 'var(--accent)', fontSize: size, letterSpacing: '2px' }}>
+      {'★★★★★'.slice(0, full)}<span style={{ opacity: 0.25 }}>{'★★★★★'.slice(full)}</span>
     </span>
   );
 };
@@ -25,49 +28,55 @@ export default function ReviewsScorecard({ locId }) {
     setData(null); setHidden(false);
     api(`/marketing/reviews/${locId}`)
       .then(d => { if (!cancelled) setData(d); })
-      .catch(() => { if (!cancelled) setHidden(true); });   // not configured / no place_id -> hide
+      .catch(() => { if (!cancelled) setHidden(true); });   // not configured -> hide
     return () => { cancelled = true; };
   }, [locId, api]);
 
   if (hidden || !data) return null;
 
-  const { rating, total, delta, reviews, demo } = data;
-  const recent = (reviews || [])[0];
+  const { rating, total, delta, reviews, demo, low_recent } = data;
+  const featured = (reviews || []).slice(0, 2);
 
   return (
-    <div className="card">
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '10px' }}>
-        <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Google reviews</span>
-        {demo ? (
-          <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warning)', display: 'inline-block' }} />sample
-          </span>
-        ) : (
-          <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }} />live
-          </span>
-        )}
+    <div className="card" style={{ borderLeft: '3px solid var(--accent)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '12px' }}>
+        <span style={{ fontFamily: MONO, fontSize: '10.5px', fontWeight: 600, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text3)' }}>Google reviews</span>
+        <span style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: demo ? 'var(--warning)' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: demo ? 'var(--warning)' : 'var(--success)', display: 'inline-block' }} />
+          {demo ? 'sample' : 'live'}
+        </span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <span style={{ fontSize: '29px', fontWeight: 600, letterSpacing: '-.02em', lineHeight: 1 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <span style={{ fontFamily: 'var(--font-disp)', fontSize: '38px', fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
           {rating != null ? Number(rating).toFixed(1) : '—'}
         </span>
         <div>
           <Stars rating={rating} />
-          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
+          <div style={{ fontFamily: MONO, fontSize: '10.5px', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)', marginTop: '3px' }}>
             {total != null ? `${Number(total).toLocaleString('en-CA')} reviews` : '—'}
             {delta > 0 && <span style={{ color: 'var(--success)' }}> · +{delta} this mo</span>}
           </div>
         </div>
       </div>
 
-      {recent && (
-        <div style={{ marginTop: '11px', paddingTop: '10px', borderTop: '0.5px solid var(--border)' }}>
-          <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '3px' }}>
-            {recent.author || 'Customer'}{recent.when ? ` · ${recent.when}` : ''}{recent.rating ? ` · ${'★'.repeat(recent.rating)}` : ''}
+      {featured.map((rv, i) => (
+        <div key={i} style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--bg3)', borderRadius: '9px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '4px' }}>
+            <Stars rating={rv.rating} size={11} />
+            <span style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+              {rv.author || 'Customer'}{rv.when ? ` · ${rv.when}` : ''}
+            </span>
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--text2)', lineHeight: 1.45 }}>{recent.text}</div>
+          <div style={{ fontSize: '12.5px', color: 'var(--text2)', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {rv.text}
+          </div>
+        </div>
+      ))}
+
+      {low_recent > 0 && !demo && (
+        <div style={{ marginTop: '10px', fontSize: '11.5px', color: 'var(--warning)' }}>
+          {low_recent} recent review{low_recent === 1 ? '' : 's'} under 4★ — worth a reply on your Google profile.
         </div>
       )}
 
