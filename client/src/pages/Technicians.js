@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
+import { Skeleton } from '../components/Feedback';
 
 const num = v => (typeof v === 'number' ? v : parseFloat(v)) || 0;
 const money0 = n => '$' + Math.round(num(n)).toLocaleString('en-CA');
@@ -133,7 +134,7 @@ function TechniciansView({ locId }) {
       {error && <div className="card" style={{ padding: '14px', color: 'var(--danger)', margin: '12px 0' }}>{error}</div>}
 
       {loading ? (
-        <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)' }}>Loading&hellip;</div>
+        <div className="card"><Skeleton rows={6} height={16} /></div>
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', margin: '14px 0 18px' }}>
@@ -182,6 +183,7 @@ function TechniciansView({ locId }) {
             </button>
           </div>
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="table-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
                 <tr style={{ background: 'var(--bg3)', color: 'var(--text3)', textAlign: 'left' }}>
@@ -230,6 +232,7 @@ function TechniciansView({ locId }) {
                 </tfoot>
               )}
             </table>
+            </div>
           </div>
           {hiddenTechList.length > 0 && (
             <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text3)', display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
+import { showToast, askConfirm, askInput, Skeleton } from '../components/Feedback';
 
 // Profit-Share Bonus tab (spec: lemonops-bonus-fuelcard-spec-FULL.md §3).
 // Owner/partner only; per-location. Month lifecycle: no run → draft → approved
@@ -73,7 +74,7 @@ function BonusView({ locId }) {
   }, [load, month]);
 
   if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
-  if (!data) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading…</div>;
+  if (!data) return <Skeleton rows={6} height={18} />;
 
   const { run, lines, formula, versions, people, efficiency, targets, pace, history, stretch_needed } = data;
   const locked = run && run.status === 'approved';
@@ -167,24 +168,24 @@ function BonusView({ locId }) {
   };
 
   const overrideLine = async (l) => {
-    const v = window.prompt(`Paid amount for ${l.person_name} (calculated ${money(l.calculated)}):`, l.paid);
+    const v = await askInput({ title: `Override — ${l.person_name}`, body: `Calculated ${money(l.calculated)}.`, label: 'Paid amount ($)', initial: String(l.paid), type: 'number' });
     if (v == null) return;
     const paid = Number(v);
     if (!(paid >= 0)) { setErr('Enter a valid amount'); return; }
     let reason = '';
     if (paid !== Number(l.calculated)) {
-      reason = window.prompt('Override reason (required — goes in the payroll export):', l.override_reason || '') || '';
+      reason = await askInput({ title: 'Override reason', body: 'Required — goes in the payroll export.', label: 'Reason', initial: l.override_reason || '' }) || '';
       if (!reason.trim()) { setErr('Override reason is required'); return; }
     }
-    try { await api(`/bonus/run/${run.id}/line/${l.id}`, { method: 'PUT', body: JSON.stringify({ paid, override_reason: reason }) }); load(month); }
+    try { await api(`/bonus/run/${run.id}/line/${l.id}`, { method: 'PUT', body: JSON.stringify({ paid, override_reason: reason }) }); load(month); showToast(`Line updated — ${l.person_name}`); }
     catch (e) { setErr(e.message); }
   };
 
   const approve = async () => {
     const summary = lines.map((l) => `${l.person_name}: ${money(l.paid)}`).join('\n');
-    if (!window.confirm(`Approve & lock ${monthLabel(month)}?\n\nTotal ${money(totalPaid)} posts to the fuel card:\n${summary}\n\nThis cannot be edited afterward (only superseded).`)) return;
+    if (!await askConfirm({ title: `Approve & lock ${monthLabel(month)}`, body: `Total ${money(totalPaid)} posts to the fuel card:\n${summary}\n\nThis cannot be edited afterward (only superseded).`, confirmLabel: 'Approve & lock' })) return;
     setBusy(true); setErr(null);
-    try { await api(`/bonus/run/${run.id}/approve`, { method: 'POST' }); load(month); }
+    try { await api(`/bonus/run/${run.id}/approve`, { method: 'POST' }); load(month); showToast('Approved — bonus posted to the fuel card'); }
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -228,13 +229,13 @@ function BonusView({ locId }) {
           {user?.role === 'owner' && <button onClick={() => setShowSettings((s) => !s)}>⚙ Formula settings</button>}
           {run && !locked && user?.role === 'owner' && (
             <button onClick={async () => {
-              if (!window.confirm(`Discard this ${monthLabel(month)} draft? The month goes back to the start — fix the hours, then calculate again. Nothing has been paid or posted.`)) return;
-              try { await api(`/bonus/run/${run.id}`, { method: 'DELETE' }); resetLocal(); } catch (e) { setErr(e.message); }
-            }} style={{ color: 'var(--danger)' }}>🗑 Discard draft</button>
+              if (!await askConfirm({ title: 'Discard draft', body: `The ${monthLabel(month)} draft goes back to the start — fix the hours, then calculate again. Nothing has been paid or posted.`, confirmLabel: 'Discard', danger: true })) return;
+              try { await api(`/bonus/run/${run.id}`, { method: 'DELETE' }); resetLocal(); showToast('Draft discarded'); } catch (e) { setErr(e.message); }
+            }} style={{ color: 'var(--danger)' }}>Discard draft</button>
           )}
           {run && !locked && user?.role === 'owner' && <button className="primary" onClick={approve} disabled={busy}>✓ Approve & Lock</button>}
           {locked && !run.superseded_by && user?.role === 'owner' && (
-            <button onClick={() => { setNetProfit(String(run.net_profit)); if (window.confirm('Supersede this locked run? A corrected draft will be created; on approval the fuel ledger receives only the difference.')) doCalculate({ confirm_net: true }, run.id); }}>↺ Supersede</button>
+            <button onClick={async () => { setNetProfit(String(run.net_profit)); if (await askConfirm({ title: 'Supersede locked run', body: 'A corrected draft will be created; on approval the fuel ledger receives only the difference.', confirmLabel: 'Create corrected draft' })) doCalculate({ confirm_net: true }, run.id); }}>↺ Supersede</button>
           )}
         </div>
       </div>
@@ -507,7 +508,7 @@ function SettingsPanel({ api, locId, formula, versions, people, onClose, onSaved
     setCrewBusy(false);
   };
   const setPersonActive = async (p, active) => {
-    if (!active && !window.confirm(`Remove ${p.name} entirely (time clock too)? Locked months keep their history.`)) return;
+    if (!active && !await askConfirm({ title: `Remove ${p.name}`, body: 'Removes them from the bonus AND the time clock. Locked months keep their history.', confirmLabel: 'Remove', danger: true })) return;
     setCrewBusy(true); setErr(null);
     try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ active }) }); onCrewChanged(); }
     catch (e) { setErr(e.message); }

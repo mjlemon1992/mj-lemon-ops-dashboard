@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
 import Icon from '../components/Icon';
+import { showToast, askConfirm, askInput, Skeleton } from '../components/Feedback';
 
 // Time Clock admin (owner + that location's manager). Review the month's punches,
 // fix missed/wrong ones, add a manual entry, and set each tech's kiosk PIN. The
@@ -63,30 +64,31 @@ function ClockAdmin({ locId }) {
   useEffect(() => { load(); }, [load]);
 
   const setAnchor = async () => {
-    const v = window.prompt('Biweekly period START date (YYYY-MM-DD) — pick the first day of any real pay period; all periods count 14 days from it:', (periods && periods.anchor) || '2026-01-04');
+    const v = await askInput({ title: 'Pay cycle', body: 'Pick the first day of any real biweekly pay period — all periods count 14 days from it.', label: 'Period start date (YYYY-MM-DD)', initial: (periods && periods.anchor) || '2026-01-04' });
     if (!v) return;
     setBusy(true); setErr(null);
-    try { await api(`/clock/${locId}/pay-anchor`, { method: 'PUT', body: JSON.stringify({ anchor: v.trim() }) }); setSel(null); loadPeriods(); }
+    try { await api(`/clock/${locId}/pay-anchor`, { method: 'PUT', body: JSON.stringify({ anchor: v.trim() }) }); setSel(null); loadPeriods(); showToast('Pay cycle updated'); }
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
 
   const decide = async (r, action) => {
-    if (action === 'approve' && !window.confirm(`Approve ${r.person_name}'s ${OFF_LABEL[r.type] || r.type} — ${fmtD(r.start_date)} to ${fmtD(r.end_date)} (${r.working_days} working day${r.working_days === 1 ? '' : 's'})?\n\nIt will show on the kiosk calendar and the Shopmonkey calendar, and the bonus schedule adjusts so it doesn't count against them.`)) return;
+    if (action === 'approve' && !await askConfirm({ title: 'Approve time off', body: `${r.person_name} — ${OFF_LABEL[r.type] || r.type}, ${fmtD(r.start_date)} to ${fmtD(r.end_date)} (${r.working_days} working day${r.working_days === 1 ? '' : 's'}).\n\nShows on the kiosk and Shopmonkey calendars; the bonus schedule adjusts so it doesn't count against them.`, confirmLabel: 'Approve' })) return;
     setBusy(true); setErr(null);
     try {
       const out = await api(`/clock/timeoff/${r.id}/decide`, { method: 'PUT', body: JSON.stringify({ action }) });
       if (out.shopmonkey && /failed/.test(out.shopmonkey)) setErr(`Approved, but Shopmonkey calendar ${out.shopmonkey}`);
+      else showToast(action === 'approve' ? 'Approved — calendars updated' : 'Request denied');
       load();
     } catch (e) { setErr(e.message); }
     setBusy(false);
   };
   // Annual holiday allowance per person (working days; stat holidays excluded).
   const setAllowance = async (p) => {
-    const v = window.prompt(`Holiday allowance for ${p.name} — working days per year (blank = no allowance):`, p.vacation_days_per_year != null ? String(p.vacation_days_per_year) : '');
+    const v = await askInput({ title: `Holiday allowance — ${p.name}`, body: 'Working days per year, stat holidays excluded. Leave blank for no allowance.', label: 'Days per year', initial: p.vacation_days_per_year != null ? String(p.vacation_days_per_year) : '' });
     if (v === null) return;
     setBusy(true); setErr(null);
-    try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ vacation_days_per_year: v.trim() === '' ? null : Number(v) }) }); load(); }
+    try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ vacation_days_per_year: v.trim() === '' ? null : Number(v) }) }); load(); showToast(`Allowance saved for ${p.name}`); }
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -101,9 +103,9 @@ function ClockAdmin({ locId }) {
 
   const cancelOff = async (r) => {
     const what = r.type === 'closure' ? 'the shop closure' : `${r.person_name}'s time off`;
-    if (!window.confirm(`Cancel ${what} ${fmtD(r.start_date)}–${fmtD(r.end_date)}? Removes the calendar entry too.`)) return;
+    if (!await askConfirm({ title: 'Cancel time off', body: `Cancel ${what} ${fmtD(r.start_date)}–${fmtD(r.end_date)}? Removes the calendar entry too.`, confirmLabel: 'Cancel it', danger: true })) return;
     setBusy(true); setErr(null);
-    try { await api(`/clock/timeoff/${r.id}`, { method: 'DELETE' }); load(); }
+    try { await api(`/clock/timeoff/${r.id}`, { method: 'DELETE' }); load(); showToast('Time off cancelled'); }
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -136,10 +138,10 @@ function ClockAdmin({ locId }) {
   };
 
   const setPin = async (p) => {
-    const v = window.prompt(`Set kiosk PIN for ${p.name} (4–6 digits, blank to clear):`, '');
+    const v = await askInput({ title: `Kiosk PIN — ${p.name}`, label: 'PIN (4–6 digits, blank to clear)', type: 'tel' });
     if (v === null) return;
     setBusy(true); setErr(null);
-    try { await api(`/clock/${locId}/person/${p.id}/pin`, { method: 'PUT', body: JSON.stringify({ pin: v.trim() === '' ? null : v.trim() }) }); load(); }
+    try { await api(`/clock/${locId}/person/${p.id}/pin`, { method: 'PUT', body: JSON.stringify({ pin: v.trim() === '' ? null : v.trim() }) }); load(); showToast(v.trim() === '' ? `PIN cleared for ${p.name}` : `PIN set for ${p.name}`); }
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -161,7 +163,7 @@ function ClockAdmin({ locId }) {
     setBusy(false);
   };
   const setPersonActive = async (p, active) => {
-    if (!active && !window.confirm(`Remove ${p.name} from the time clock? Their punch history stays; they just can't clock in.`)) return;
+    if (!active && !await askConfirm({ title: `Remove ${p.name}`, body: "Their punch history stays; they just can't clock in until re-added.", confirmLabel: 'Remove', danger: true })) return;
     setBusy(true); setErr(null);
     try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ active }) }); load(); }
     catch (e) { setErr(e.message); }
@@ -217,7 +219,7 @@ function ClockAdmin({ locId }) {
     } catch (e) { setErr(e.message); }
   };
   const emailPdf = async () => {
-    const to = window.prompt('Email the timesheet PDF to:', user?.email || '');
+    const to = await askInput({ title: 'Email timesheet', label: 'Send the PDF to', initial: user?.email || '', type: 'email' });
     if (!to) return;
     setBusy(true); setErr(null);
     try {
@@ -234,9 +236,9 @@ function ClockAdmin({ locId }) {
     catch (e) { setErr(e.message); setBusy(false); return false; }
   };
   const delEntry = async (id) => {
-    if (!window.confirm('Delete this punch?')) return;
+    if (!await askConfirm({ title: 'Delete punch', body: 'This removes the punch permanently.', confirmLabel: 'Delete', danger: true })) return;
     setBusy(true); setErr(null);
-    try { await api(`/clock/entries/${id}`, { method: 'DELETE' }); load(); }
+    try { await api(`/clock/entries/${id}`, { method: 'DELETE' }); load(); showToast('Punch deleted'); }
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -248,7 +250,7 @@ function ClockAdmin({ locId }) {
   };
 
   if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
-  if (!data) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading…</div>;
+  if (!data) return <Skeleton rows={6} height={18} />;
 
   const summary = data.summary || {};
   const kioskUrl = `${window.location.origin}/clock/${locId}`;
@@ -498,7 +500,7 @@ function ClockAdmin({ locId }) {
           </span>
         </div>
         {adding && <AddRow people={people} onCancel={() => setAdding(false)} onSave={addEntry} busy={busy} />}
-        <div style={{ overflowX: 'auto' }}>
+        <div className="table-scroll">
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
             <thead><tr style={{ color: 'var(--text3)', fontSize: '11px', textTransform: 'uppercase' }}>
               {['Person', 'Clock in', 'Clock out', 'Break', 'Paid', ''].map((h) => <th key={h} style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '0.5px solid var(--border)' }}>{h}</th>)}

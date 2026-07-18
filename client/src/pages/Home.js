@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
 import { parseAlerts } from '../utils/alerts';
 import PaceTach from '../components/PaceTach';
+import { Skeleton } from '../components/Feedback';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -55,7 +56,7 @@ export default function Home() {
       .finally(() => setRefreshing(false));
   };
 
-  if (loading) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading...</div>;
+  if (loading) return <Skeleton rows={6} height={20} />;
 
   // Scope to the global location selection: "All" = every active shop (group
   // view), otherwise just the selected one.

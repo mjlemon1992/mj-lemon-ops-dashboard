@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
 import { parseAlerts, alertId } from '../utils/alerts';
 import Icon from './Icon';
+import { FeedbackHost } from './Feedback';
 
 // Grouped nav (2026-07-17 refresh): same items, same roles — organized into five
 // sections so the sidebar reads in blocks instead of a flat list. Every item
@@ -248,6 +249,7 @@ export default function Layout() {
           <Outlet />
         </div>
       </div>
+      <FeedbackHost />
     </div>
   );
 }

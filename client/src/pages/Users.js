@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { showToast, askConfirm } from '../components/Feedback';
 
 const EMPTY = { name: '', email: '', role: 'manager', location_id: '', password: '', active: true };
 
@@ -38,11 +39,12 @@ export default function Users() {
 
   // Hard delete (server blocks self-delete and the last active owner).
   const remove = async (u) => {
-    if (!window.confirm(`Delete ${u.name} (${u.email})? They lose access immediately. This can't be undone.`)) return;
+    if (!await askConfirm({ title: `Delete ${u.name}`, body: `${u.email} loses access immediately. This can't be undone.`, confirmLabel: 'Delete user', danger: true })) return;
     try {
       await api(`/users/${u.id}`, { method: 'DELETE' });
       setUsers(prev => prev.filter(x => x.id !== u.id));
-    } catch (err) { setError(err.message); window.alert(err.message); }
+      showToast(`${u.name} deleted`);
+    } catch (err) { setError(err.message); showToast(err.message, 'error'); }
   };
 
   const initials = name => name ? name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : '?';
