@@ -1,3 +1,4 @@
+import { askConfirm, showToast } from './Feedback';
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import DriveLibrary from './DriveLibrary';
@@ -439,8 +440,8 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
   // Soft delete — for when the wrong image got imported. Recoverable from
   // "Recently deleted" below, so this no longer destroys anything outright.
   const del = async (id) => {
-    if (!window.confirm('Delete this post? You can restore it from “Recently deleted” below.')) return;
-    try { await api(`/marketing/posts/post/${id}`, { method: 'DELETE' }); refresh(); }
+    if (!await askConfirm({ title: 'Delete post', body: 'You can restore it from "Recently deleted" below.', confirmLabel: 'Delete', danger: true })) return;
+    try { await api(`/marketing/posts/post/${id}`, { method: 'DELETE' }); refresh(); showToast('Post deleted'); }
     catch (e) { setErr(String(e.message || e)); }
   };
   const restore = async (id) => {

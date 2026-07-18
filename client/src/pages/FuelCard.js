@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
+import { showToast, askInput, Skeleton } from '../components/Feedback';
 
 // Group Fuel Card tab (spec §4). One physical card per location; the ledger
 // tracks each person's share. Bonus credits land automatically on Approve &
@@ -32,7 +33,7 @@ function FuelView({ locId }) {
   useEffect(() => { load(); }, [load]);
 
   if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
-  if (!data) return <div style={{ color: 'var(--text3)', padding: '40px' }}>Loading…</div>;
+  if (!data) return <Skeleton rows={6} height={18} />;
 
   const { tiles, people, ledger } = data;
   const owner = user?.role === 'owner';
@@ -43,32 +44,33 @@ function FuelView({ locId }) {
   const reconciled = tiles.variance != null && Math.abs(tiles.variance) < 0.005;
 
   const logPurchase = async () => {
-    const amount = Number(window.prompt('Purchase amount ($):'));
+    const amount = Number(await askInput({ title: 'Log fuel purchase', label: 'Purchase amount ($)', type: 'number' }));
     if (!(amount > 0)) return;
-    const names = activePeople.map((p, i) => `${i + 1}=${p.name}`).join('  ');
-    const pick = window.prompt(`Who? (blank = unassigned)\n${names}`, '');
+    const names = activePeople.map((p, i) => `${i + 1} = ${p.name}`).join('\n');
+    const pick = await askInput({ title: 'Who bought it?', body: names, label: 'Number (blank = unassigned)' });
+    if (pick === null) return;
     const person = pick ? activePeople[Number(pick) - 1] : null;
-    const memo = window.prompt('Station / memo (e.g. Petro-Canada, Gasoline Alley):', '') || '';
-    try { await api(`/fuel/${locId}/ledger`, { method: 'POST', body: JSON.stringify({ type: 'purchase', amount, person_id: person ? person.id : null, memo }) }); load(); }
+    const memo = await askInput({ title: 'Station / memo', label: 'e.g. Petro-Canada, Gasoline Alley' }) || '';
+    try { await api(`/fuel/${locId}/ledger`, { method: 'POST', body: JSON.stringify({ type: 'purchase', amount, person_id: person ? person.id : null, memo }) }); load(); showToast(`Purchase logged${person ? ` — ${person.name}` : ' (unassigned)'}`); }
     catch (e) { setErr(e.message); }
   };
 
   const topUp = async () => {
-    const names = activePeople.map((p, i) => `${i + 1}=${p.name}`).join('  ');
-    const pick = window.prompt(`Top-up for whom?\n${names}`, '');
+    const names = activePeople.map((p, i) => `${i + 1} = ${p.name}`).join('\n');
+    const pick = await askInput({ title: 'Top-up', body: names, label: 'Who is it for? (number)' });
     const person = pick ? activePeople[Number(pick) - 1] : null;
     if (!person) return;
-    const amount = Number(window.prompt(`Top-up amount for ${person.name} ($):`));
+    const amount = Number(await askInput({ title: `Top-up — ${person.name}`, label: 'Amount ($)', type: 'number' }));
     if (!(amount > 0)) return;
-    const memo = window.prompt('Reason / memo:', '') || '';
-    try { await api(`/fuel/${locId}/ledger`, { method: 'POST', body: JSON.stringify({ type: 'topup', amount, person_id: person.id, memo }) }); load(); }
+    const memo = await askInput({ title: 'Reason / memo', label: 'Optional note' }) || '';
+    try { await api(`/fuel/${locId}/ledger`, { method: 'POST', body: JSON.stringify({ type: 'topup', amount, person_id: person.id, memo }) }); load(); showToast(`Top-up logged for ${person.name}`); }
     catch (e) { setErr(e.message); }
   };
 
   const reconcile = async () => {
-    const bal = window.prompt('Actual card balance from the provider portal/statement ($):');
+    const bal = await askInput({ title: 'Reconcile card', body: 'Actual card balance from the provider portal/statement.', label: 'Balance ($)', type: 'number' });
     if (bal == null || bal === '') return;
-    try { await api(`/fuel/${locId}/reconcile`, { method: 'POST', body: JSON.stringify({ actual_balance: Number(bal) }) }); load(); }
+    try { await api(`/fuel/${locId}/reconcile`, { method: 'POST', body: JSON.stringify({ actual_balance: Number(bal) }) }); load(); showToast('Reconciled against statement'); }
     catch (e) { setErr(e.message); }
   };
 
