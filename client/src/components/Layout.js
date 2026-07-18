@@ -3,30 +3,31 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
 import { parseAlerts, alertId } from '../utils/alerts';
+import Icon from './Icon';
 
 // Grouped nav (2026-07-17 refresh): same items, same roles — organized into five
 // sections so the sidebar reads in blocks instead of a flat list. Every item
 // carries its section so labels survive role filtering (showSection compares
 // against the previous VISIBLE item).
 const NAV = [
-  { path: '/', label: 'Home', icon: '⌂', section: 'Overview' },
-  { path: '/scorecard', label: 'Scorecard', icon: '✦', section: 'Overview', roles: ['owner', 'partner'] },
-  { path: '/performance', label: 'Performance', icon: '◈', section: 'Overview' },
-  { path: '/alerts', label: 'Alerts', icon: '◉', section: 'Overview' },
-  { path: '/technicians', label: 'Technicians', icon: '⚒', section: 'Shop' },
-  { path: '/comebacks', label: 'Comebacks', icon: '↩', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
-  { path: '/wip', label: 'Committed WIP', icon: '📋', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
-  { path: '/notices', label: 'Shop Notices', icon: '📢', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
-  { path: '/finance', label: 'Finance', icon: '$', section: 'Money', roles: ['owner', 'partner', 'manager'] },
-  { path: '/reports', label: 'Reports', icon: '▤', section: 'Money', roles: ['owner', 'partner', 'manager'] },
-  { path: '/bonus', label: 'Bonus', icon: '◆', section: 'Money', roles: ['owner', 'partner', 'manager'] },
-  { path: '/fuel-card', label: 'Fuel Card', icon: '⛽', section: 'Money', roles: ['owner', 'partner', 'manager'] },
-  { path: '/time-clock', label: 'Time Clock', icon: '🕐', section: 'Money', roles: ['owner', 'partner', 'manager'] },
-  { path: '/marketing', label: 'Marketing', icon: '◆', section: 'Marketing', roles: ['owner', 'partner', 'manager'] },
-  { path: '/locations', label: 'Locations', icon: '◎', section: 'Settings', roles: ['owner'] },
-  { path: '/targets', label: 'Targets', icon: '◎', section: 'Settings', roles: ['owner', 'partner', 'manager'] },
-  { path: '/users', label: 'Users', icon: '◈', section: 'Settings', roles: ['owner'] },
-  { path: '/chief-of-staff', label: 'Automations', icon: '⏱', section: 'Settings', roles: ['owner', 'partner'] },
+  { path: '/', label: 'Home', icon: 'home', section: 'Overview' },
+  { path: '/scorecard', label: 'Scorecard', icon: 'chart', section: 'Overview', roles: ['owner', 'partner'] },
+  { path: '/performance', label: 'Performance', icon: 'gauge', section: 'Overview' },
+  { path: '/alerts', label: 'Alerts', icon: 'bell', section: 'Overview' },
+  { path: '/technicians', label: 'Technicians', icon: 'wrench', section: 'Crew' },
+  { path: '/time-clock', label: 'Time Clock', icon: 'clock', section: 'Crew', roles: ['owner', 'partner', 'manager'] },
+  { path: '/bonus', label: 'Bonus', icon: 'award', section: 'Crew', roles: ['owner', 'partner', 'manager'] },
+  { path: '/fuel-card', label: 'Fuel Card', icon: 'fuel', section: 'Crew', roles: ['owner', 'partner', 'manager'] },
+  { path: '/comebacks', label: 'Comebacks', icon: 'undo', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
+  { path: '/wip', label: 'Committed WIP', icon: 'clipboard', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
+  { path: '/notices', label: 'Shop Notices', icon: 'megaphone', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
+  { path: '/finance', label: 'Finance', icon: 'dollar', section: 'Money', roles: ['owner', 'partner', 'manager'] },
+  { path: '/reports', label: 'Reports', icon: 'file', section: 'Money', roles: ['owner', 'partner', 'manager'] },
+  { path: '/marketing', label: 'Marketing', icon: 'spark', section: 'Marketing', roles: ['owner', 'partner', 'manager'] },
+  { path: '/locations', label: 'Locations', icon: 'pin', section: 'Settings', roles: ['owner'] },
+  { path: '/targets', label: 'Targets', icon: 'target', section: 'Settings', roles: ['owner', 'partner', 'manager'] },
+  { path: '/users', label: 'Users', icon: 'users', section: 'Settings', roles: ['owner'] },
+  { path: '/chief-of-staff', label: 'Automations', icon: 'gear', section: 'Settings', roles: ['owner', 'partner'] },
 ];
 
 export default function Layout() {
@@ -169,7 +170,7 @@ export default function Layout() {
                     marginBottom: '1px',
                   }}
                 >
-                  <span style={{ fontSize: '14px' }}>{item.icon}</span>
+                  <Icon name={item.icon} size={15} />
                   <span style={{ flex: 1 }}>{item.label}</span>
                   {item.path === '/alerts' && alertCount > 0 && (
                     <span style={{ background: 'rgba(255,77,77,0.15)', color: 'var(--danger)', fontSize: '10px', padding: '1px 6px', borderRadius: '10px' }}>{alertCount}</span>

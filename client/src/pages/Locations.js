@@ -144,7 +144,7 @@ export default function Locations() {
   return (
     <div>
       <div className="page-header">
-        <div className="page-title-text">Locations</div>
+        <span />
         <button className="primary" onClick={openNew}>+ Add location</button>
       </div>
 

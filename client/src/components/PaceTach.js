@@ -31,10 +31,11 @@ export default function PaceTach({ pct, size = 140 }) {
       x.lineTo(cx + Math.cos(a - Math.PI / 2) * 3, cy + Math.sin(a - Math.PI / 2) * 3);
       x.closePath(); x.fillStyle = '#F05423'; x.fill();
       x.beginPath(); x.arc(cx, cy, 4.5, 0, 7); x.fillStyle = cssVar('--text', '#e0e0e0'); x.fill();
-      x.fillStyle = steel; x.font = '600 8px ui-monospace, Menlo, monospace'; x.textAlign = 'center';
-      x.fillText('% TO TARGET', cx, cy + R * 0.5 + 8);
       x.fillStyle = '#F05423'; x.font = `700 ${Math.round(W * 0.09)}px 'Avenir Next Condensed','Barlow Condensed','Arial Narrow',sans-serif`;
-      x.fillText(pct != null ? Math.round(pct) : '—', cx, cy - R * 0.28);
+      x.textAlign = 'center';
+      x.fillText(pct != null ? Math.round(pct) : '—', cx, cy + R * 0.55);
+      x.fillStyle = steel; x.font = '600 8px ui-monospace, Menlo, monospace';
+      x.fillText('% TO TARGET', cx, cy + R * 0.55 + 12);
     };
     const T = Math.max(0, Math.min((pct || 0) / 100, 1));
     let raf = null, t0 = null;
