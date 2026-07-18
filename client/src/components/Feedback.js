@@ -26,6 +26,7 @@ export function FeedbackHost() {
   const [dlg, setDlg] = useState(null);
   const [val, setVal] = useState('');
   const inputRef = useRef(null);
+  const queueRef = useRef([]);   // dialogs requested while one is open — never drop a resolver
 
   useEffect(() => {
     const onToast = (e) => {
@@ -33,7 +34,13 @@ export function FeedbackHost() {
       setToasts((ts) => [...ts, t]);
       setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== t.id)), 3500);
     };
-    const onDialog = (e) => { setDlg(e.detail); setVal(e.detail.initial || ''); };
+    const onDialog = (e) => {
+      setDlg((cur) => {
+        if (cur) { queueRef.current.push(e.detail); return cur; }
+        setVal(e.detail.initial || '');
+        return e.detail;
+      });
+    };
     window.addEventListener('ops:toast', onToast);
     window.addEventListener('ops:dialog', onDialog);
     return () => { window.removeEventListener('ops:toast', onToast); window.removeEventListener('ops:dialog', onDialog); };
@@ -41,7 +48,12 @@ export function FeedbackHost() {
 
   useEffect(() => { if (dlg && dlg.mode === 'input' && inputRef.current) inputRef.current.focus(); }, [dlg]);
 
-  const close = (result) => { if (dlg) dlg.resolve(result); setDlg(null); };
+  const close = (result) => {
+    if (dlg) dlg.resolve(result);
+    const next = queueRef.current.shift() || null;
+    if (next) setVal(next.initial || '');
+    setDlg(next);
+  };
 
   return (
     <>
