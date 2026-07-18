@@ -98,12 +98,17 @@ module.exports = (pool) => {
 
       const r = await fetchPlace(placeId);
       const total = r.user_ratings_total ?? null, rating = r.rating ?? null;
-      const reviews = (r.reviews || []).slice(0, 3).map(rv => ({
+      // Featured quotes: 4★+ only (the scorecard showcases wins). Low-star
+      // recents aren't hidden from the owner — they surface as a count so the
+      // card can say "N recent under 4★ · handle on Google" without the text.
+      const fetched = (r.reviews || []);
+      const reviews = fetched.filter(rv => Number(rv.rating) >= 4).slice(0, 3).map(rv => ({
         author: rv.author_name, rating: rv.rating, text: rv.text,
         when: rv.relative_time_description, time: rv.time,
       }));
+      const low_recent = fetched.filter(rv => Number(rv.rating) < 4).length;
       const dlt = await monthDelta(id, total, rating);
-      const payload = { rating, total, delta: dlt, reviews };
+      const payload = { rating, total, delta: dlt, reviews, low_recent };
       await pool.query(`INSERT INTO marketing_reviews_cache (location_id, payload, created_at) VALUES ($1,$2,NOW())
         ON CONFLICT (location_id) DO UPDATE SET payload=EXCLUDED.payload, created_at=NOW()`, [id, JSON.stringify(payload)]);
       res.json({ ...payload, cached: false });
