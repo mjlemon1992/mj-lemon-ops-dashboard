@@ -2,14 +2,13 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLocations } from '../context/LocationContext';
 import { showToast, askConfirm } from './Feedback';
+import { fmtShortDate, fmtClock, monthLabel, money, OFF_LABEL } from '../utils/format';
 
 // "Waiting on you" rail — every decision from every page lands here. Pinned on
 // the right on desktop; the topbar pill toggles it. Cards act inline: holiday
 // requests approve/deny, punch changes apply/dismiss, fuel + bonus deep-link.
-const fmtD = (d) => d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '';
-const fmtT = (t) => t ? new Date(t).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : null;
-const OFF_LABEL = { vacation: 'holiday', sick: 'sick day', unpaid: 'unpaid leave', other: 'time off' };
-const monthLabel = (m) => new Date(m + '-15T12:00:00Z').toLocaleDateString('en-CA', { month: 'long' });
+const fmtD = fmtShortDate;
+const fmtT = fmtClock;
 
 export default function WaitingRail({ detail, api, onAction, onClose, onDismiss, multiLoc }) {
   const navigate = useNavigate();
@@ -94,7 +93,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
         <div key={`fuel-${r.location_id}`} className="wr-card">
           <div className="wr-card-title">{r.n} unassigned fuel purchase{r.n === 1 ? '' : 's'}
             <button className="wr-x" title="Dismiss — reappears if new purchases land" onClick={() => dismiss(`fuel-${r.location_id}-${r.n}-${r.total}`)}>✕</button></div>
-          <div className="wr-card-body">${Number(r.total).toFixed(2)} on the card, nobody assigned{multiLoc && <span className="wr-loc"> · {r.location_name}</span>}</div>
+          <div className="wr-card-body">{money(r.total)} on the card, nobody assigned{multiLoc && <span className="wr-loc"> · {r.location_name}</span>}</div>
           <div className="wr-actions"><button onClick={() => goTo(r.location_id, '/fuel-card')}>Assign →</button></div>
         </div>
       ))}

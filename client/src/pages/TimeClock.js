@@ -3,14 +3,15 @@ import { useAuth } from '../context/AuthContext';
 import PerLocationPage from '../components/PerLocationPage';
 import Icon from '../components/Icon';
 import { showToast, askConfirm, askInput, Skeleton } from '../components/Feedback';
+import { fmtShortDate, OFF_LABEL } from '../utils/format';
+import { crewPaidHours } from '../utils/pay';
 
 // Time Clock admin (owner + that location's manager). Review the month's punches,
 // fix missed/wrong ones, add a manual entry, and set each tech's kiosk PIN. The
 // shop-floor kiosk lives at /clock/:locationId. Monthly paid hours feed the bonus.
 
 const fmtDT = (t) => t ? new Date(t).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
-const fmtD = (d) => d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '';
-const OFF_LABEL = { vacation: 'Holiday', sick: 'Sick', unpaid: 'Unpaid', other: 'Other', closure: 'Shop closure' };
+const fmtD = fmtShortDate;
 // Tap anywhere in a date field to pop the native calendar (graceful fallback).
 const openPicker = (e) => { try { e.target.showPicker(); } catch { /* unsupported */ } };
 
@@ -290,10 +291,8 @@ function ClockAdmin({ locId }) {
       {/* The period at a glance — one compact strip, always visible up top */}
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
         {(() => {
-          const clockedAll = Object.values(summary).reduce((s, v) => s + Number(v || 0), 0);
-          const statAll = Number(data.stat_pay_hours || 0) * people.length;
           const holAll = Object.values(data.paid_timeoff_hours || {}).reduce((s, v) => s + Number(v || 0), 0);
-          const crewPaid = Math.round((clockedAll + statAll + holAll) * 100) / 100;
+          const crewPaid = crewPaidHours(data, people.length);
           const breaksH = Math.round((data.entries || []).reduce((s, e) => s + (e.break_seconds || 0), 0) / 36) / 100;
           const onNow = live.filter((p) => p.status !== 'off').length;
           const mini = { minWidth: '128px', padding: '10px 14px', opacity: (crewPaid === 0 && onNow === 0) ? 0.55 : 1 };

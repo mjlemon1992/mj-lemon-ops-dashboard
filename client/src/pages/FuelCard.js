@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import PerLocationPage from '../components/PerLocationPage';
+import { money } from '../utils/format';
 import { showToast, askInput, Skeleton } from '../components/Feedback';
 
 // Group Fuel Card tab (spec §4). One physical card per location; the ledger
@@ -8,7 +9,6 @@ import { showToast, askInput, Skeleton } from '../components/Feedback';
 // Lock (Bonus tab). Extras are ledger rows (top-ups) — never edits to
 // computed values. Variance = actual card balance − Σledger.
 
-const money = (n) => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function FuelCard() {
   return <PerLocationPage>{(locId) => <FuelView locId={locId} />}</PerLocationPage>;

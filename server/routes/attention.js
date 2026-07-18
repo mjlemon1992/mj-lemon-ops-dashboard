@@ -10,9 +10,17 @@ const { ensureBonusFuelTables } = require('../lib/bonusFuelSchema');
 module.exports = (pool) => {
   const router = express.Router();
 
+  // This endpoint is polled every 60s by every signed-in tab — run the schema
+  // DDL once per process, not per request.
+  let ensured = null;
+  const ensureOnce = () => {
+    if (!ensured) ensured = Promise.all([ensureTimeClockTables(pool), ensureBonusFuelTables(pool)]).catch((e) => { ensured = null; throw e; });
+    return ensured;
+  };
+
   router.get('/', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
     try {
-      await Promise.all([ensureTimeClockTables(pool), ensureBonusFuelTables(pool)]);
+      await ensureOnce();
       let locs;
       if (['owner', 'partner'].includes(req.user.role)) {
         ({ rows: locs } = await pool.query('SELECT id, name FROM locations WHERE active = true ORDER BY name'));

@@ -197,15 +197,7 @@ h3 { font-family: var(--font-disp); font-size: 15px; font-weight: 700; letter-sp
 .metric-card:has(.metric-sub.warn)::before { width: 3px; background: var(--warning); }
 .metric-card:has(.metric-sub.bad)::before  { width: 3px; background: var(--danger); }
 
-/* --- OPS glance board (Home hero) --- */
-.glance-board { display: flex; align-items: center; gap: 20px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 18px 22px; margin-bottom: 20px; flex-wrap: wrap; }
-.glance-main { flex: 1 1 260px; min-width: 220px; }
-.glance-rev { font-family: var(--font-disp); font-size: 44px; font-weight: 700; line-height: 1.05; letter-spacing: 0.01em; color: var(--text); font-variant-numeric: tabular-nums; }
-.glance-sub { font-size: 12px; color: var(--text3); margin-top: 4px; }
-.glance-meter { height: 6px; background: var(--bg3); border-radius: 3px; margin-top: 12px; overflow: hidden; max-width: 340px; }
-.glance-meter-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.6s ease; }
-.glance-side { display: flex; gap: 28px; align-items: flex-start; }
-.glance-num { font-family: var(--font-disp); font-size: 28px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+/* --- Hero tach slot (rest of the old glance board removed — .hero-band replaced it) --- */
 .glance-tach { flex: 0 0 auto; }
 @media (max-width: 640px) { .glance-tach { display: none; } }
 
@@ -232,7 +224,8 @@ h3 { font-family: var(--font-disp); font-size: 15px; font-weight: 700; letter-sp
 .table-scroll table { min-width: 560px; }
 table { font-variant-numeric: tabular-nums; }
 @media (max-width: 768px) {
-  .table-scroll th:first-child, .table-scroll td:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+  .table-scroll th:first-child, .table-scroll td:first-child { position: sticky; left: 0; background: var(--bg2); z-index: 1; }
+  .table-scroll thead th:first-child, .table-scroll tfoot td:first-child { background: var(--bg3); }
 }
 
 /* --- Foreman Home: hero band + live decks + rail --- */

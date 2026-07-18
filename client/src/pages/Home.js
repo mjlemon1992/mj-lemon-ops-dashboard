@@ -6,6 +6,8 @@ import { useLocations } from '../context/LocationContext';
 import { parseAlerts } from '../utils/alerts';
 import PaceTach from '../components/PaceTach';
 import { Skeleton } from '../components/Feedback';
+import { fmtShortDate as fmtD2, money0 } from '../utils/format';
+import { crewPaidHours } from '../utils/pay';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -56,7 +58,8 @@ export default function Home() {
       .catch(() => {});
   }, [locations, api]);
   useEffect(() => {
-    const active = locations.filter(l => l.active);
+    // Only the shops the decks will actually render (global selection scope).
+    const active = locations.filter(l => l.active && (isAll || l.id === selectedId));
     if (!active.length || !['owner', 'partner', 'manager'].includes(user?.role)) return undefined;
     let cancelled = false;
     Promise.all(active.map(async (loc) => {
@@ -69,12 +72,7 @@ export default function Home() {
       const cur = pp && (pp.periods || []).find(x => x.current);
       if (cur) {
         const e = await api(`/clock/${loc.id}/entries?from=${cur.from}&to=${cur.to}`).catch(() => null);
-        if (e) {
-          const clocked = Object.values(e.summary || {}).reduce((a, v) => a + Number(v || 0), 0);
-          const hol = Object.values(e.paid_timeoff_hours || {}).reduce((a, v) => a + Number(v || 0), 0);
-          const nP = st ? (st.people || []).length : 0;
-          paid = clocked + Number(e.stat_pay_hours || 0) * nP + hol;
-        }
+        if (e) paid = crewPaidHours(e, st ? (st.people || []).length : 0);
       }
       return [loc.id, st ? st.people || [] : null, toff, paid];
     })).then(rows => {
@@ -84,7 +82,7 @@ export default function Home() {
       setClockByLoc(c); setOffByLoc(o); setPaidByLoc(p);
     });
     return () => { cancelled = true; };
-  }, [locations, api, user]);
+  }, [locations, api, user, isAll, selectedId]);
 
   // Manual "Refresh now": force a live Shopmonkey sync, then reload the cache.
   const handleRefresh = () => {
@@ -163,8 +161,6 @@ export default function Home() {
   const gRoTarget = avgPos(_locTargets.map(t => parseFloat(t.avg_ro_value) || 0));
   const gPphTarget = avgPos(activeLocations.map(l => parseFloat(l.pph_target) || 0));
   const gEffTarget = avgPos(activeLocations.map(l => parseFloat(l.efficiency_target) || 0));
-  const money0 = n => '$' + Math.round(n).toLocaleString('en-CA');
-  const fmtD2 = d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
 
 
   const allAlerts = metricList.flatMap(parseAlerts);
@@ -218,7 +214,7 @@ export default function Home() {
               <div className="hero-stats">
                 <div>
                   <div className="hero-num">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
-                  <div className="hero-sub">revenue · <span style={{ color: delta >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>{delta >= 0 ? `ahead by ${money0(delta)}` : `behind by ${money0(-delta)}`}</span></div>
+                  <div className="hero-sub">revenue · <span style={{ color: delta >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>{delta >= 0 ? `ahead by ${money0(delta)}` : `behind by ${money0(-delta)}`}</span> · {groupRevenue >= gRevTarget ? `${money0(groupRevenue - gRevTarget)} over target` : `${money0(gRevTarget - groupRevenue)} to go`}</div>
                 </div>
                 <div>
                   <div className="hero-num">{groupCarCount > 0 ? groupCarCount : '—'}</div>
