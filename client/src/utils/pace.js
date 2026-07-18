@@ -60,9 +60,15 @@ function countWorkingDays(year, month, fromDay, toDay, hols) {
   return n;
 }
 
+// "Today" anchored to the shop's timezone (America/Edmonton — matches every
+// server-side date computation), NOT the viewer's browser timezone. A Kelowna
+// or overseas viewer at local midnight must not shift the shop's calendar day.
+export const shopTodayIso = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
+export const shopNow = () => new Date(shopTodayIso() + 'T12:00:00');
+
 // Returns fraction of the month's working days that have elapsed (0..1),
 // or null if the month has no working days. `today` optional (defaults now).
-export function workingPaceFrac(province, today = new Date()) {
+export function workingPaceFrac(province, today = shopNow()) {
   const year = today.getFullYear();
   const month = today.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -74,7 +80,7 @@ export function workingPaceFrac(province, today = new Date()) {
 }
 
 // Pace % = actual vs (target * workingPaceFrac). Null if no target/data.
-export function pacePct(actual, target, province, today = new Date()) {
+export function pacePct(actual, target, province, today = shopNow()) {
   if (!target || target <= 0 || !actual) return null;
   const frac = workingPaceFrac(province, today);
   if (!frac || frac <= 0) return null;
@@ -82,7 +88,7 @@ export function pacePct(actual, target, province, today = new Date()) {
 }
 
 // Working days left in the current month (after today), for the hero band.
-export function workingDaysLeftInMonth(province, today = new Date()) {
+export function workingDaysLeftInMonth(province, today = shopNow()) {
   const year = today.getFullYear();
   const month = today.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -91,30 +97,4 @@ export function workingDaysLeftInMonth(province, today = new Date()) {
   return countWorkingDays(year, month, today.getDate() + 1, daysInMonth, hols);
 }
 
-// Next statutory holiday on/after today: {date, label} or null.
-export function nextStatHoliday(province, today = new Date()) {
-  const prov = (province || 'ab').toLowerCase();
-  const iso = today.toLocaleDateString('en-CA');
-  for (const year of [today.getFullYear(), today.getFullYear() + 1]) {
-    const list = (HOLIDAYS[prov] && HOLIDAYS[prov][year]) || HOLIDAYS.ab[year] || [];
-    for (const d of list) {
-      if (d >= iso) {
-        const label = new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
-        return { date: d, label };
-      }
-    }
-  }
-  return null;
-}
 
-// Set of stat-holiday ISO dates in a window (for the two-week deck).
-export function holidayDatesBetween(province, fromIso, toIso) {
-  const out = new Set();
-  const prov = (province || 'ab').toLowerCase();
-  for (const year of [Number(fromIso.slice(0, 4)), Number(toIso.slice(0, 4))]) {
-    for (const d of (HOLIDAYS[prov] && HOLIDAYS[prov][year]) || HOLIDAYS.ab[year] || []) {
-      if (d >= fromIso && d <= toIso) out.add(d);
-    }
-  }
-  return out;
-}

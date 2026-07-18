@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useLocations } from '../context/LocationContext';
+import PerLocationPage from '../components/PerLocationPage';
 import { showToast, askInput, Skeleton } from '../components/Feedback';
 
 // Group Fuel Card tab (spec §4). One physical card per location; the ledger
@@ -11,14 +11,7 @@ import { showToast, askInput, Skeleton } from '../components/Feedback';
 const money = (n) => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function FuelCard() {
-  const { isAll, selectedId, scopeLocations, select } = useLocations();
-  // Per-location page: follow the global selector. "All" auto-selects the
-  // first shop so there's never a dead-end picker page.
-  useEffect(() => {
-    if (isAll && (scopeLocations || []).length) select(scopeLocations[0].id);
-  }, [isAll, scopeLocations, select]);
-  if (isAll || !selectedId) return null;
-  return <FuelView locId={selectedId} />;
+  return <PerLocationPage>{(locId) => <FuelView locId={locId} />}</PerLocationPage>;
 }
 
 function FuelView({ locId }) {

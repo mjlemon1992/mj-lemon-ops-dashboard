@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useLocations } from '../context/LocationContext';
+import PerLocationPage from '../components/PerLocationPage';
 import Icon from '../components/Icon';
 import { showToast, askConfirm, askInput, Skeleton } from '../components/Feedback';
 
@@ -15,14 +15,7 @@ const OFF_LABEL = { vacation: 'Holiday', sick: 'Sick', unpaid: 'Unpaid', other: 
 const openPicker = (e) => { try { e.target.showPicker(); } catch { /* unsupported */ } };
 
 export default function TimeClock() {
-  const { isAll, selectedId, scopeLocations, select } = useLocations();
-  // Per-location page: follow the global selector. "All" auto-selects the
-  // first shop so there's never a dead-end picker page.
-  useEffect(() => {
-    if (isAll && (scopeLocations || []).length) select(scopeLocations[0].id);
-  }, [isAll, scopeLocations, select]);
-  if (isAll || !selectedId) return null;
-  return <ClockAdmin locId={selectedId} />;
+  return <PerLocationPage>{(locId) => <ClockAdmin locId={locId} />}</PerLocationPage>;
 }
 
 function ClockAdmin({ locId }) {
