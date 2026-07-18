@@ -152,7 +152,7 @@ export default function Layout() {
             return (
               <React.Fragment key={item.path}>
                 {showSection && (
-                  <div style={{ fontSize: '10px', fontWeight: '500', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '12px 8px 4px' }}>
+                  <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '9.5px', fontWeight: '600', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em', padding: '12px 8px 4px' }}>
                     {item.section}
                   </div>
                 )}
@@ -199,7 +199,7 @@ export default function Layout() {
             {isMobile && (
               <button onClick={() => setNavOpen(true)} aria-label="Open menu" style={{ background: 'none', border: 'none', color: 'var(--text)', fontSize: '22px', cursor: 'pointer', padding: 0, lineHeight: 1, flexShrink: 0 }}>☰</button>
             )}
-            <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: isMobile ? '17px' : '20px', fontWeight: 800, letterSpacing: '-0.5px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontFamily: 'var(--font-disp)', fontSize: isMobile ? '19px' : '22px', fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {visibleNav.find(n => n.path === location.pathname)?.label || 'Dashboard'}
             </div>
           </div>
