@@ -199,7 +199,6 @@ export default function Notices() {
 
   return (
     <div>
-      <h1 style={{ marginBottom: '4px' }}>Shop Notices</h1>
       <div style={{ color: 'var(--text3)', fontSize: '14px', marginBottom: '24px' }}>
         Whatever is active here rotates on the shop-floor display so the techs see it — updates, shout-outs, safety notes, or full posters.
       </div>

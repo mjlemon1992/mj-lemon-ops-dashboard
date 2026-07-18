@@ -124,7 +124,6 @@ function TechniciansView({ locId }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
         <div>
-          <h1 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text)', margin: 0 }}>Technicians</h1>
           <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '3px' }}>
             Live roster pulled from Shopmonkey. Add or remove techs in Shopmonkey and this follows on the next sync &mdash; no manual list to maintain.
           </div>
@@ -202,7 +201,8 @@ function TechniciansView({ locId }) {
                     <td style={{ padding: '8px 12px', color: 'var(--text)' }} className="strong">
                       {(() => { const c = clockFor(t.tech_name); return (<>
                         {c && c.photo && <img src={c.photo} alt="" style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', verticalAlign: 'middle', marginRight: '7px', border: c.color ? `2px solid ${c.color}` : 'none' }} />}
-                        <span style={{ color: (c && c.color) || 'var(--text)' }}>{t.tech_name}</span>
+                        {c && c.color && !c.photo && <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: c.color, marginRight: '7px', verticalAlign: 'middle' }} />}
+                        <span>{t.tech_name}</span>
                         <ClockChip c={c} />
                       </>); })()}
                     </td>

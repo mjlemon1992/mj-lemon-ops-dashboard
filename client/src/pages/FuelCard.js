@@ -91,7 +91,6 @@ function FuelView({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '4px' }}>
-        <h1>Group Fuel Card</h1>
         {tiles.variance == null
           ? <span className="badge neutral">no reconciliation yet</span>
           : reconciled

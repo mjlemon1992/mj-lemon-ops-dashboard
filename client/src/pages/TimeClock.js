@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
+import Icon from '../components/Icon';
 
 // Time Clock admin (owner + that location's manager). Review the month's punches,
 // fix missed/wrong ones, add a manual entry, and set each tech's kiosk PIN. The
@@ -33,6 +34,7 @@ function ClockAdmin({ locId }) {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [tab, setTab] = useState('punches');   // punches | crew | timeoff workspace tabs
   const isOwner = user?.role === 'owner';
 
   // Load the pay-period list once (and after an anchor change).
@@ -272,19 +274,23 @@ function ClockAdmin({ locId }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '6px' }}>
-        <h1>Time Clock</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+        <a href={kioskUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
+          <button style={{ fontSize: '12px', padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Icon name="external" size={13} /> Open kiosk</button>
+        </a>
+        <button onClick={() => { navigator.clipboard && navigator.clipboard.writeText(kioskUrl); setHolNote('Kiosk link copied'); setTimeout(() => setHolNote(''), 2500); }}
+          title={kioskUrl} style={{ fontSize: '12px', padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Icon name="copy" size={13} /> Copy link</button>
         <span style={{ marginLeft: 'auto' }} />
-        {isOwner && <button onClick={setAnchor} disabled={busy} title="Set the biweekly cycle start date" style={{ fontSize: '12px', padding: '6px 10px' }}>⚙ Pay cycle</button>}
-        <button onClick={() => setClosure(closure ? null : { start: '', end: '', note: '' })} disabled={busy} title="Book a shop-wide closure period" style={{ fontSize: '12px', padding: '6px 10px' }}>🚪 Book closure</button>
-        <button onClick={syncHolidays} disabled={busy} title="Put this year's stat holidays on the Shopmonkey calendar" style={{ fontSize: '12px', padding: '6px 10px' }}>🎌 Holidays → Shopmonkey</button>
+        {isOwner && <button onClick={setAnchor} disabled={busy} title="Set the biweekly cycle start date" style={{ fontSize: '12px', padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Icon name="gear" size={13} /> Pay cycle</button>}
+        <button onClick={() => { setTab('timeoff'); setClosure(closure ? null : { start: '', end: '', note: '' }); }} disabled={busy} title="Book a shop-wide closure period" style={{ fontSize: '12px', padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Icon name="calendar" size={13} /> Book closure</button>
+        <button onClick={syncHolidays} disabled={busy} title="Put this year's stat holidays on the Shopmonkey calendar" style={{ fontSize: '12px', padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Icon name="flag" size={13} /> Holidays → Shopmonkey</button>
       </div>
       <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '16px' }}>
-        Kiosk for the shop tablet: <code>{kioskUrl}</code> — shop PIN opens it, each tech uses their own PIN to clock and to request time off. Hours feed the bonus; this page shows biweekly pay periods for payroll.
+        The shop tablet runs the kiosk — shop PIN opens it, each tech uses their own PIN to clock in/out and request time off. Hours feed the bonus; this page shows biweekly pay periods for payroll.
       </div>
 
       {err && <div className="alert-strip" style={{ marginBottom: '12px' }}><span style={{ color: 'var(--danger)' }}>{err}</span></div>}
-      {holNote && <div style={{ fontSize: '12px', color: 'var(--success)', marginBottom: '12px' }}>🎌 {holNote}</div>}
+      {holNote && <div style={{ fontSize: '12px', color: 'var(--success)', marginBottom: '12px' }}>{holNote}</div>}
 
       {/* The period at a glance — one compact strip, always visible up top */}
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
@@ -295,7 +301,7 @@ function ClockAdmin({ locId }) {
           const crewPaid = Math.round((clockedAll + statAll + holAll) * 100) / 100;
           const breaksH = Math.round((data.entries || []).reduce((s, e) => s + (e.break_seconds || 0), 0) / 36) / 100;
           const onNow = live.filter((p) => p.status !== 'off').length;
-          const mini = { minWidth: '128px', padding: '10px 14px' };
+          const mini = { minWidth: '128px', padding: '10px 14px', opacity: (crewPaid === 0 && onNow === 0) ? 0.55 : 1 };
           return (<>
             <div className="metric-card" style={mini}><div className="metric-label">Crew paid</div><div className="metric-value" style={{ fontSize: '20px' }}>{crewPaid} h</div></div>
             <div className="metric-card" style={mini}><div className="metric-label">Breaks</div><div className="metric-value" style={{ fontSize: '20px' }}>{breaksH} h</div></div>
@@ -306,10 +312,17 @@ function ClockAdmin({ locId }) {
         })()}
       </div>
 
+      {/* Workspace tabs — the page was one long scroll; related blocks now live together */}
+      <div className="tc-tabs">
+        {[['punches', 'Punches'], ['crew', 'Crew'], ['timeoff', 'Time off']].map(([k, l]) => (
+          <button key={k} className={tab === k ? 'tc-tab active' : 'tc-tab'} onClick={() => setTab(k)}>{l}</button>
+        ))}
+      </div>
+
       {/* Closure booking — calendar pickers, one booking covers the whole crew */}
       {closure && (
         <div className="card" style={{ marginBottom: '16px', border: '1px solid var(--danger)' }}>
-          <div style={{ fontWeight: 600, marginBottom: '8px' }}>🚪 Book a shop closure</div>
+          <div style={{ fontWeight: 600, marginBottom: '8px' }}>Book a shop closure</div>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>First closed day
               <input type="date" value={closure.start} onClick={openPicker} onFocus={openPicker}
@@ -356,7 +369,7 @@ function ClockAdmin({ locId }) {
               {/* Paid or unpaid — the tech chose on the kiosk; flip it here after talking to them */}
               <button disabled={busy} onClick={() => setPaidFlag(r, !(r.paid === true))}
                 style={{ fontSize: '11px', padding: '4px 10px', fontWeight: 700, color: r.paid === true ? 'var(--success)' : r.paid === false ? 'var(--text3)' : 'var(--warning)' }}>
-                {r.paid === true ? '💰 PAID' : r.paid === false ? 'UNPAID' : '❓ paid? tap to set'}
+                {r.paid === true ? 'PAID' : r.paid === false ? 'UNPAID' : '❓ paid? tap to set'}
               </button>
               <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
                 <button className="primary" disabled={busy} onClick={() => decide(r, 'approve')} style={{ fontSize: '12px', padding: '5px 14px' }}>✓ Approve</button>
@@ -394,10 +407,11 @@ function ClockAdmin({ locId }) {
       )}
 
       {/* Per-person paid hours (this pay period) + PIN + time off taken this year */}
+      {tab === 'crew' && (
       <div className="card" style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
           <span style={{ fontWeight: 600 }}>Paid hours — {sel ? `${fmtD(sel.from)} – ${fmtD(sel.to)}` : 'period'} <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>(biweekly pay period)</span></span>
-          <button onClick={() => setAddingPerson(addingPerson ? null : { name: '', role: 'tech', in_bonus: false })} disabled={busy} style={{ fontSize: '11px', padding: '3px 10px' }}>＋ Add technician</button>
+          <button onClick={() => setAddingPerson(addingPerson ? null : { name: '', role: 'tech', in_bonus: false })} disabled={busy} style={{ fontSize: '11px', padding: '3px 10px' }} title="Add a technician to the time clock"><Icon name="plus" size={11} /> Add technician</button>
           <span style={{ fontSize: '12px', marginLeft: 'auto', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
             {(data.closure_days || 0) > 0 && <span style={{ color: 'var(--danger)' }}>🚪 Shop closed {data.closure_days} day{data.closure_days === 1 ? '' : 's'} this period</span>}
             {(data.stat_holidays || []).length > 0 && (
@@ -444,10 +458,10 @@ function ClockAdmin({ locId }) {
                     : (totals[p.id] ? ` · ${totals[p.id]} day${totals[p.id] === 1 ? '' : 's'} this year` : '')}
                 </div>
               </div>
-              <button onClick={() => setAllowance(p)} disabled={busy} title="Set annual holiday allowance (working days)" style={{ fontSize: '11px', padding: '4px 8px' }}>🏖</button>
-              <button onClick={() => setPin(p)} disabled={busy} style={{ fontSize: '11px', padding: '4px 10px' }}>Set PIN</button>
-              <button onClick={() => uploadPhoto(p)} disabled={busy} title="Upload a profile photo" style={{ fontSize: '11px', padding: '4px 8px' }}>📷</button>
-              <button onClick={() => setPersonActive(p, false)} disabled={busy} title="Remove from the time clock" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)' }}>✕</button>
+              <button onClick={() => setAllowance(p)} disabled={busy} title="Set annual holiday allowance (working days)" style={{ fontSize: '11px', padding: '4px 8px' }}><Icon name="sun" size={12} /></button>
+              <button onClick={() => setPin(p)} disabled={busy} title="Set kiosk PIN" style={{ fontSize: '11px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Icon name="key" size={12} /> PIN</button>
+              <button onClick={() => uploadPhoto(p)} disabled={busy} title="Upload a profile photo" style={{ fontSize: '11px', padding: '4px 8px' }}><Icon name="camera" size={12} /></button>
+              <button onClick={() => setPersonActive(p, false)} disabled={busy} title="Remove from the time clock" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)', borderColor: 'rgba(255,77,77,0.4)', marginLeft: '10px' }}><Icon name="x" size={12} /></button>
             </div>
             );
           })}
@@ -461,10 +475,10 @@ function ClockAdmin({ locId }) {
           </div>
         )}
       </div>
+      )}
 
-      {/* Entries — filterable by technician and pay period. Sits right under
-          the paid-hours summary: the payroll number and its punch detail read
-          together; time-off admin follows below. */}
+      {/* Entries — filterable by technician and pay period. */}
+      {tab === 'punches' && (
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '12px 16px', borderBottom: '0.5px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <span style={{ fontWeight: 600 }}>Punches</span>
@@ -478,9 +492,9 @@ function ClockAdmin({ locId }) {
             ))}
           </select>
           <span style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
-            <button onClick={exportPdf} disabled={busy || !sel} title="Download this selection as a PDF" style={{ fontSize: '12px', padding: '5px 12px' }}>⬇ PDF</button>
-            <button onClick={emailPdf} disabled={busy || !sel} title="Email this selection as a PDF" style={{ fontSize: '12px', padding: '5px 12px' }}>📧 Email</button>
-            <button onClick={() => setAdding(true)} style={{ fontSize: '12px', padding: '5px 12px' }}>＋ Add manual entry</button>
+            <button onClick={exportPdf} disabled={busy || !sel} title="Download this selection as a PDF" style={{ fontSize: '12px', padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Icon name="download" size={13} /> PDF</button>
+            <button onClick={emailPdf} disabled={busy || !sel} title="Email this selection as a PDF" style={{ fontSize: '12px', padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Icon name="mail" size={13} /> Email</button>
+            <button onClick={() => setAdding(true)} style={{ fontSize: '12px', padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Icon name="plus" size={13} /> Add manual entry</button>
           </span>
         </div>
         {adding && <AddRow people={people} onCancel={() => setAdding(false)} onSave={addEntry} busy={busy} />}
@@ -536,22 +550,28 @@ function ClockAdmin({ locId }) {
           </table>
         </div>
       </div>
+      )}
 
       {/* Upcoming approved time off */}
-      {upcoming.length > 0 && (
+      {tab === 'timeoff' && upcoming.length === 0 && !closure && (
+        <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '28px' }}>
+          No upcoming time off. Techs request holidays from the kiosk; approvals appear here and in "Needs attention".
+        </div>
+      )}
+      {tab === 'timeoff' && upcoming.length > 0 && (
         <div className="card" style={{ marginBottom: '16px' }}>
           <div style={{ fontWeight: 600, marginBottom: '10px' }}>Upcoming time off</div>
           {upcoming.map((r) => (
             <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', marginBottom: '4px' }}>
-              <span style={{ fontWeight: 600 }}>{r.type === 'closure' ? '🚪 Shop closed' : r.person_name}</span>
+              <span style={{ fontWeight: 600 }}>{r.type === 'closure' ? 'Shop closed' : r.person_name}</span>
               <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{r.type === 'closure' ? '' : (OFF_LABEL[r.type] || r.type) + ' · '}{fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'}{r.type === 'closure' ? '' : ` = ${r.hours} h`}</b></span>
               {r.type !== 'closure' && (
                 <button disabled={busy} onClick={() => setPaidFlag(r, !(r.paid === true))}
                   style={{ fontSize: '11px', padding: '3px 10px', fontWeight: 700, color: r.paid === true ? 'var(--success)' : r.paid === false ? 'var(--text3)' : 'var(--warning)' }}>
-                  {r.paid === true ? '💰 PAID' : r.paid === false ? 'UNPAID' : '❓ paid?'}
+                  {r.paid === true ? '💰 PAID' : r.paid === false ? 'UNPAID' : 'paid?'}
                 </button>
               )}
-              {r.sm_appointment_id && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>📅 on Shopmonkey</span>}
+              {r.sm_appointment_id && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>on Shopmonkey ✓</span>}
               <button disabled={busy} onClick={() => cancelOff(r)} style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px', color: 'var(--danger)' }}>Cancel</button>
             </div>
           ))}

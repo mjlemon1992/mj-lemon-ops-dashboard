@@ -103,7 +103,7 @@ export default function Users() {
   return (
     <div>
       <div className="page-header">
-        <div className="page-title-text">Users</div>
+        <span />
         <button className="primary" onClick={openNew}>+ Invite user</button>
       </div>
       <div className="card">

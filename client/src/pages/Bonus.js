@@ -213,7 +213,7 @@ function BonusView({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '4px' }}>
-        <h1>Profit-Share Bonus — {monthLabel(month)}</h1>
+        <h1>{monthLabel(month)}</h1>
         {run && (locked
           ? <span className="badge success">🔒 Approved{run.superseded_by ? ' · superseded' : ''}</span>
           : <span className="badge warning">⏳ Draft — awaiting approval</span>)}

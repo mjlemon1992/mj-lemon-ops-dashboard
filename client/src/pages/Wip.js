@@ -37,7 +37,6 @@ return (
   <div>
   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
 <div>
-  <h1 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text)', margin: 0 }}>Committed WIP</h1>
 <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '3px' }}>Authorized work not yet invoiced — potential revenue on the floor (pre-tax)</div>
   </div>
   </div>
