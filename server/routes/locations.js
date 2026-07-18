@@ -8,6 +8,9 @@ module.exports = (pool) => {
   // on-clock hours/tech used for the efficiency denominator (40 unless changed).
   let _colInit = false;
   const ensureColumns = async () => {
+  await pool.query("ALTER TABLE locations ADD COLUMN IF NOT EXISTS fb_page_id VARCHAR(60)");
+  await pool.query("ALTER TABLE locations ADD COLUMN IF NOT EXISTS ig_user_id VARCHAR(60)");
+  await pool.query("ALTER TABLE locations ADD COLUMN IF NOT EXISTS gbp_location_name VARCHAR(160)");
     if (_colInit) return;
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS display_pin VARCHAR(12)');
     await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS weekly_hours DECIMAL(6,2) DEFAULT 40');
@@ -102,15 +105,15 @@ module.exports = (pool) => {
   // the live Shopmonkey roster (see routes/technicians.js) and must not be
   // clobbered by an edit-location save.
   router.put('/:id', authenticateToken, requireOwner, async (req, res) => {
-    const { name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin, weekly_hours, display_show_leaderboard, open_days } = req.body;
+    const { name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin, weekly_hours, display_show_leaderboard, open_days, fb_page_id, ig_user_id, gbp_location_name } = req.body;
     // open_days: CSV of weekday slugs, validated so a bad payload can't break day counting.
     const validOpenDays = typeof open_days === 'string' && open_days.split(',').every((d) => ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].includes(d.trim().toLowerCase())) && open_days.trim() !== '' ? open_days.toLowerCase() : null;
     try {
       await ensureColumns();
       const result = await pool.query(
-        `UPDATE locations SET name=$1, address=$2, city=$3, province=$4, shopmonkey_location_id=$5, qbo_company_id=$6, qbo_slug=$7, slack_channel=$8, labour_rate=$9, stale_threshold_days=$10, parts_margin_target=$11, efficiency_target=$12, pph_target=$13, active=$14, display_pin=$15, weekly_hours=$16, display_show_leaderboard=COALESCE($17, display_show_leaderboard), open_days=COALESCE($18, open_days), updated_at=NOW()
-         WHERE id=$19 RETURNING *`,
-        [name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug || null, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin || null, weekly_hours || 40, typeof display_show_leaderboard === 'boolean' ? display_show_leaderboard : null, validOpenDays, req.params.id]
+        `UPDATE locations SET name=$1, address=$2, city=$3, province=$4, shopmonkey_location_id=$5, qbo_company_id=$6, qbo_slug=$7, slack_channel=$8, labour_rate=$9, stale_threshold_days=$10, parts_margin_target=$11, efficiency_target=$12, pph_target=$13, active=$14, display_pin=$15, weekly_hours=$16, display_show_leaderboard=COALESCE($17, display_show_leaderboard), open_days=COALESCE($18, open_days), fb_page_id=CASE WHEN $19::text IS NULL THEN fb_page_id ELSE NULLIF($19,'') END, ig_user_id=CASE WHEN $20::text IS NULL THEN ig_user_id ELSE NULLIF($20,'') END, gbp_location_name=CASE WHEN $21::text IS NULL THEN gbp_location_name ELSE NULLIF($21,'') END, updated_at=NOW()
+         WHERE id=$22 RETURNING *`,
+        [name, address, city, province, shopmonkey_location_id, qbo_company_id, qbo_slug || null, slack_channel, labour_rate, stale_threshold_days, parts_margin_target, efficiency_target, pph_target, active, display_pin || null, weekly_hours || 40, typeof display_show_leaderboard === 'boolean' ? display_show_leaderboard : null, validOpenDays, fb_page_id !== undefined ? String(fb_page_id) : null, ig_user_id !== undefined ? String(ig_user_id) : null, gbp_location_name !== undefined ? String(gbp_location_name) : null, req.params.id]
       );
       if (!result.rows.length) return res.status(404).json({ error: 'Location not found' });
       res.json(result.rows[0]);

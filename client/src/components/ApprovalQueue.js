@@ -460,6 +460,30 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
     setDrafts(s => ({ ...s, [id]: { ig: current.ig, fb: current.fb, gbp: current.gbp, ...s[id], [key]: val } }));
 
   const CAPS = [['ig', 'Instagram'], ['fb', 'Facebook'], ['gbp', 'Google']];
+
+  // Per-channel publish chips for approved cards. States: sent ✓ / failed ✗
+  // (hover = error) / not_connected ○ (publishing not wired yet) / none —.
+  const retryPublish = async (id) => {
+    try { const out = await api(`/marketing/posts/post/${id}/publish`, { method: 'POST' }); showToast('Publish re-attempted'); refresh(); }
+    catch (e) { showToast(String(e.message || e), 'error'); }
+  };
+  const PubChips = ({ p }) => {
+    const pub = p.publish || {};
+    const anyFailed = Object.values(pub).some(x => x.status === 'failed');
+    const chip = (ch, label) => {
+      const st = pub[ch] && pub[ch].status;
+      const col = st === 'sent' ? 'var(--success)' : st === 'failed' ? 'var(--danger)' : 'var(--text3)';
+      const mark = st === 'sent' ? '✓' : st === 'failed' ? '✗' : '○';
+      const title = st === 'failed' ? (pub[ch].error || 'failed') : st === 'sent' ? 'posted' : 'not connected yet';
+      return <span key={ch} title={`${label}: ${title}`} style={{ fontSize: '10.5px', fontFamily: "ui-monospace, Menlo, monospace", color: col, letterSpacing: '0.04em' }}>{label} {mark}</span>;
+    };
+    return (
+      <span style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
+        {chip('fb', 'FB')}{chip('ig', 'IG')}{chip('gbp', 'GBP')}
+        {anyFailed && <button onClick={() => retryPublish(p.id)} style={{ fontSize: '10.5px', padding: '2px 8px' }}>Retry</button>}
+      </span>
+    );
+  };
   const shownDrafts = previewLimit ? posts.slice(0, previewLimit) : posts;
 
   return (
@@ -597,6 +621,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
                   {p.captions?.ig || p.note || '(no caption)'}
                 </div>
                 <span className="badge success">approved</span>
+                <PubChips p={p} />
                 <button onClick={() => download(p)} style={{ fontSize: '12px' }}>⬇ Image</button>
                 <button onClick={() => copy(p.captions?.ig)} style={{ fontSize: '12px' }} title="Copy Instagram caption">IG</button>
                 <button onClick={() => copy(p.captions?.fb)} style={{ fontSize: '12px' }} title="Copy Facebook caption">FB</button>
