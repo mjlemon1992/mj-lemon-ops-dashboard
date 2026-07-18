@@ -125,8 +125,11 @@ export default function Home() {
   const alertCount = allAlerts.length;
   const staleCount = allAlerts.filter(a => a.type === 'stale').length;
   const marginCount = allAlerts.filter(a => a.type === 'margin').length;
-  const staleDays = (activeLocations[0] && activeLocations[0].stale_threshold_days) || 5;
-  const marginTarget = Math.round((activeLocations[0] && activeLocations[0].parts_margin_target) || 55);
+  // Alert-strip thresholds: use the first location that actually has one set —
+  // an unconfigured shop (threshold 0) must not make the strip read "below 0%".
+  const firstPos = vals => vals.filter(v => v > 0)[0];
+  const staleDays = firstPos(activeLocations.map(l => parseInt(l.stale_threshold_days, 10) || 0)) || 5;
+  const marginTarget = Math.round(firstPos(activeLocations.map(l => parseFloat(l.parts_margin_target) || 0)) || 55);
 
   return (
     <div>
@@ -163,6 +166,9 @@ export default function Home() {
             <div className="glance-rev">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
             <div className="glance-sub">
               of {money0(gRevTarget)} target ·{' '}
+              <span style={{ color: groupRevenue >= gRevTarget ? 'var(--success)' : 'var(--text3)' }}>
+                {groupRevenue >= gRevTarget ? `${money0(groupRevenue - gRevTarget)} over` : `${money0(gRevTarget - groupRevenue)} to go`}
+              </span>{' · '}
               <span style={{ color: pctColor(pacePct(groupRevenue, gRevTarget)) }}>
                 {pacePct(groupRevenue, gRevTarget) != null ? `${pacePct(groupRevenue, gRevTarget)}% of pace` : 'no pace data'}
               </span>
@@ -193,21 +199,22 @@ export default function Home() {
           location (the locations list is already server-filtered to it). */}
       {(
         <div className="stat-grid" style={{ marginBottom: '20px' }}>
+          {/* Revenue / cars / efficiency live on the glance board when a target
+              exists — only fall back to cards when the board is hidden. */}
+          {!(gRevTarget > 0) && (
           <div className="metric-card">
             <div className="metric-label">{isAll ? 'Group revenue MTD' : 'Revenue MTD'}</div>
             <div className="metric-value">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
             <div className={`metric-sub ${toneClass(pacePct(groupRevenue, gRevTarget))}`} style={{ color: pctColor(pacePct(groupRevenue, gRevTarget)) }}>{groupRevenue > 0 ? (pacePct(groupRevenue, gRevTarget) != null ? `${pacePct(groupRevenue, gRevTarget)}% of pace` : 'live from Shopmonkey') : 'awaiting sync'}</div>
-            {gRevTarget > 0 && (
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '3px' }}>
-                Target {money0(gRevTarget)} · <span style={{ color: groupRevenue >= gRevTarget ? 'var(--success)' : 'var(--text2)' }}>{groupRevenue >= gRevTarget ? `${money0(groupRevenue - gRevTarget)} over` : `${money0(gRevTarget - groupRevenue)} to go`}</span>
-              </div>
-            )}
           </div>
+          )}
+          {!(gRevTarget > 0) && (
           <div className="metric-card">
             <div className="metric-label">{isAll ? 'Group car count' : 'Car count'}</div>
             <div className="metric-value">{groupCarCount > 0 ? groupCarCount : '—'}</div>
             <div className={`metric-sub ${toneClass(pacePct(groupCarCount, gCarTarget))}`} style={{ color: pctColor(pacePct(groupCarCount, gCarTarget)) }}>{groupCarCount > 0 ? (pacePct(groupCarCount, gCarTarget) != null ? `${pacePct(groupCarCount, gCarTarget)}% of pace` : 'invoiced this month') : 'awaiting sync'}</div>
           </div>
+          )}
           <div className="metric-card">
             <div className="metric-label">Parts margin</div>
             <div className="metric-value">{groupMargin > 0 ? `${groupMargin.toFixed(1)}%` : '—'}</div>
@@ -220,11 +227,13 @@ export default function Home() {
             <div className="metric-value">{groupPPH > 0 ? `$${groupPPH}` : '—'}</div>
             <div className={`metric-sub ${toneClass(targetPct(groupPPH, gPphTarget))}`} style={{ color: pctColor(targetPct(groupPPH, gPphTarget)) }}>{groupPPH > 0 ? (targetPct(groupPPH, gPphTarget) != null ? `${targetPct(groupPPH, gPphTarget)}% of target` : 'hours sold basis') : 'awaiting sync'}</div>
           </div>
+          {!(gRevTarget > 0) && (
           <div className="metric-card">
             <div className="metric-label">Avg efficiency</div>
             <div className="metric-value">{groupEff > 0 ? `${groupEff}%` : '—'}</div>
             <div className={`metric-sub ${toneClass(targetPct(groupEff, gEffTarget))}`} style={{ color: pctColor(targetPct(groupEff, gEffTarget)) }}>{groupEff > 0 ? (targetPct(groupEff, gEffTarget) != null ? `${targetPct(groupEff, gEffTarget)}% of target` : 'hours sold / worked') : 'no hours yet'}</div>
           </div>
+          )}
           <div className="metric-card">
             <div className="metric-label">Avg RO value</div>
             <div className="metric-value">{groupAvgRO > 0 ? money0(groupAvgRO) : '—'}</div>
