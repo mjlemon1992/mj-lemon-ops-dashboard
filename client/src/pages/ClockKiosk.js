@@ -247,7 +247,8 @@ export default function ClockKiosk() {
   if (!entered) {
     return (
       <div style={wrap}>
-        <div style={{ fontSize: '22px', fontWeight: 700, marginBottom: '18px' }}>🕐 Shop Time Clock</div>
+        <div style={{ ...eyebrow, marginBottom: '8px' }}>OPS · Shop floor</div>
+        <div style={{ ...kh, fontSize: '30px', marginBottom: '18px' }}>Shop Time Clock</div>
         <form onSubmit={(e) => { e.preventDefault(); setLocPin(entryPin); loadRoster(entryPin); }} style={{ textAlign: 'center' }}>
           <div style={{ color: 'var(--text3)', marginBottom: '10px' }}>Enter the shop PIN</div>
           <input autoFocus type="password" inputMode="numeric" value={entryPin} onChange={(e) => setEntryPin(e.target.value)}
@@ -308,7 +309,7 @@ export default function ClockKiosk() {
   if (view === 'timesheet' && sheet) {
     return (
       <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '26px' }}>
-        <div style={{ fontSize: '22px', fontWeight: 700 }}>📋 {sheet.person.name} — my timesheet</div>
+        <div style={{ ...kh, fontSize: '24px' }}>{sheet.person.name} — timesheet</div>
         <div style={{ color: 'var(--text3)', margin: '4px 0 6px' }}>
           {fmtDay(sheet.from + 'T12:00:00')} → {fmtDay(sheet.to + 'T12:00:00')} (this pay period) · <b style={{ color: 'var(--text1)' }}>{sheet.total_paid} h paid</b>
         </div>
@@ -425,7 +426,7 @@ export default function ClockKiosk() {
     return (
       <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '26px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', width: '100%', maxWidth: '820px' }}>
-          <div style={{ fontSize: '22px', fontWeight: 700 }}>📅 Who's off</div>
+          <div style={{ ...kh, fontSize: '24px' }}>Who's off</div>
           <button onClick={() => { setView('request'); setError(''); }} className="primary" style={{ marginLeft: 'auto', fontSize: '15px', padding: '10px 18px' }}>Request time off</button>
           <button onClick={() => { setView('roster'); setError(''); }} style={{ fontSize: '15px', padding: '10px 18px' }}>← Clock</button>
         </div>
@@ -459,7 +460,7 @@ export default function ClockKiosk() {
     const f = reqForm;
     return (
       <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '26px' }}>
-        <div style={{ fontSize: '22px', fontWeight: 700, marginBottom: '14px' }}>🏖 Request time off</div>
+        <div style={{ ...kh, fontSize: '24px', marginBottom: '14px' }}>Request time off</div>
         {!f.person ? (
           <>
             <div style={{ color: 'var(--text3)', marginBottom: '12px' }}>Who's asking?</div>
@@ -505,7 +506,7 @@ export default function ClockKiosk() {
   return (
     <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '30px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '14px', width: '100%', maxWidth: '760px', justifyContent: 'center' }}>
-        <div style={{ fontSize: '22px', fontWeight: 700, marginBottom: '4px' }}>🕐 Who's clocking?</div>
+        <div style={{ ...kh, fontSize: '24px', marginBottom: '4px' }}>Who's clocking?</div>
         <button onClick={() => { setView('timeoff'); setError(''); }} style={{ fontSize: '14px', padding: '8px 14px' }}>📅 Time off</button>
       </div>
       {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', margin: '6px 0 14px' }}>✓ {flash}</div>}
@@ -587,10 +588,12 @@ function OffMonth({ offset, board, holidays }) {
   );
 }
 
+const kh = { fontFamily: 'var(--font-disp)', textTransform: 'uppercase', letterSpacing: '0.03em', fontWeight: 700 };
+const eyebrow = { fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '10px', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)' };
 const wrap = { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', background: 'var(--bg1)', color: 'var(--text1)' };
 const lbl = { display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: 'var(--text3)' };
 const inp = { fontSize: '17px', padding: '10px' };
 const pill = { display: 'inline-block', padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 600 };
 const card = { padding: '18px', borderRadius: '14px', background: 'var(--bg2)', border: '2px solid var(--border)', cursor: 'pointer', textAlign: 'center' };
-const key = { height: '72px', fontSize: '26px', borderRadius: '12px', background: 'var(--bg3)', border: '1px solid var(--border)', cursor: 'pointer', color: 'var(--text1)' };
-const bigBtn = { fontSize: '18px', padding: '12px 26px', borderRadius: '12px', minWidth: '130px' };
+const key = { height: '72px', fontSize: '28px', fontFamily: 'var(--font-disp)', fontWeight: 700, borderRadius: '12px', background: 'var(--bg3)', border: '1px solid var(--border)', cursor: 'pointer', color: 'var(--text1)' };
+const bigBtn = { fontSize: '19px', fontFamily: 'var(--font-disp)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '12px 26px', borderRadius: '12px', minWidth: '130px' };
