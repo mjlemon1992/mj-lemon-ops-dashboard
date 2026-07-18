@@ -62,6 +62,7 @@ app.use('/api/notices', noticesRoutes(pool));
 app.use('/api/bonus', bonusRoutes(pool));
 app.use('/api/fuel', fuelRoutes(pool));
 app.use('/api/clock', timeClockRoutes(pool));
+app.use('/api/attention', require('./routes/attention')(pool));
 app.use('/mcp', mcpRoutes(pool));
 app.use('/report', require('./report')(pool));
 

@@ -44,6 +44,21 @@ export default function Layout() {
   const [alertCount, setAlertCount] = useState(0);
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth <= 768);
   const [navOpen, setNavOpen] = useState(false);
+  const [attention, setAttention] = useState({ items: [], total: 0 });
+  const [attnOpen, setAttnOpen] = useState(false);
+
+  // "Waiting on you" — human queues (holiday requests, punch changes,
+  // unassigned fuel). One aggregate call, refreshed every minute.
+  useEffect(() => {
+    if (!user || !['owner', 'partner', 'manager'].includes(user.role)) return undefined;
+    let cancelled = false;
+    const load = () => api('/attention')
+      .then(d => { if (!cancelled && d && Array.isArray(d.items)) setAttention(d); })
+      .catch(() => {});
+    load();
+    const t = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [user, api]);
 
   // Collapse the sidebar into a drawer on phones; restore it on wider screens.
   useEffect(() => {
@@ -188,7 +203,33 @@ export default function Layout() {
               {visibleNav.find(n => n.path === location.pathname)?.label || 'Dashboard'}
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, position: 'relative' }}>
+            {attention.total > 0 && (
+              <>
+                <div className="badge warning" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setAttnOpen(o => !o)}>
+                  ⏳ {attention.total}{isMobile ? '' : ' waiting on you'}
+                </div>
+                {attnOpen && (
+                  <>
+                    <div onClick={() => setAttnOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+                    <div style={{ position: 'absolute', top: '40px', right: 0, zIndex: 61, minWidth: 260, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '10px', boxShadow: '0 8px 28px rgba(0,0,0,0.35)', padding: '6px', maxHeight: '60vh', overflowY: 'auto' }}>
+                      <div className="section-label" style={{ padding: '6px 10px 4px' }}>Waiting on you</div>
+                      {attention.items.map((it, i) => (
+                        <div key={i}
+                          onClick={() => { setAttnOpen(false); navigate(it.path); }}
+                          style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '7px', cursor: 'pointer', fontSize: '12.5px', color: 'var(--text)' }}
+                          onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg3)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+                          <span style={{ fontSize: '14px' }}>{it.kind === 'fuel' ? '⛽' : it.kind === 'edit' ? '✎' : '🏖'}</span>
+                          <span style={{ flex: 1 }}>{it.count} {it.label}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{it.location_name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
             {alertCount > 0 && (
               <div className="badge danger" style={{ cursor: 'pointer' }} onClick={() => navigate('/alerts')}>
                 ⚠ {alertCount}{isMobile ? '' : ' active alerts'}
