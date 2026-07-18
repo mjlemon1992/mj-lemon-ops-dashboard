@@ -10,23 +10,11 @@ const fmtT = (t) => t ? new Date(t).toLocaleTimeString('en-CA', { hour: 'numeric
 const OFF_LABEL = { vacation: 'holiday', sick: 'sick day', unpaid: 'unpaid leave', other: 'time off' };
 const monthLabel = (m) => new Date(m + '-15T12:00:00Z').toLocaleDateString('en-CA', { month: 'long' });
 
-// Nudge cards (fuel, bonus) can be dismissed — hidden on this device until the
-// key changes (bonus keys include the month, so next month prompts fresh).
-const DISMISS_KEY = 'ops_rail_dismissed';
-const loadDismissed = () => { try { return new Set(JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]')); } catch { return new Set(); } };
-
-export default function WaitingRail({ detail, api, onAction, onClose, multiLoc }) {
+export default function WaitingRail({ detail, api, onAction, onClose, onDismiss, multiLoc }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
-  const [dismissed, setDismissed] = useState(loadDismissed);
-  const dismiss = (key) => {
-    const next = new Set(dismissed); next.add(key);
-    localStorage.setItem(DISMISS_KEY, JSON.stringify([...next]));
-    setDismissed(next);
-  };
-  const { timeoff = [], edits = [] } = detail || {};
-  const fuel = ((detail || {}).fuel || []).filter(r => !dismissed.has(`fuel-${r.location_id}`));
-  const bonus = ((detail || {}).bonus || []).filter(b => !dismissed.has(`bonus-${b.location_id}-${b.month}`));
+  const dismiss = (key) => onDismiss && onDismiss(key);
+  const { timeoff = [], edits = [], fuel = [], bonus = [] } = detail || {};
   const total = timeoff.length + edits.length + fuel.length;
 
   const act = async (fn, doneMsg) => {
