@@ -76,7 +76,7 @@ export default function ReviewsScorecard({ locId }) {
 
       {low_recent > 0 && !demo && (
         <div style={{ marginTop: '10px', fontSize: '11.5px', color: 'var(--warning)' }}>
-          {low_recent} recent review{low_recent === 1 ? '' : 's'} under 4★ — worth a reply on your Google profile.
+          {low_recent} recent review{low_recent === 1 ? '' : 's'} under 4★
         </div>
       )}
 
