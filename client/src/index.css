@@ -281,3 +281,5 @@ table { font-variant-numeric: tabular-nums; }
 .wr-actions { display: flex; gap: 8px; margin-top: 10px; }
 .wr-actions button { font-size: 12px; padding: 5px 14px; }
 .wr-foot { font-size: 11px; color: var(--text3); line-height: 1.6; margin-top: 14px; }
+.wr-x { float: right; background: none; border: none; color: var(--text3); cursor: pointer; font-size: 13px; padding: 0 0 0 8px; line-height: 1.2; }
+.wr-x:hover { color: var(--text); background: none; }
