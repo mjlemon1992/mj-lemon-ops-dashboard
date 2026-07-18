@@ -62,12 +62,12 @@ module.exports = (pool) => {
              FROM fuel_ledger
             WHERE location_id = ANY($1) AND person_id IS NULL AND type = 'purchase'
             GROUP BY location_id`, [ids]),
-        // Last month's bonus not yet approved = the net-profit prompt (owner/partner).
-        ['owner', 'partner'].includes(req.user.role)
-          ? pool.query(
-            `SELECT location_id, status FROM bonus_run
-              WHERE location_id = ANY($1) AND month = $2 AND superseded_by IS NULL`, [ids, prevMonth])
-          : Promise.resolve({ rows: null }),
+        // Last month's bonus not yet approved = the net-profit prompt. Managers
+        // see it too — as a nudge for their shop (the money actions themselves
+        // stay owner-only on the bonus routes).
+        pool.query(
+          `SELECT location_id, status FROM bonus_run
+            WHERE location_id = ANY($1) AND month = $2 AND superseded_by IS NULL`, [ids, prevMonth]),
         // Only prompt shops that actually run a bonus (≥1 active in-bonus person).
         pool.query(
           `SELECT location_id FROM bonus_person
