@@ -81,7 +81,7 @@ export default function Layout() {
   const d = {
     timeoff: _raw.timeoff || [],
     edits: _raw.edits || [],
-    fuel: (_raw.fuel || []).filter(r => !dismissed.has(`fuel-${r.location_id}`)),
+    fuel: (_raw.fuel || []).filter(r => !dismissed.has(`fuel-${r.location_id}-${r.n}-${r.total}`)),
     bonus: (_raw.bonus || []).filter(b => !dismissed.has(`bonus-${b.location_id}-${b.month}`)),
   };
   const railCount = d.timeoff.length + d.edits.length + d.fuel.length + d.bonus.length;
@@ -238,22 +238,29 @@ export default function Layout() {
             {railCount > 0 && (
               <>
                 <div className="badge warning" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={toggleRail}>
-                  ⏳ {railCount}{isMobile ? '' : (showRail ? ' waiting on you' : ' waiting on you')}
+                  ⏳ {railCount}{isMobile ? '' : ' waiting on you'}
                 </div>
                 {isMobile && attnOpen && (
                   <>
                     <div onClick={() => setAttnOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
                     <div style={{ position: 'absolute', top: '40px', right: 0, zIndex: 61, minWidth: 260, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '10px', boxShadow: '0 8px 28px rgba(0,0,0,0.35)', padding: '6px', maxHeight: '60vh', overflowY: 'auto' }}>
                       <div className="section-label" style={{ padding: '6px 10px 4px' }}>Waiting on you</div>
-                      {attention.items.map((it, i) => (
-                        <div key={i}
-                          onClick={() => { setAttnOpen(false); navigate(it.path); }}
+                      {/* Built from the SAME filtered detail as the pill and rail —
+                          bonus prompts included, dismissed cards excluded. */}
+                      {[
+                        ...d.timeoff.map(r => ({ key: `to-${r.id}`, icon: '🏖', text: `${r.person_name} — holiday request`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
+                        ...d.edits.map(r => ({ key: `ed-${r.id}`, icon: '✎', text: `${r.person_name} — punch change`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
+                        ...d.fuel.map(r => ({ key: `fu-${r.location_id}`, icon: '⛽', text: `${r.n} unassigned fuel purchase${r.n === 1 ? '' : 's'}`, loc: r.location_id, locName: r.location_name, path: '/fuel-card' })),
+                        ...d.bonus.map(b => ({ key: `bo-${b.location_id}`, icon: '◆', text: `Bonus — ${b.status === 'draft' ? 'review draft' : 'enter net profit'}`, loc: b.location_id, locName: b.location_name, path: '/bonus' })),
+                      ].map((it) => (
+                        <div key={it.key}
+                          onClick={() => { setAttnOpen(false); select(it.loc); navigate(it.path); }}
                           style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '7px', cursor: 'pointer', fontSize: '12.5px', color: 'var(--text)' }}
                           onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg3)'; }}
                           onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
-                          <span style={{ fontSize: '14px' }}>{it.kind === 'fuel' ? '⛽' : it.kind === 'edit' ? '✎' : '🏖'}</span>
-                          <span style={{ flex: 1 }}>{it.count} {it.label}</span>
-                          <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{it.location_name}</span>
+                          <span style={{ fontSize: '14px' }}>{it.icon}</span>
+                          <span style={{ flex: 1 }}>{it.text}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{it.locName}</span>
                         </div>
                       ))}
                     </div>

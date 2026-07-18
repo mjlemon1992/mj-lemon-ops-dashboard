@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useLocations } from '../context/LocationContext';
 import { showToast, askConfirm } from './Feedback';
 
 // "Waiting on you" rail — every decision from every page lands here. Pinned on
@@ -12,10 +13,13 @@ const monthLabel = (m) => new Date(m + '-15T12:00:00Z').toLocaleDateString('en-C
 
 export default function WaitingRail({ detail, api, onAction, onClose, onDismiss, multiLoc }) {
   const navigate = useNavigate();
+  const { select } = useLocations();
   const [busy, setBusy] = useState(false);
   const dismiss = (key) => onDismiss && onDismiss(key);
   const { timeoff = [], edits = [], fuel = [], bonus = [] } = detail || {};
-  const total = timeoff.length + edits.length + fuel.length;
+  const total = timeoff.length + edits.length + fuel.length + bonus.length;
+  // Deep-links must land on the card's own shop, not whatever is globally selected.
+  const goTo = (locationId, path) => { select(locationId); navigate(path); };
 
   const act = async (fn, doneMsg) => {
     setBusy(true);
@@ -75,7 +79,12 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
             {multiLoc && <span className="wr-loc"> · {r.location_name}</span>}
           </div>
           <div className="wr-actions">
-            <button className="primary" disabled={busy || (!r.proposed_clock_in && !r.proposed_clock_out && r.proposed_break_minutes == null)} onClick={() => decideEdit(r, 'apply')}>Apply</button>
+            <button className="primary"
+              disabled={busy || (r.entry_id
+                ? (!r.proposed_clock_in && !r.proposed_clock_out && r.proposed_break_minutes == null)
+                : !(r.proposed_clock_in && r.proposed_clock_out))}
+              title={!r.entry_id && !(r.proposed_clock_in && r.proposed_clock_out) ? 'A missing punch needs both proposed times — fix it from Time Clock' : undefined}
+              onClick={() => decideEdit(r, 'apply')}>Apply</button>
             <button disabled={busy} onClick={() => decideEdit(r, 'dismissed')}>Dismiss</button>
           </div>
         </div>
@@ -84,9 +93,9 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
       {fuel.map((r) => (
         <div key={`fuel-${r.location_id}`} className="wr-card">
           <div className="wr-card-title">{r.n} unassigned fuel purchase{r.n === 1 ? '' : 's'}
-            <button className="wr-x" title="Dismiss" onClick={() => dismiss(`fuel-${r.location_id}`)}>✕</button></div>
+            <button className="wr-x" title="Dismiss — reappears if new purchases land" onClick={() => dismiss(`fuel-${r.location_id}-${r.n}-${r.total}`)}>✕</button></div>
           <div className="wr-card-body">${Number(r.total).toFixed(2)} on the card, nobody assigned{multiLoc && <span className="wr-loc"> · {r.location_name}</span>}</div>
-          <div className="wr-actions"><button onClick={() => navigate('/fuel-card')}>Assign →</button></div>
+          <div className="wr-actions"><button onClick={() => goTo(r.location_id, '/fuel-card')}>Assign →</button></div>
         </div>
       ))}
 
@@ -95,7 +104,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
           <div className="wr-card-title">{monthLabel(b.month)} bonus{multiLoc ? ` — ${b.location_name}` : ''}
             <button className="wr-x" title="Dismiss until next month" onClick={() => dismiss(`bonus-${b.location_id}-${b.month}`)}>✕</button></div>
           <div className="wr-card-body">{b.status === 'draft' ? 'Draft is calculated — review and lock it' : 'Net profit is one number from calculating'}</div>
-          <div className="wr-actions"><button onClick={() => navigate('/bonus')}>{b.status === 'draft' ? 'Review →' : 'Enter net →'}</button></div>
+          <div className="wr-actions"><button onClick={() => goTo(b.location_id, '/bonus')}>{b.status === 'draft' ? 'Review →' : 'Enter net →'}</button></div>
         </div>
       ))}
 
