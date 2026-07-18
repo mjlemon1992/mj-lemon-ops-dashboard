@@ -4,46 +4,69 @@
 // (revenue, car count) are compared against where the shop *should* be by now,
 // counting only days it's actually open.
 
-// 2026 statutory holiday dates by province (YYYY-MM-DD).
-// AB: 9 official stats + Boxing Day (shop closes). BC: provincial stats incl.
-// BC Day and Truth & Reconciliation. Update yearly or extend as needed.
-const HOLIDAYS = {
-  ab: {
-    2026: [
-      '2026-01-01', // New Year's Day
-      '2026-02-16', // Family Day
-      '2026-04-03', // Good Friday
-      '2026-05-18', // Victoria Day
-      '2026-07-01', // Canada Day
-      '2026-09-07', // Labour Day
-      '2026-10-12', // Thanksgiving
-      '2026-11-11', // Remembrance Day
-      '2026-12-25', // Christmas Day
-      '2026-12-28'  // Boxing Day (observed Mon, Dec 26 is Sat) - shop closes
-    ]
+// Statutory holidays COMPUTED for any year/province — mirrors
+// server/lib/workdays.js exactly (dates only; names live server-side).
+// No annual list maintenance: Easter via the Gregorian algorithm, the rest
+// are fixed dates or Nth-Monday rules, weekend fixed-dates observe Monday.
+const _p2 = (n) => String(n).padStart(2, '0');
+const _iso = (y, m, d) => `${y}-${_p2(m)}-${_p2(d)}`;
+const _dow = (y, m, d) => new Date(y, m - 1, d).getDay();
+function _easter(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  return { month: Math.floor((h + l - 7 * m + 114) / 31), day: ((h + l - 7 * m + 114) % 31) + 1 };
+}
+const _nthMon = (y, m, n) => 1 + ((8 - _dow(y, m, 1)) % 7) + (n - 1) * 7;
+const _obsMon = (y, m, d) => { const w = _dow(y, m, d); return w === 6 ? d + 2 : w === 0 ? d + 1 : d; };
+const _RULES = {
+  newyear: (y) => [_iso(y, 1, _obsMon(y, 1, 1))],
+  febFamily: (y) => [_iso(y, 2, _nthMon(y, 2, 3))],
+  goodfriday: (y) => { const e = _easter(y); const gf = new Date(y, e.month - 1, e.day - 2); return [_iso(y, gf.getMonth() + 1, gf.getDate())]; },
+  victoria: (y) => [_iso(y, 5, 24 - ((_dow(y, 5, 24) + 6) % 7))],
+  fetenationale: (y) => [_iso(y, 6, _obsMon(y, 6, 24))],
+  nipd: (y) => [_iso(y, 6, _obsMon(y, 6, 21))],
+  canada: (y) => [_iso(y, 7, _obsMon(y, 7, 1))],
+  nunavut: (y) => [_iso(y, 7, _obsMon(y, 7, 9))],
+  civicAug: (y) => [_iso(y, 8, _nthMon(y, 8, 1))],
+  discovery: (y) => [_iso(y, 8, _nthMon(y, 8, 3))],
+  labour: (y) => [_iso(y, 9, _nthMon(y, 9, 1))],
+  tandr: (y) => [_iso(y, 9, 30)],
+  thanksgiving: (y) => [_iso(y, 10, _nthMon(y, 10, 2))],
+  remembrance: (y) => [_iso(y, 11, 11)],
+  christmasPair: (y, withBoxing) => {
+    const taken = new Set(); const out = [];
+    const place = (d) => { let day = d; while (_dow(y, 12, day) === 0 || _dow(y, 12, day) === 6 || taken.has(day)) day++; taken.add(day); out.push(_iso(y, 12, day)); };
+    place(25); if (withBoxing) place(26);
+    return out;
   },
-  bc: {
-    2026: [
-      '2026-01-01', // New Year's Day
-      '2026-02-16', // Family Day (BC)
-      '2026-04-03', // Good Friday
-      '2026-05-18', // Victoria Day
-      '2026-07-01', // Canada Day
-      '2026-08-03', // BC Day
-      '2026-09-07', // Labour Day
-      '2026-09-30', // Truth & Reconciliation (BC observes)
-      '2026-10-12', // Thanksgiving
-      '2026-11-11', // Remembrance Day
-      '2026-12-25', // Christmas Day
-      '2026-12-28'  // Boxing Day (observed)
-    ]
-  }
 };
-
+const _PROV_RULES = {
+  ab: [['newyear'], ['febFamily'], ['goodfriday'], ['victoria'], ['canada'], ['labour'], ['thanksgiving'], ['remembrance'], ['christmasPair', true]],
+  bc: [['newyear'], ['febFamily'], ['goodfriday'], ['victoria'], ['canada'], ['civicAug'], ['labour'], ['tandr'], ['thanksgiving'], ['remembrance'], ['christmasPair', true]],
+  sk: [['newyear'], ['febFamily'], ['goodfriday'], ['victoria'], ['canada'], ['civicAug'], ['labour'], ['thanksgiving'], ['remembrance'], ['christmasPair', false]],
+  mb: [['newyear'], ['febFamily'], ['goodfriday'], ['victoria'], ['canada'], ['labour'], ['thanksgiving'], ['christmasPair', false]],
+  on: [['newyear'], ['febFamily'], ['goodfriday'], ['victoria'], ['canada'], ['labour'], ['thanksgiving'], ['christmasPair', true]],
+  qc: [['newyear'], ['goodfriday'], ['victoria'], ['fetenationale'], ['canada'], ['labour'], ['thanksgiving'], ['christmasPair', false]],
+  nb: [['newyear'], ['febFamily'], ['goodfriday'], ['canada'], ['civicAug'], ['labour'], ['remembrance'], ['christmasPair', false]],
+  ns: [['newyear'], ['febFamily'], ['goodfriday'], ['canada'], ['labour'], ['remembrance'], ['christmasPair', false]],
+  pe: [['newyear'], ['febFamily'], ['goodfriday'], ['canada'], ['labour'], ['remembrance'], ['christmasPair', false]],
+  nl: [['newyear'], ['goodfriday'], ['canada'], ['labour'], ['remembrance'], ['christmasPair', false]],
+  yt: [['newyear'], ['goodfriday'], ['victoria'], ['canada'], ['discovery'], ['labour'], ['tandr'], ['thanksgiving'], ['remembrance'], ['christmasPair', false]],
+  nt: [['newyear'], ['goodfriday'], ['victoria'], ['nipd'], ['canada'], ['civicAug'], ['labour'], ['tandr'], ['thanksgiving'], ['remembrance'], ['christmasPair', false]],
+  nu: [['newyear'], ['goodfriday'], ['victoria'], ['canada'], ['nunavut'], ['civicAug'], ['labour'], ['thanksgiving'], ['remembrance'], ['christmasPair', false]],
+};
+const _hsCache = new Map();
 function holidaySet(province, year) {
-  const prov = (province || 'ab').toLowerCase();
-  const list = (HOLIDAYS[prov] && HOLIDAYS[prov][year]) || (HOLIDAYS.ab[year] || []);
-  return new Set(list);
+  const prov = _PROV_RULES[(province || 'ab').toLowerCase()] ? (province || 'ab').toLowerCase() : 'ab';
+  const key = `${prov}:${year}`;
+  if (!_hsCache.has(key)) {
+    const dates = [];
+    for (const [rule, arg] of _PROV_RULES[prov]) dates.push(..._RULES[rule](year, arg));
+    _hsCache.set(key, new Set(dates));
+  }
+  return _hsCache.get(key);
 }
 
 // Count Mon-Fri days in [start..end] (inclusive) that aren't holidays.

@@ -5,48 +5,105 @@
 // efficiency = hours_sold / available_hours measures sold work against the
 // ~40h/week a tech is on the clock, net of stat holidays (per Jamie's def).
 
-// Statutory holidays per province/territory, 2026. Each province gets its own
-// legal list — Family Day doesn't exist in QC, Saskatchewan Day isn't BC Day,
-// etc. The Locations province dropdown selects which list applies.
-const HOLIDAYS = {
-  ab: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01', '2026-09-07', '2026-10-12', '2026-11-11', '2026-12-25', '2026-12-28'] },
-  bc: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01', '2026-08-03', '2026-09-07', '2026-09-30', '2026-10-12', '2026-11-11', '2026-12-25', '2026-12-28'] },
-  sk: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01', '2026-08-03', '2026-09-07', '2026-10-12', '2026-11-11', '2026-12-25'] },
-  mb: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01', '2026-09-07', '2026-10-12', '2026-12-25'] },
-  on: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-05-18', '2026-07-01', '2026-09-07', '2026-10-12', '2026-12-25', '2026-12-28'] },
-  qc: { 2026: ['2026-01-01', '2026-04-03', '2026-05-18', '2026-06-24', '2026-07-01', '2026-09-07', '2026-10-12', '2026-12-25'] },
-  nb: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-07-01', '2026-08-03', '2026-09-07', '2026-11-11', '2026-12-25'] },
-  ns: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-07-01', '2026-09-07', '2026-11-11', '2026-12-25'] },
-  pe: { 2026: ['2026-01-01', '2026-02-16', '2026-04-03', '2026-07-01', '2026-09-07', '2026-11-11', '2026-12-25'] },
-  nl: { 2026: ['2026-01-01', '2026-04-03', '2026-07-01', '2026-09-07', '2026-11-11', '2026-12-25'] },
-  yt: { 2026: ['2026-01-01', '2026-04-03', '2026-05-18', '2026-07-01', '2026-08-17', '2026-09-07', '2026-09-30', '2026-10-12', '2026-11-11', '2026-12-25'] },
-  nt: { 2026: ['2026-01-01', '2026-04-03', '2026-05-18', '2026-06-22', '2026-07-01', '2026-08-03', '2026-09-07', '2026-09-30', '2026-10-12', '2026-11-11', '2026-12-25'] },
-  nu: { 2026: ['2026-01-01', '2026-04-03', '2026-05-18', '2026-07-01', '2026-07-09', '2026-08-03', '2026-09-07', '2026-10-12', '2026-11-11', '2026-12-25'] }
+// Statutory holidays, COMPUTED for any year — no annual list maintenance.
+// Every Canadian stat is deterministic: Easter via the anonymous Gregorian
+// algorithm, the rest are fixed dates or Nth-Monday rules. Fixed-date national
+// holidays that land on a weekend observe the following weekday (the shop-
+// closure convention, e.g. Boxing Day Sat 2026 → observed Mon Dec 28);
+// commemorative dates (Remembrance, Truth & Reconciliation) stay put.
+const p2 = (n) => String(n).padStart(2, '0');
+const iso = (y, m, d) => `${y}-${p2(m)}-${p2(d)}`;
+const dow = (y, m, d) => new Date(y, m - 1, d).getDay();
+
+function easterSunday(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+  return { month, day };
+}
+function nthMonday(y, m, n) {
+  const first = dow(y, m, 1);
+  const day = 1 + ((8 - first) % 7) + (n - 1) * 7;
+  return { day, shifted: false };
+}
+// Fixed date; weekend → following Monday (marked observed).
+function observedMonday(y, m, d) {
+  const w = dow(y, m, d);
+  if (w === 6) return { m, day: d + 2, shifted: true };
+  if (w === 0) return { m, day: d + 1, shifted: true };
+  return { m, day: d, shifted: false };
+}
+
+// Each rule returns [{date, name}] for a year (christmas pair returns two).
+const RULES = {
+  newyear: (y) => { const o = observedMonday(y, 1, 1); return [{ date: iso(y, 1, o.day), name: "New Year's Day" + (o.shifted ? ' (observed)' : '') }]; },
+  febFamily: (y, name) => [{ date: iso(y, 2, nthMonday(y, 2, 3).day), name: name || 'Family Day' }],
+  goodfriday: (y) => { const e = easterSunday(y); const gf = new Date(y, e.month - 1, e.day - 2); return [{ date: iso(y, gf.getMonth() + 1, gf.getDate()), name: 'Good Friday' }]; },
+  victoria: (y, name) => { const w = dow(y, 5, 24); const day = 24 - ((w + 6) % 7); return [{ date: iso(y, 5, day), name: name || 'Victoria Day' }]; },
+  fetenationale: (y) => { const o = observedMonday(y, 6, 24); return [{ date: iso(y, 6, o.day), name: 'Fête nationale' + (o.shifted ? ' (observed)' : '') }]; },
+  nipd: (y) => { const o = observedMonday(y, 6, 21); return [{ date: iso(y, 6, o.day), name: 'National Indigenous Peoples Day' + (o.shifted ? ' (observed)' : '') }]; },
+  canada: (y) => { const o = observedMonday(y, 7, 1); return [{ date: iso(y, 7, o.day), name: 'Canada Day' + (o.shifted ? ' (observed)' : '') }]; },
+  nunavut: (y) => { const o = observedMonday(y, 7, 9); return [{ date: iso(y, 7, o.day), name: 'Nunavut Day' + (o.shifted ? ' (observed)' : '') }]; },
+  civicAug: (y, name) => [{ date: iso(y, 8, nthMonday(y, 8, 1).day), name: name || 'Civic Holiday' }],
+  discovery: (y) => [{ date: iso(y, 8, nthMonday(y, 8, 3).day), name: 'Discovery Day' }],
+  labour: (y) => [{ date: iso(y, 9, nthMonday(y, 9, 1).day), name: 'Labour Day' }],
+  tandr: (y) => [{ date: iso(y, 9, 30), name: 'Truth & Reconciliation Day' }],
+  thanksgiving: (y) => [{ date: iso(y, 10, nthMonday(y, 10, 2).day), name: 'Thanksgiving' }],
+  remembrance: (y) => [{ date: iso(y, 11, 11), name: 'Remembrance Day' }],
+  christmasPair: (y, withBoxing) => {
+    // Christmas then Boxing each take the next open weekday, chaining around
+    // weekends (Fri 25 + Sat 26 → Boxing observed Mon; Sat+Sun → Mon + Tue).
+    const taken = new Set();
+    const place = (d, name) => {
+      let day = d, shifted = false;
+      while (dow(y, 12, day) === 0 || dow(y, 12, day) === 6 || taken.has(day)) { day++; shifted = true; }
+      taken.add(day);
+      return { date: iso(y, 12, day), name: name + (shifted ? ' (observed)' : '') };
+    };
+    const out = [place(25, 'Christmas Day')];
+    if (withBoxing) out.push(place(26, 'Boxing Day'));
+    return out;
+  },
 };
 
-// Display names: nationwide defaults + per-province naming (Feb 16 and Aug 3
-// mean different things in different provinces).
-const HOLIDAY_NAMES = {
-  '2026-01-01': "New Year's Day", '2026-02-16': 'Family Day', '2026-04-03': 'Good Friday',
-  '2026-05-18': 'Victoria Day', '2026-06-22': 'National Indigenous Peoples Day (observed)',
-  '2026-06-24': 'Fête nationale', '2026-07-01': 'Canada Day', '2026-07-09': 'Nunavut Day',
-  '2026-08-03': 'Civic Holiday', '2026-08-17': 'Discovery Day',
-  '2026-09-07': 'Labour Day', '2026-09-30': 'Truth & Reconciliation Day',
-  '2026-10-12': 'Thanksgiving', '2026-11-11': 'Remembrance Day',
-  '2026-12-25': 'Christmas Day', '2026-12-28': 'Boxing Day (observed)'
+// Which rules apply per province/territory (+ local names where they differ).
+const PROV_RULES = {
+  ab: [['newyear'], ['febFamily'], ['goodfriday'], ['victoria'], ['canada'], ['labour'], ['thanksgiving'], ['remembrance'], ['christmasPair', true]],
+  bc: [['newyear'], ['febFamily'], ['goodfriday'], ['victoria'], ['canada'], ['civicAug', 'BC Day'], ['labour'], ['tandr'], ['thanksgiving'], ['remembrance'], ['christmasPair', true]],
+  sk: [['newyear'], ['febFamily'], ['goodfriday'], ['victoria'], ['canada'], ['civicAug', 'Saskatchewan Day'], ['labour'], ['thanksgiving'], ['remembrance'], ['christmasPair', false]],
+  mb: [['newyear'], ['febFamily', 'Louis Riel Day'], ['goodfriday'], ['victoria'], ['canada'], ['labour'], ['thanksgiving'], ['christmasPair', false]],
+  on: [['newyear'], ['febFamily'], ['goodfriday'], ['victoria'], ['canada'], ['labour'], ['thanksgiving'], ['christmasPair', true]],
+  qc: [['newyear'], ['goodfriday'], ['victoria', "National Patriots' Day"], ['fetenationale'], ['canada'], ['labour'], ['thanksgiving'], ['christmasPair', false]],
+  nb: [['newyear'], ['febFamily'], ['goodfriday'], ['canada'], ['civicAug', 'New Brunswick Day'], ['labour'], ['remembrance'], ['christmasPair', false]],
+  ns: [['newyear'], ['febFamily', 'Heritage Day'], ['goodfriday'], ['canada'], ['labour'], ['remembrance'], ['christmasPair', false]],
+  pe: [['newyear'], ['febFamily', 'Islander Day'], ['goodfriday'], ['canada'], ['labour'], ['remembrance'], ['christmasPair', false]],
+  nl: [['newyear'], ['goodfriday'], ['canada'], ['labour'], ['remembrance'], ['christmasPair', false]],
+  yt: [['newyear'], ['goodfriday'], ['victoria'], ['canada'], ['discovery'], ['labour'], ['tandr'], ['thanksgiving'], ['remembrance'], ['christmasPair', false]],
+  nt: [['newyear'], ['goodfriday'], ['victoria'], ['nipd'], ['canada'], ['civicAug'], ['labour'], ['tandr'], ['thanksgiving'], ['remembrance'], ['christmasPair', false]],
+  nu: [['newyear'], ['goodfriday'], ['victoria'], ['canada'], ['nunavut'], ['civicAug'], ['labour'], ['thanksgiving'], ['remembrance'], ['christmasPair', false]],
 };
-const PROV_HOLIDAY_NAMES = {
-  bc: { '2026-08-03': 'BC Day' },
-  sk: { '2026-08-03': 'Saskatchewan Day' },
-  mb: { '2026-02-16': 'Louis Riel Day' },
-  qc: { '2026-05-18': "National Patriots' Day" },
-  nb: { '2026-08-03': 'New Brunswick Day' },
-  ns: { '2026-02-16': 'Heritage Day' },
-  pe: { '2026-02-16': 'Islander Day' }
-};
+
+const _holCache = new Map();
+function holidaysForYear(province, year) {
+  const prov = PROV_RULES[(province || 'ab').toLowerCase()] ? (province || 'ab').toLowerCase() : 'ab';
+  const key = `${prov}:${year}`;
+  if (!_holCache.has(key)) {
+    const out = [];
+    for (const [rule, arg] of PROV_RULES[prov]) out.push(...RULES[rule](year, arg));
+    out.sort((a, b) => a.date.localeCompare(b.date));
+    _holCache.set(key, out);
+  }
+  return _holCache.get(key);
+}
 function holidayName(province, date) {
-  const prov = (province || '').toLowerCase();
-  return (PROV_HOLIDAY_NAMES[prov] && PROV_HOLIDAY_NAMES[prov][date]) || HOLIDAY_NAMES[date] || 'Stat holiday';
+  const y = Number(String(date).slice(0, 4));
+  const hit = holidaysForYear(province, y).find((h) => h.date === date);
+  return hit ? hit.name : 'Stat holiday';
+}
+function holidaySet(province, year) {
+  return new Set(holidaysForYear(province, year).map((h) => h.date));
 }
 
 // A shop's open days as a Set of JS weekday numbers (0=Sun..6=Sat), from the
@@ -163,6 +220,7 @@ function workingDaysInMonthOpen(province, monthDate, openDays) {
 }
 
 module.exports = {
+  holidaysForYear,
   workingDaysElapsed,
   workingDaysInMonth,
   workingPaceFrac,
