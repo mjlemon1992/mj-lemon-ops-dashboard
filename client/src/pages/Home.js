@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { pacePct as wdPacePct } from '../utils/pace';
+import { pacePct as wdPacePct, workingPaceFrac, workingDaysLeftInMonth, nextStatHoliday, holidayDatesBetween } from '../utils/pace';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
@@ -41,6 +41,42 @@ export default function Home() {
   };
 
   useEffect(() => { loadData().then(() => setLoading(false)); }, []);
+
+  // Foreman decks: who's on the clock, upcoming time off, crew paid this
+  // pay period — per active location, quietly skipped on any error.
+  const [clockByLoc, setClockByLoc] = useState({});
+  const [offByLoc, setOffByLoc] = useState({});
+  const [paidByLoc, setPaidByLoc] = useState({});
+  useEffect(() => {
+    const active = locations.filter(l => l.active);
+    if (!active.length || !['owner', 'partner', 'manager'].includes(user?.role)) return undefined;
+    let cancelled = false;
+    Promise.all(active.map(async (loc) => {
+      const [st, toff, pp] = await Promise.all([
+        api(`/clock/${loc.id}/status`).catch(() => null),
+        api(`/clock/${loc.id}/timeoff`).catch(() => null),
+        api(`/clock/${loc.id}/pay-periods`).catch(() => null),
+      ]);
+      let paid = null;
+      const cur = pp && (pp.periods || []).find(x => x.current);
+      if (cur) {
+        const e = await api(`/clock/${loc.id}/entries?from=${cur.from}&to=${cur.to}`).catch(() => null);
+        if (e) {
+          const clocked = Object.values(e.summary || {}).reduce((a, v) => a + Number(v || 0), 0);
+          const hol = Object.values(e.paid_timeoff_hours || {}).reduce((a, v) => a + Number(v || 0), 0);
+          const nP = st ? (st.people || []).length : 0;
+          paid = clocked + Number(e.stat_pay_hours || 0) * nP + hol;
+        }
+      }
+      return [loc.id, st ? st.people || [] : null, toff, paid];
+    })).then(rows => {
+      if (cancelled) return;
+      const c = {}, o = {}, p = {};
+      rows.forEach(([id, st, toff, paid]) => { if (st) c[id] = st; if (toff) o[id] = toff; if (paid != null) p[id] = paid; });
+      setClockByLoc(c); setOffByLoc(o); setPaidByLoc(p);
+    });
+    return () => { cancelled = true; };
+  }, [locations, api, user]);
 
   // Manual "Refresh now": force a live Shopmonkey sync, then reload the cache.
   const handleRefresh = () => {
@@ -120,6 +156,7 @@ export default function Home() {
   const gPphTarget = avgPos(activeLocations.map(l => parseFloat(l.pph_target) || 0));
   const gEffTarget = avgPos(activeLocations.map(l => parseFloat(l.efficiency_target) || 0));
   const money0 = n => '$' + Math.round(n).toLocaleString('en-CA');
+  const fmtD2 = d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
 
 
   const allAlerts = metricList.flatMap(parseAlerts);
@@ -158,43 +195,137 @@ export default function Home() {
         </div>
       )}
 
-      {/* Glance board: the one-look answer — revenue vs target on a tach, pace,
-          cars, efficiency. The detailed cards below stay untouched. */}
-      {gRevTarget > 0 && (
-        <div className="glance-board">
-          <div className="glance-main">
-            <div className="section-label">{isAll ? 'Group revenue · MTD' : 'Revenue · MTD'}</div>
-            <div className="glance-rev">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
-            <div className="glance-sub">
-              of {money0(gRevTarget)} target ·{' '}
-              <span style={{ color: groupRevenue >= gRevTarget ? 'var(--success)' : 'var(--text3)' }}>
-                {groupRevenue >= gRevTarget ? `${money0(groupRevenue - gRevTarget)} over` : `${money0(gRevTarget - groupRevenue)} to go`}
-              </span>{' · '}
-              <span style={{ color: pctColor(pacePct(groupRevenue, gRevTarget)) }}>
-                {pacePct(groupRevenue, gRevTarget) != null ? `${pacePct(groupRevenue, gRevTarget)}% of pace` : 'no pace data'}
-              </span>
+      {/* Foreman hero band — the demo layout on real data */}
+      {gRevTarget > 0 && (() => {
+        const frac = workingPaceFrac(_groupProv) || 0;
+        const delta = groupRevenue - gRevTarget * frac;
+        const daysLeft = workingDaysLeftInMonth(_groupProv);
+        const pctFill = Math.min((groupRevenue / gRevTarget) * 100, 100);
+        const crewPaidTotal = activeLocations.reduce((a, l) => a + (paidByLoc[l.id] || 0), 0);
+        const havePaid = activeLocations.some(l => paidByLoc[l.id] != null);
+        return (
+          <div className="hero-band">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="section-label" style={{ marginBottom: '8px' }}>Month to date · vs target {money0(gRevTarget)}</div>
+              <div className="hero-stats">
+                <div>
+                  <div className="hero-num">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
+                  <div className="hero-sub">revenue · <span style={{ color: delta >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>{delta >= 0 ? `ahead by ${money0(delta)}` : `behind by ${money0(-delta)}`}</span></div>
+                </div>
+                <div>
+                  <div className="hero-num">{groupCarCount > 0 ? groupCarCount : '—'}</div>
+                  <div className="hero-sub">car count{gCarTarget > 0 ? ` of ${gCarTarget}` : ''}</div>
+                </div>
+                <div>
+                  <div className="hero-num">{groupEff > 0 ? groupEff : '—'}<span className="hero-unit">%</span></div>
+                  <div className="hero-sub">avg efficiency</div>
+                </div>
+                {havePaid && (
+                  <div>
+                    <div className="hero-num">{Math.round(crewPaidTotal * 10) / 10}<span className="hero-unit">h</span></div>
+                    <div className="hero-sub">crew paid this period</div>
+                  </div>
+                )}
+              </div>
+              <div className="hero-bar-row">
+                <div className="hero-bar">
+                  <div className="hero-bar-fill" style={{ width: `${pctFill}%` }} />
+                  <div className="hero-bar-marker" style={{ left: `${Math.min(frac * 100, 100)}%` }} title="Where pace says you should be" />
+                </div>
+                <div className="hero-bar-cap">{daysLeft} working day{daysLeft === 1 ? '' : 's'} left</div>
+              </div>
             </div>
-            <div className="glance-meter">
-              <div className="glance-meter-fill" style={{ width: `${Math.min(targetPct(groupRevenue, gRevTarget) || 0, 100)}%` }} />
+            <div className="glance-tach"><PaceTach pct={targetPct(groupRevenue, gRevTarget)} /></div>
+          </div>
+        );
+      })()}
+
+      {/* Live decks: crew now · efficiency · two weeks */}
+      {Object.keys(clockByLoc).length > 0 && (() => {
+        const scopeIds = activeLocations.map(l => l.id);
+        const todayIso = new Date().toLocaleDateString('en-CA');
+        const offToday = new Set();
+        const upcoming = [];
+        scopeIds.forEach(id => ((offByLoc[id] || {}).requests || []).forEach(r => {
+          if (r.status !== 'approved') return;
+          if (r.start_date <= todayIso && r.end_date >= todayIso && r.person_id) offToday.add(r.person_id);
+          if (r.end_date >= todayIso) upcoming.push(r);
+        }));
+        upcoming.sort((a, b) => a.start_date < b.start_date ? -1 : 1);
+        const crew = scopeIds.flatMap(id => clockByLoc[id] || []);
+        const onCount = crew.filter(p => p.status !== 'off' && !offToday.has(p.id)).length;
+        const fmtSince = t => t ? new Date(t).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }).replace(/\s?[ap]\.?m\.?/i, '') : '';
+        const breakMins = t => Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000));
+        const effRows = activeLocations.flatMap(l => ((teff[l.id] || {}).technicians || []))
+          .map(t => { const w = num(t.hours_worked), so = num(t.hours_sold); return w > 0 ? { name: t.tech_name, eff: Math.round((so / w) * 100) } : null; })
+          .filter(Boolean);
+        const days = Array.from({ length: 14 }, (_, i) => { const dt = new Date(); dt.setDate(dt.getDate() + i); return dt; });
+        const hset = holidayDatesBetween(_groupProv, todayIso, days[13].toLocaleDateString('en-CA'));
+        const offDates = (iso) => { let approved = false, pending = false;
+          scopeIds.forEach(id => ((offByLoc[id] || {}).requests || []).forEach(r => {
+            if (r.start_date <= iso && r.end_date >= iso) { if (r.status === 'approved') approved = true; else if (r.status === 'pending') pending = true; }
+          }));
+          return { approved, pending };
+        };
+        const nextStat = nextStatHoliday(_groupProv);
+        const nextOff = upcoming.find(r => r.person_id);
+        return (
+          <div className="deck-row">
+            <div className="card deck">
+              <div className="deck-head"><span className="deck-title">Crew now</span><span className="section-label">{onCount} of {crew.length} in</span></div>
+              {crew.length === 0 && <div className="deck-empty">No crew on the time clock yet.</div>}
+              {crew.map(p => {
+                const hol = offToday.has(p.id);
+                return (
+                  <div key={p.id} className="crew-row">
+                    {p.photo
+                      ? <img src={p.photo} alt="" className="crew-ava" style={{ border: p.color ? `2px solid ${p.color}` : 'none' }} />
+                      : <span className="crew-ava crew-ava-fallback" style={{ background: p.color || 'var(--bg3)' }}>{(p.name || '?')[0]}</span>}
+                    <span className="crew-name">{p.name.split(' ')[0]}</span>
+                    <span className="crew-state" style={{ color: hol ? 'var(--warning)' : p.status === 'on' ? 'var(--success)' : p.status === 'break' ? 'var(--warning)' : 'var(--text3)' }}>
+                      {hol ? 'HOLIDAY' : p.status === 'on' ? `ON · ${fmtSince(p.clock_in)}` : p.status === 'break' ? `BREAK · ${breakMins(p.break_started_at)}m` : 'OUT'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="card deck">
+              <div className="deck-head"><span className="deck-title">Efficiency</span><span className="section-label">{gEffTarget > 0 ? `vs ${Math.round(gEffTarget)}% target` : 'MTD'}</span></div>
+              {effRows.length === 0 && <div className="deck-empty">No hours yet this month.</div>}
+              {effRows.map(r => (
+                <div key={r.name} className="eff-row">
+                  <span className="crew-name">{r.name.split(' ')[0]}</span>
+                  <div className="eff-bar">
+                    <div className="eff-bar-fill" style={{ width: `${Math.min(r.eff, 110) / 110 * 100}%`, background: gEffTarget > 0 ? (r.eff >= gEffTarget ? 'var(--success)' : 'var(--warning)') : 'var(--accent)' }} />
+                    {gEffTarget > 0 && <div className="eff-bar-marker" style={{ left: `${Math.min(gEffTarget, 110) / 110 * 100}%` }} />}
+                  </div>
+                  <span className="eff-pct">{r.eff}%</span>
+                </div>
+              ))}
+            </div>
+            <div className="card deck">
+              <div className="deck-head"><span className="deck-title">Two weeks</span><span className="section-label">Off &amp; stats</span></div>
+              <div className="tw-grid">
+                {days.map(dt => {
+                  const iso = dt.toLocaleDateString('en-CA');
+                  const dow = dt.getDay();
+                  const o = offDates(iso);
+                  const cls = ['tw-cell'];
+                  if (dow === 0 || dow === 6) cls.push('dim');
+                  if (hset.has(iso)) cls.push('stat');
+                  if (o.approved) cls.push('off');
+                  else if (o.pending) cls.push('pending');
+                  return <span key={iso} className={cls.join(' ')} title={iso}>{dt.getDate()}</span>;
+                })}
+              </div>
+              <div className="deck-foot">
+                {nextOff ? `${(nextOff.person_name || '').split(' ')[0]} ${fmtD2(nextOff.start_date)}–${fmtD2(nextOff.end_date)}${nextOff.paid === true ? ' paid' : ''}` : 'No time off booked'}
+                {nextStat ? ` · next stat: ${nextStat.label}` : ''}
+              </div>
             </div>
           </div>
-          <div className="glance-side">
-            <div>
-              <div className="section-label">Cars</div>
-              <div className="glance-num">{groupCarCount > 0 ? groupCarCount : '—'}</div>
-              <div className="glance-sub">{gCarTarget > 0 ? `of ${gCarTarget}` : ' '}</div>
-            </div>
-            <div>
-              <div className="section-label">Efficiency</div>
-              <div className="glance-num">{groupEff > 0 ? `${groupEff}%` : '—'}</div>
-              <div className="glance-sub">{gEffTarget > 0 ? `target ${Math.round(gEffTarget)}%` : ' '}</div>
-            </div>
-          </div>
-          <div className="glance-tach">
-            <PaceTach pct={targetPct(groupRevenue, gRevTarget)} />
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Full metric block for every role — a manager's "group" is just their own
           location (the locations list is already server-filtered to it). */}
