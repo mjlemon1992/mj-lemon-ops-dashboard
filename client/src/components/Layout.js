@@ -251,7 +251,7 @@ export default function Layout() {
                         ...d.timeoff.map(r => ({ key: `to-${r.id}`, icon: '🏖', text: `${r.person_name} — holiday request`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
                         ...d.edits.map(r => ({ key: `ed-${r.id}`, icon: '✎', text: `${r.person_name} — punch change`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
                         ...d.fuel.map(r => ({ key: `fu-${r.location_id}`, icon: '⛽', text: `${r.n} unassigned fuel purchase${r.n === 1 ? '' : 's'}`, loc: r.location_id, locName: r.location_name, path: '/fuel-card' })),
-                        ...d.bonus.map(b => ({ key: `bo-${b.location_id}`, icon: '◆', text: `Bonus — ${b.status === 'draft' ? 'review draft' : 'enter net profit'}`, loc: b.location_id, locName: b.location_name, path: '/bonus' })),
+                        ...d.bonus.map(b => ({ key: `bo-${b.location_id}`, icon: '◆', text: `Bonus — ${b.status === 'draft' ? 'draft awaiting lock' : 'month open'}`, loc: b.location_id, locName: b.location_name, path: '/bonus' })),
                       ].map((it) => (
                         <div key={it.key}
                           onClick={() => { setAttnOpen(false); select(it.loc); navigate(it.path); }}

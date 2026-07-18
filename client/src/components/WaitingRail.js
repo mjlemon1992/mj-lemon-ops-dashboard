@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLocations } from '../context/LocationContext';
+import { useAuth } from '../context/AuthContext';
 import { showToast, askConfirm } from './Feedback';
 import { fmtShortDate, fmtClock, monthLabel, money, OFF_LABEL } from '../utils/format';
 
@@ -13,6 +14,8 @@ const fmtT = fmtClock;
 export default function WaitingRail({ detail, api, onAction, onClose, onDismiss, multiLoc }) {
   const navigate = useNavigate();
   const { select } = useLocations();
+  const { user } = useAuth();
+  const ownerish = ['owner', 'partner'].includes(user?.role);
   const [busy, setBusy] = useState(false);
   const dismiss = (key) => onDismiss && onDismiss(key);
   const { timeoff = [], edits = [], fuel = [], bonus = [] } = detail || {};
@@ -102,8 +105,10 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
         <div key={`bonus-${b.location_id}`} className="wr-card">
           <div className="wr-card-title">{monthLabel(b.month)} bonus{multiLoc ? ` — ${b.location_name}` : ''}
             <button className="wr-x" title="Dismiss until next month" onClick={() => dismiss(`bonus-${b.location_id}-${b.month}`)}>✕</button></div>
-          <div className="wr-card-body">{b.status === 'draft' ? 'Draft is calculated — review and lock it' : 'Net profit is one number from calculating'}</div>
-          <div className="wr-actions"><button onClick={() => goTo(b.location_id, '/bonus')}>{b.status === 'draft' ? 'Review →' : 'Enter net →'}</button></div>
+          <div className="wr-card-body">{ownerish
+            ? (b.status === 'draft' ? 'Draft is calculated — review and lock it' : 'Net profit is one number from calculating')
+            : (b.status === 'draft' ? 'Draft calculated — waiting on the owner to lock it' : 'Waiting on the owner for net profit from month-end close')}</div>
+          <div className="wr-actions"><button onClick={() => goTo(b.location_id, '/bonus')}>{ownerish ? (b.status === 'draft' ? 'Review →' : 'Enter net →') : 'View →'}</button></div>
         </div>
       ))}
 
