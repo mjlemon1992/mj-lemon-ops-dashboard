@@ -29,7 +29,7 @@ module.exports = (pool) => {
         const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
         return d.toISOString().slice(0, 7);
       })();
-      const [timeoff, edits, fuel, bonusRuns] = await Promise.all([
+      const [timeoff, edits, fuel, bonusRuns, bonusCrew] = await Promise.all([
         pool.query(
           `SELECT r.id, r.location_id, r.person_id, r.type, r.paid, r.working_days,
                   r.start_date::text AS start_date, r.end_date::text AS end_date,
@@ -60,13 +60,20 @@ module.exports = (pool) => {
             `SELECT location_id, status FROM bonus_run
               WHERE location_id = ANY($1) AND month = $2 AND superseded_by IS NULL`, [ids, prevMonth])
           : Promise.resolve({ rows: null }),
+        // Only prompt shops that actually run a bonus (≥1 active in-bonus person).
+        pool.query(
+          `SELECT location_id FROM bonus_person
+            WHERE location_id = ANY($1) AND active = true AND in_bonus IS NOT FALSE
+            GROUP BY location_id`, [ids]),
       ]);
 
       // Bonus prompt: previous month with no approved (unsuperseded) run.
       const bonus = [];
       if (bonusRuns.rows) {
         const runByLoc = Object.fromEntries(bonusRuns.rows.map((r) => [r.location_id, r.status]));
+        const hasCrew = new Set(bonusCrew.rows.map((r) => r.location_id));
         for (const l of locs) {
+          if (!hasCrew.has(l.id)) continue;   // shop doesn't run a bonus — no prompt
           const st = runByLoc[l.id];
           if (st !== 'approved') bonus.push({ location_id: l.id, location_name: l.name, month: prevMonth, status: st || 'none' });
         }

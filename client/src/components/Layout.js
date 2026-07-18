@@ -263,7 +263,7 @@ export default function Layout() {
           </div>
           {showRail && (
             <div style={{ width: 300, flexShrink: 0, overflowY: 'auto', borderLeft: '0.5px solid var(--border)', background: 'var(--bg2)' }}>
-              <WaitingRail detail={attention.detail} api={api} onAction={loadAttention} multiLoc={locations.length > 1} />
+              <WaitingRail detail={attention.detail} api={api} onAction={loadAttention} onClose={toggleRail} multiLoc={locations.length > 1} />
             </div>
           )}
         </div>
