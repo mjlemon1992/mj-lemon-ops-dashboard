@@ -148,7 +148,7 @@ export default function Display() {
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px' }}>
             <span style={{ fontSize: '26px', fontWeight: 800, color: 'var(--accent)', letterSpacing: '-1px' }}>OPS</span>
-            <span style={{ fontSize: '24px', fontWeight: 600, color: 'var(--text)' }}>{data.location.name}</span>
+            <span style={{ fontFamily: 'var(--font-disp)', fontSize: '26px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: 'var(--text)' }}>{data.location.name}</span>
           </div>
           {posters.length > 1 && <NoticeDots count={posters.length} idx={posterIdx % posters.length} />}
         </div>
@@ -168,7 +168,7 @@ export default function Display() {
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '24px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px' }}>
           <span style={{ fontSize: '26px', fontWeight: 800, color: 'var(--accent)', letterSpacing: '-1px' }}>OPS</span>
-          <span style={{ fontSize: '24px', fontWeight: 600, color: 'var(--text)' }}>{data.location.name}</span>
+          <span style={{ fontFamily: 'var(--font-disp)', fontSize: '26px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: 'var(--text)' }}>{data.location.name}</span>
         </div>
         <div style={{ fontSize: '13px', color: 'var(--text3)' }}>
           {loading ? 'Refreshing…' : `Updated ${updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : ''}`} · auto-refresh 5 min
@@ -181,7 +181,7 @@ export default function Display() {
         <div key={notice.id} style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', marginBottom: '28px', background: 'var(--bg2)', border: `1px solid ${nStyle.color}`, borderLeft: `8px solid ${nStyle.color}`, borderRadius: '16px', padding: '20px 28px' }}>
           <div style={{ fontSize: '40px', lineHeight: 1 }}>{nStyle.icon}</div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '12px', fontWeight: 800, letterSpacing: '0.12em', color: nStyle.color, marginBottom: '4px' }}>{nStyle.label}</div>
+            <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '11px', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: nStyle.color, marginBottom: '4px' }}>{nStyle.label}</div>
             {notice.title && <div style={{ fontSize: '26px', fontWeight: 700, color: 'var(--text)' }}>{notice.title}</div>}
             {notice.body && <div style={{ fontSize: '19px', color: 'var(--text2)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{notice.body}</div>}
           </div>
@@ -194,12 +194,12 @@ export default function Display() {
       <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '28px 32px', marginBottom: '28px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '16px' }}>
           <div>
-            <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Revenue this month</div>
-            <div style={{ fontSize: '64px', fontWeight: 800, color: 'var(--text)', lineHeight: 1.05 }}>{money(data.revenue)}</div>
+            <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>Revenue this month</div>
+            <div style={{ fontFamily: 'var(--font-disp)', fontSize: '72px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.02, fontVariantNumeric: 'tabular-nums' }}>{money(data.revenue)}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Target</div>
-            <div style={{ fontSize: '40px', fontWeight: 700, color: 'var(--text2)' }}>{target != null ? money(target) : 'Not set'}</div>
+            <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>Target</div>
+            <div style={{ fontFamily: 'var(--font-disp)', fontSize: '44px', fontWeight: 700, color: 'var(--text2)', fontVariantNumeric: 'tabular-nums' }}>{target != null ? money(target) : 'Not set'}</div>
           </div>
         </div>
 
@@ -226,9 +226,9 @@ export default function Display() {
       {data.reviews && data.reviews.rating != null && (
         <div style={{ display: 'flex', gap: '28px', marginBottom: '28px' }}>
           <div style={{ flex: 1, background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '24px 32px' }}>
-            <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Google rating</div>
+            <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>Google rating</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', marginTop: '8px' }}>
-              <span style={{ fontSize: '56px', fontWeight: 800, lineHeight: 1 }}>{Number(data.reviews.rating).toFixed(1)}</span>
+              <span style={{ fontFamily: 'var(--font-disp)', fontSize: '60px', fontWeight: 700, lineHeight: 1 }}>{Number(data.reviews.rating).toFixed(1)}</span>
               <span style={{ fontSize: '28px', color: 'var(--accent)', letterSpacing: '2px' }}>★★★★★</span>
             </div>
             <div style={{ fontSize: '16px', color: 'var(--text3)', marginTop: '10px' }}>
@@ -236,8 +236,8 @@ export default function Display() {
             </div>
           </div>
           <div style={{ flex: 1, background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '24px 32px' }}>
-            <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>New reviews this month</div>
-            <div style={{ fontSize: '56px', fontWeight: 800, lineHeight: 1, marginTop: '8px', color: data.reviews.delta > 0 ? 'var(--success)' : 'var(--text)' }}>
+            <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>New reviews this month</div>
+            <div style={{ fontFamily: 'var(--font-disp)', fontSize: '60px', fontWeight: 700, lineHeight: 1, marginTop: '8px', color: data.reviews.delta > 0 ? 'var(--success)' : 'var(--text)' }}>
               {data.reviews.delta > 0 ? `+${data.reviews.delta}` : (data.reviews.delta || 0)}
             </div>
             <div style={{ fontSize: '16px', color: 'var(--text3)', marginTop: '10px' }}>month to date</div>
@@ -247,7 +247,7 @@ export default function Display() {
 
       {/* Tech leaderboard — cycles between this month and year-to-date */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-        <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>
           Technicians · hours sold {!showYtd && data.totals && `(${hrs(data.totals.hours_sold)} sold / ${hrs(data.totals.hours_billed)} billed)`}
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -256,7 +256,7 @@ export default function Display() {
         </div>
       </div>
       <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', overflow: 'hidden', opacity: fade ? 1 : 0, transition: 'opacity 0.4s ease' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1.2fr', padding: '12px 24px', borderBottom: '0.5px solid var(--border)', fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1.2fr', padding: '12px 24px', borderBottom: '0.5px solid var(--border)', fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
           <div>Technician</div>
           <div style={{ textAlign: 'right' }}>Billed</div>
           <div style={{ textAlign: 'right' }}>Sold</div>
@@ -285,9 +285,9 @@ export default function Display() {
                 {t.tech_name}
                 {chip && <span style={{ fontSize: '13px', fontWeight: 600, color: chip.col, whiteSpace: 'nowrap' }}>{chip.txt}</span>}
               </div>
-              <div style={{ textAlign: 'right', fontSize: '22px', color: 'var(--text2)' }}>{hrs(t.hours_billed)}</div>
-              <div style={{ textAlign: 'right', fontSize: '22px', color: 'var(--text2)' }}>{hrs(t.hours_sold)}</div>
-              <div style={{ textAlign: 'right', fontSize: '24px', fontWeight: 700, color: effColor }}>{eff == null ? '—' : `${eff}%`}</div>
+              <div style={{ textAlign: 'right', fontFamily: 'var(--font-disp)', fontSize: '24px', fontWeight: 700, color: 'var(--text2)', fontVariantNumeric: 'tabular-nums' }}>{hrs(t.hours_billed)}</div>
+              <div style={{ textAlign: 'right', fontFamily: 'var(--font-disp)', fontSize: '24px', fontWeight: 700, color: 'var(--text2)', fontVariantNumeric: 'tabular-nums' }}>{hrs(t.hours_sold)}</div>
+              <div style={{ textAlign: 'right', fontFamily: 'var(--font-disp)', fontSize: '27px', fontWeight: 700, color: effColor, fontVariantNumeric: 'tabular-nums' }}>{eff == null ? '—' : `${eff}%`}</div>
             </div>
           );
         })}
@@ -296,7 +296,7 @@ export default function Display() {
       {/* All-locations revenue standings (revenue only) */}
       {data.leaderboard && data.leaderboard.length >= 2 && (
         <div style={{ marginTop: '28px' }}>
-          <div style={{ fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
+          <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: '10px' }}>
             Group standings · revenue to date
           </div>
           <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', overflow: 'hidden' }}>
