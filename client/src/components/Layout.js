@@ -66,8 +66,25 @@ export default function Layout() {
     const t = setInterval(loadAttention, 60000);
     return () => clearInterval(t);
   }, [canQueue, loadAttention]);
-  const d = attention.detail || {};
-  const railCount = (d.timeoff || []).length + (d.edits || []).length + (d.fuel || []).length + (d.bonus || []).length;
+  // Dismissed nudge cards (fuel/bonus) — per device; bonus keys include the
+  // month so next month's prompt returns. Kept here so the pill count, rail
+  // visibility and the cards all agree.
+  const [dismissed, setDismissed] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('ops_rail_dismissed') || '[]')); } catch { return new Set(); }
+  });
+  const dismissCard = (key) => setDismissed(prev => {
+    const next = new Set(prev); next.add(key);
+    localStorage.setItem('ops_rail_dismissed', JSON.stringify([...next]));
+    return next;
+  });
+  const _raw = attention.detail || {};
+  const d = {
+    timeoff: _raw.timeoff || [],
+    edits: _raw.edits || [],
+    fuel: (_raw.fuel || []).filter(r => !dismissed.has(`fuel-${r.location_id}`)),
+    bonus: (_raw.bonus || []).filter(b => !dismissed.has(`bonus-${b.location_id}-${b.month}`)),
+  };
+  const railCount = d.timeoff.length + d.edits.length + d.fuel.length + d.bonus.length;
   const showRail = !isMobile && railOpen && railCount > 0;
   const toggleRail = () => {
     if (isMobile) { setAttnOpen(o => !o); return; }
@@ -263,7 +280,7 @@ export default function Layout() {
           </div>
           {showRail && (
             <div style={{ width: 300, flexShrink: 0, overflowY: 'auto', borderLeft: '0.5px solid var(--border)', background: 'var(--bg2)' }}>
-              <WaitingRail detail={attention.detail} api={api} onAction={loadAttention} onClose={toggleRail} multiLoc={locations.length > 1} />
+              <WaitingRail detail={d} api={api} onAction={loadAttention} onClose={toggleRail} onDismiss={dismissCard} multiLoc={locations.length > 1} />
             </div>
           )}
         </div>
