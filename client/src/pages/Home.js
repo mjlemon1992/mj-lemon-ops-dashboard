@@ -64,7 +64,7 @@ export default function Home() {
   useEffect(() => {
     // Only the shops the decks will actually render (global selection scope).
     const active = locations.filter(l => l.active && (isAll || l.id === selectedId));
-    if (!active.length || !['owner', 'partner', 'manager'].includes(user?.role)) return undefined;
+    if (!active.length || !['owner', 'partner', 'manager', 'advisor'].includes(user?.role)) return undefined;
     let cancelled = false;
     Promise.all(active.map(async (loc) => {
       const [st, toff, pp] = await Promise.all([
