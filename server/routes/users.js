@@ -19,7 +19,9 @@ module.exports = (pool) => {
   router.post('/', authenticateToken, requireOwner, async (req, res) => {
     const { email, name, role, location_id, password } = req.body;
     if (!email || !name || !role || !password) return res.status(400).json({ error: 'email, name, role, password required' });
-    if (!['owner', 'partner', 'manager'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    if (!['owner', 'partner', 'manager', 'advisor'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    // Advisors are location-scoped by definition — without one they'd see nothing.
+    if (role === 'advisor' && !location_id) return res.status(400).json({ error: 'An advisor needs a location' });
     try {
       const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
       if (existing.rows.length) return res.status(409).json({ error: 'Email already in use' });
@@ -47,7 +49,8 @@ module.exports = (pool) => {
 
   router.put('/:id', authenticateToken, requireOwner, async (req, res) => {
     const { name, role, location_id, active } = req.body;
-    if (role && !['owner', 'partner', 'manager'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    if (role && !['owner', 'partner', 'manager', 'advisor'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    if (role === 'advisor' && !location_id) return res.status(400).json({ error: 'An advisor needs a location' });
     try {
       if ((role && role !== 'owner') || active === false) {
         const last = await lastActiveOwner(req.params.id);

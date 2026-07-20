@@ -27,6 +27,7 @@ import Bonus from './pages/Bonus';
 import FuelCard from './pages/FuelCard';
 import ClockKiosk from './pages/ClockKiosk';
 import TimeClock from './pages/TimeClock';
+import Reorders from './pages/Reorders';
 
 function ProtectedRoute({ children, ownerOnly, ownerOrPartner }) {
   const { user, loading } = useAuth();
@@ -35,6 +36,13 @@ function ProtectedRoute({ children, ownerOnly, ownerOrPartner }) {
   if (ownerOnly && user.role !== 'owner') return <Navigate to="/" replace />;
   if (ownerOrPartner && !['owner', 'partner'].includes(user.role)) return <Navigate to="/" replace />;
   return children;
+}
+
+// Advisors land on their board — Home is revenue metrics they can't (and
+// shouldn't) load.
+function RoleHome() {
+  const { user } = useAuth();
+  return user?.role === 'advisor' ? <Navigate to="/reorders" replace /> : <Home />;
 }
 
 export default function App() {
@@ -46,7 +54,8 @@ export default function App() {
           <Route path="/display/:locationId" element={<Display />} />
           <Route path="/clock/:locationId" element={<ClockKiosk />} />
           <Route path="/" element={<ProtectedRoute><LocationProvider><Layout /></LocationProvider></ProtectedRoute>}>
-            <Route index element={<Home />} />
+            <Route index element={<RoleHome />} />
+            <Route path="reorders" element={<Reorders />} />
             <Route path="chief-of-staff" element={<ProtectedRoute ownerOrPartner><ChiefOfStaff /></ProtectedRoute>} />
             <Route path="scorecard" element={<ProtectedRoute ownerOrPartner><Scorecard /></ProtectedRoute>} />
             <Route path="performance" element={<Performance />} />

@@ -61,7 +61,8 @@ module.exports = (pool) => {
     try {
       let query = 'SELECT * FROM locations ORDER BY name';
       let params = [];
-      if (req.user.role === 'manager') {
+      // Managers and advisors are scoped to their own location.
+      if (['manager', 'advisor'].includes(req.user.role)) {
         query = 'SELECT * FROM locations WHERE id = $1';
         params = [req.user.location_id];
       }

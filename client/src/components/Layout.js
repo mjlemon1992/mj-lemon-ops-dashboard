@@ -23,6 +23,8 @@ const NAV = [
   { path: '/comebacks', label: 'Comebacks', icon: 'undo', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
   { path: '/wip', label: 'Committed WIP', icon: 'clipboard', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
   { path: '/notices', label: 'Shop Notices', icon: 'megaphone', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
+  // The service advisor's whole dashboard: the re-order board, nothing money.
+  { path: '/reorders', label: 'Re-orders', icon: 'clipboard', section: 'Shop', roles: ['advisor'] },
   { path: '/finance', label: 'Finance', icon: 'dollar', section: 'Money', roles: ['owner', 'partner', 'manager'] },
   { path: '/reports', label: 'Reports', icon: 'file', section: 'Money', roles: ['owner', 'partner', 'manager'] },
   { path: '/marketing', label: 'Marketing', icon: 'spark', section: 'Marketing', roles: ['owner', 'partner', 'manager'] },
@@ -121,7 +123,11 @@ export default function Layout() {
     return () => { cancelled = true; };
   }, [user, api, isAll, selectedId]);
 
-  const visibleNav = NAV.filter(n => !n.roles || n.roles.includes(user?.role));
+  // Advisors are allow-list only: items must NAME the role. Every other role
+  // keeps the default (roleless items are visible to them).
+  const visibleNav = NAV.filter(n => (user?.role === 'advisor'
+    ? (n.roles || []).includes('advisor')
+    : (!n.roles || n.roles.includes(user?.role))));
   const initials = user?.name ? user.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : 'U';
   const go = (path) => { navigate(path); if (isMobile) setNavOpen(false); };
 

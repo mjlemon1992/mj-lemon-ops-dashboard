@@ -51,12 +51,14 @@ function requireRole(...roles) {
   };
 }
 
-// Location scoping: owner/partner see every location; a manager only their own.
-// Any manager-accessible route that touches a locationId MUST check this first.
+// Location scoping: owner/partner see every location; a manager or advisor only
+// their own. Any such route that touches a locationId MUST check this first.
+// (An advisor's ROUTE access is far narrower than a manager's — this only
+// answers "which location", the requireRole allow-lists answer "which routes".)
 function canAccessLocation(user, locationId) {
   if (!user) return false;
   if (['owner', 'partner'].includes(user.role)) return true;
-  return user.role === 'manager' && !!user.location_id && user.location_id === locationId;
+  return ['manager', 'advisor'].includes(user.role) && !!user.location_id && user.location_id === locationId;
 }
 
 module.exports = { authenticateToken, syncAuth, requireOwner, requireOwnerOrPartner, requireRole, canAccessLocation, JWT_SECRET };
