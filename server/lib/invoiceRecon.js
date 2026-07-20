@@ -58,6 +58,73 @@ async function extractInvoice(fileBase64, mediaType) {
   };
 }
 
+// AI-extract a monthly vendor STATEMENT — the list of every invoice the supplier
+// billed us in the period — via Claude vision + forced tool call. Statements can
+// be long (many rows), so give it room.
+async function extractStatement(fileBase64, mediaType) {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error('ANTHROPIC_API_KEY not configured');
+  const isPdf = /pdf/i.test(mediaType || '');
+  const block = isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileBase64 } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType || 'image/jpeg', data: fileBase64 } };
+  const tool = {
+    name: 'record_statement',
+    description: 'Record the list of invoices from a monthly vendor/supplier account STATEMENT.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vendor: { type: 'string', description: 'Supplier/vendor business name on the statement' },
+        statement_date: { type: 'string', description: 'Statement date as YYYY-MM-DD' },
+        period: { type: 'string', description: 'Statement period label, e.g. "June 2026"' },
+        total: { type: 'number', description: 'Statement grand total / balance in dollars, if shown' },
+        invoices: {
+          type: 'array',
+          description: 'One entry per INVOICE line on the statement. Include only invoices/charges — skip payment, credit, and running-balance rows.',
+          items: {
+            type: 'object',
+            properties: {
+              invoice_number: { type: 'string', description: 'The invoice/document number' },
+              invoice_date: { type: 'string', description: 'Date as YYYY-MM-DD' },
+              amount: { type: 'number', description: 'Invoice amount in dollars (the charge, positive)' },
+            },
+            required: ['invoice_number'],
+          },
+        },
+      },
+      required: ['vendor', 'invoices'],
+    },
+  };
+  const headers = { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
+  if (isPdf) headers['anthropic-beta'] = 'pdfs-2024-09-25';
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6', max_tokens: 8000,
+      tool_choice: { type: 'tool', name: 'record_statement' }, tools: [tool],
+      messages: [{ role: 'user', content: [block, { type: 'text', text: 'This is a monthly account statement from a parts supplier. List every INVOICE it shows (number, date, amount in dollars). Skip payment, credit, finance-charge, and balance-forward rows — only actual invoices.' }] }],
+    }),
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error(`statement extract ${r.status}: ${t.slice(0, 200)}`); }
+  const j = await r.json();
+  const use = (j.content || []).find((c) => c.type === 'tool_use');
+  if (!use) throw new Error('No structured statement extraction returned');
+  const x = use.input || {};
+  const invoices = (Array.isArray(x.invoices) ? x.invoices : []).map((it) => ({
+    invoice_number: (it.invoice_number || '').toString().trim() || null,
+    invoice_date: /^\d{4}-\d{2}-\d{2}$/.test(it.invoice_date || '') ? it.invoice_date : null,
+    amount_cents: dollarsToCents(it.amount),
+  })).filter((it) => it.invoice_number || it.amount_cents != null);
+  return {
+    vendor: x.vendor || null,
+    statement_date: /^\d{4}-\d{2}-\d{2}$/.test(x.statement_date || '') ? x.statement_date : null,
+    period: (x.period || '').toString().trim() || null,
+    total_cents: dollarsToCents(x.total),
+    invoices,
+    raw: x,
+  };
+}
+
 // Sum of wholesale parts cost captured on a repair order (what ShopMonkey has).
 async function roPartsCostCents(apiKey, orderId) {
   const lines = await fetchOrderService(apiKey, orderId);
@@ -111,4 +178,4 @@ function reconcile(invoicePaidCents, roCostCents) {
   return { status: 'ok', note: `Invoice ${d(invoicePaidCents)} ≈ ${d(roCostCents)} captured on the RO.` };
 }
 
-module.exports = { extractInvoice, roPartsCostCents, matchInvoiceToRo, reconcile, digits };
+module.exports = { extractInvoice, extractStatement, roPartsCostCents, matchInvoiceToRo, reconcile, digits };

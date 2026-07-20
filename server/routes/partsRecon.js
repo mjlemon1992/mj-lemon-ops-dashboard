@@ -2,7 +2,7 @@ const express = require('express');
 const { authenticateToken, requireRole, canAccessLocation, syncAuth } = require('../middleware/auth');
 const { monthStartFor, fetchInvoicedOrdersForLocation, fetchOrderService } = require('../lib/shopmonkey');
 const { ensurePartsReconTables } = require('../lib/partsReconSchema');
-const { extractInvoice, roPartsCostCents, matchInvoiceToRo, reconcile } = require('../lib/invoiceRecon');
+const { extractInvoice, extractStatement, roPartsCostCents, matchInvoiceToRo, reconcile, digits } = require('../lib/invoiceRecon');
 const { fetchInvoiceEmails, markSeen } = require('../lib/invoiceInbox');
 
 // Parts reconciliation — v1a: ShopMonkey-only parts margin / exposure per RO.
@@ -205,20 +205,43 @@ module.exports = (pool) => {
   });
 
   // ══ SCAN FRONT DOOR — pull scanned invoices out of an email inbox ══════════
-  // ScanSnap "scan to email" → an OPS inbox → this reads the PDF/image
+  // Each location has its own dedicated invoices mailbox, so mail routes to the
+  // right shop's books + dashboard location with no tagging. ScanSnap "scan to
+  // email" / forwarded supplier PDFs → that mailbox → this reads the PDF/image
   // attachments, runs each through the same extract→match→reconcile pipeline,
   // and marks the email read. Config (all env, dark until set):
-  //   PARTS_IMAP_USER / PARTS_IMAP_PASS  dedicated invoice inbox (preferred), OR
+  //   PARTS_INBOX_MAP  JSON, per location (preferred, multi-shop):
+  //     [{"location":"<dash-loc-id>","user":"reddeer-invoices@…","pass":"<app-pw>"}]
+  //   —or— single-location fallback:
+  //   PARTS_IMAP_USER / PARTS_IMAP_PASS  dedicated invoice inbox, OR
   //   GMAIL_IMAP_USER / GMAIL_IMAP_PASS  the shared hub inbox — but then a
   //   PARTS_INTAKE_SUBJECT_TAG is REQUIRED so we only touch tagged scans and
   //   never hoover unrelated attachments out of the hub.
+  const parseInboxMap = () => { try { const m = JSON.parse(process.env.PARTS_INBOX_MAP || '[]'); return Array.isArray(m) ? m : []; } catch (e) { return []; } };
+  // Resolve the mailbox creds + subject filter for one location. A per-location
+  // map entry is a dedicated mailbox by definition (no tag needed).
+  const inboxConfigFor = (locationId) => {
+    const hit = parseInboxMap().find((m) => m && m.location === locationId);
+    if (hit && hit.user && hit.pass) return { user: hit.user, pass: hit.pass, tag: (hit.tag || '').trim(), dedicated: true };
+    return {
+      user: process.env.PARTS_IMAP_USER || process.env.GMAIL_IMAP_USER,
+      pass: process.env.PARTS_IMAP_PASS || process.env.GMAIL_IMAP_PASS,
+      tag: (process.env.PARTS_INTAKE_SUBJECT_TAG || '').trim(),
+      dedicated: !!(process.env.PARTS_IMAP_USER && process.env.PARTS_IMAP_PASS),
+    };
+  };
+  // Locations the always-on poller should sweep: every mapped location, else the
+  // single fallback location.
+  const pollLocations = () => {
+    const mapped = parseInboxMap().map((m) => m && m.location).filter(Boolean);
+    if (mapped.length) return mapped;
+    return process.env.PARTS_INBOX_LOCATION ? [process.env.PARTS_INBOX_LOCATION] : [];
+  };
+
   const scanInboxInto = async (locationId) => {
-    const user = process.env.PARTS_IMAP_USER || process.env.GMAIL_IMAP_USER;
-    const pass = process.env.PARTS_IMAP_PASS || process.env.GMAIL_IMAP_PASS;
-    const tag = (process.env.PARTS_INTAKE_SUBJECT_TAG || '').trim();
-    const dedicated = !!(process.env.PARTS_IMAP_USER && process.env.PARTS_IMAP_PASS);
-    if (!user || !pass) return { ok: false, error: 'Invoice inbox not configured (set PARTS_IMAP_USER/PASS or GMAIL_IMAP_USER/PASS)', processed: 0, results: [] };
-    if (!dedicated && !tag) return { ok: false, error: 'Refusing to scan the shared inbox without a filter — set PARTS_INTAKE_SUBJECT_TAG, or use a dedicated PARTS_IMAP_USER/PASS inbox', processed: 0, results: [] };
+    const { user, pass, tag, dedicated } = inboxConfigFor(locationId);
+    if (!user || !pass) return { ok: false, error: 'Invoice inbox not configured for this location (set PARTS_INBOX_MAP, or PARTS_IMAP_USER/PASS)', processed: 0, results: [] };
+    if (!dedicated && !tag) return { ok: false, error: 'Refusing to scan the shared inbox without a filter — set PARTS_INTAKE_SUBJECT_TAG, or use a dedicated mailbox (PARTS_INBOX_MAP / PARTS_IMAP_USER/PASS)', processed: 0, results: [] };
     const { rows } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [locationId]);
     if (!rows.length) return { ok: false, error: 'Location not found', processed: 0, results: [] };
     const smLoc = rows[0].shopmonkey_location_id;
@@ -253,6 +276,93 @@ module.exports = (pool) => {
       const out = await scanInboxInto(req.params.locationId);
       if (!out.ok) return fail(res, out.error, 400);
       res.json(out);
+    } catch (e) { fail(res, e); }
+  });
+
+  // ══ v1c — MONTH-END STATEMENT RECONCILIATION ═══════════════════════════════
+  // A supplier's statement lists every invoice they billed. Match each line to
+  // the invoices we captured (vendor_invoice) and surface the ones we're MISSING
+  // — never received/entered — the likeliest hiding spot for an unbilled part.
+  const normNum = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const reconcileStatement = async (locationId, ex) => {
+    const { rows: captured } = await pool.query(
+      `SELECT id, invoice_number, total_cents, invoice_date::text AS invoice_date, matched_order_number, match_status
+         FROM vendor_invoice WHERE location_id=$1`, [locationId]);
+    const byNum = new Map(), byDig = new Map();
+    for (const c of captured) {
+      const n = normNum(c.invoice_number); if (n && !byNum.has(n)) byNum.set(n, c);
+      const d = digits(c.invoice_number); if (d && !byDig.has(d)) byDig.set(d, c);
+    }
+    const claimed = new Set();
+    const lines = (ex.invoices || []).map((li) => {
+      const n = normNum(li.invoice_number), d = digits(li.invoice_number);
+      let c = (n && byNum.get(n)) || (d && byDig.get(d)) || null;
+      // Number didn't match — try an exact-amount match not already claimed.
+      if (!c && li.amount_cents != null) c = captured.find((x) => !claimed.has(x.id) && x.total_cents != null && Math.abs(x.total_cents - li.amount_cents) <= 50) || null;
+      let status = 'missing', matched_invoice_id = null, captured_cents = null, on_ro = null;
+      if (c) {
+        claimed.add(c.id); matched_invoice_id = c.id; captured_cents = c.total_cents;
+        on_ro = c.matched_order_number || null;
+        const tol = Math.max(100, Math.round((li.amount_cents || 0) * 0.01));
+        const amtOk = li.amount_cents == null || c.total_cents == null || Math.abs(c.total_cents - li.amount_cents) <= tol;
+        status = amtOk ? 'have' : 'amount_mismatch';
+      }
+      return { invoice_number: li.invoice_number, invoice_date: li.invoice_date, amount_cents: li.amount_cents, status, matched_invoice_id, captured_cents, on_ro };
+    });
+    const missing = lines.filter((l) => l.status === 'missing');
+    const mismatch = lines.filter((l) => l.status === 'amount_mismatch');
+    const found = lines.filter((l) => l.status === 'have');
+    return { lines, found_count: found.length, missing_count: missing.length, mismatch_count: mismatch.length, missing, mismatch };
+  };
+
+  // Upload/receive a statement (base64 file or pre-extracted). syncAuth so the
+  // scan pipeline can post statements the same way it posts invoices.
+  router.post('/:locationId/statement-intake', syncAuth, async (req, res) => {
+    try {
+      if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
+      await ensurePartsReconTables(pool);
+      const b = req.body || {};
+      let ex;
+      if (b.file) ex = await extractStatement(b.file, b.media_type || 'application/pdf');
+      else return fail(res, 'Provide a statement file (base64)', 400);
+      if (!ex.invoices || !ex.invoices.length) return fail(res, 'No invoices could be read off this statement', 422);
+      const rec = await reconcileStatement(req.params.locationId, ex);
+      const { rows } = await pool.query(
+        `INSERT INTO vendor_statement (location_id, vendor, statement_date, period_label, total_cents, line_count, found_count, missing_count, mismatch_count, lines, raw_extract, source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (location_id, COALESCE(vendor,''), COALESCE(statement_date, '1900-01-01'), COALESCE(total_cents,0))
+         DO UPDATE SET period_label=EXCLUDED.period_label, line_count=EXCLUDED.line_count, found_count=EXCLUDED.found_count,
+           missing_count=EXCLUDED.missing_count, mismatch_count=EXCLUDED.mismatch_count, lines=EXCLUDED.lines,
+           raw_extract=EXCLUDED.raw_extract, created_at=now()
+         RETURNING id`,
+        [req.params.locationId, ex.vendor, ex.statement_date, ex.period, ex.total_cents, ex.invoices.length,
+          rec.found_count, rec.missing_count, rec.mismatch_count, JSON.stringify(rec.lines), JSON.stringify(ex.raw || ex), b.file ? 'upload' : 'make']);
+      res.json({ ok: true, id: rows[0].id, vendor: ex.vendor, statement_date: ex.statement_date, period: ex.period,
+        line_count: ex.invoices.length, found: rec.found_count, missing: rec.missing_count, mismatch: rec.mismatch_count,
+        missing_list: rec.missing, mismatch_list: rec.mismatch });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Past statements for a location, newest first (lines inlined).
+  router.get('/:locationId/statements', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
+    try {
+      await ensurePartsReconTables(pool);
+      const { rows } = await pool.query(
+        `SELECT id, vendor, statement_date::text AS statement_date, period_label, total_cents, line_count,
+                found_count, missing_count, mismatch_count, lines, created_at
+           FROM vendor_statement WHERE location_id=$1 ORDER BY created_at DESC LIMIT 60`, [req.params.locationId]);
+      res.json({ statements: rows.map((r) => ({ ...r, total: r.total_cents != null ? r.total_cents / 100 : null })) });
+    } catch (e) { fail(res, e); }
+  });
+
+  router.delete('/statement/:id', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      const { rows } = await pool.query('SELECT location_id FROM vendor_statement WHERE id=$1', [req.params.id]);
+      if (!rows.length) return fail(res, 'Statement not found', 404);
+      if (!canAccessLocation(req.user, rows[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      await pool.query('DELETE FROM vendor_statement WHERE id=$1', [req.params.id]);
+      res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
 
@@ -335,25 +445,27 @@ module.exports = (pool) => {
   });
 
   // Always-on poller (dark until configured): every PARTS_INBOX_POLL_MIN minutes,
-  // scan the inbox and file any new scans under PARTS_INBOX_LOCATION. Single
-  // Railway instance, re-entrancy-guarded, and \Seen prevents double-ingest.
+  // sweep each configured location's inbox into that location. Single Railway
+  // instance, re-entrancy-guarded, and \Seen prevents double-ingest.
   const POLL_MIN = Number(process.env.PARTS_INBOX_POLL_MIN || 0);
-  const POLL_LOC = process.env.PARTS_INBOX_LOCATION || null;
-  if (POLL_MIN > 0 && POLL_LOC && (process.env.PARTS_IMAP_USER || process.env.GMAIL_IMAP_USER)) {
+  const anyInboxConfigured = !!(process.env.PARTS_INBOX_MAP || process.env.PARTS_IMAP_USER || process.env.GMAIL_IMAP_USER);
+  if (POLL_MIN > 0 && pollLocations().length && anyInboxConfigured) {
     let running = false;
     const tick = async () => {
       if (running) return;
       running = true;
       try {
-        const r = await scanInboxInto(POLL_LOC);
-        if (r && r.ok && r.processed) console.log(`[parts-inbox] filed ${r.processed} scanned invoice(s)`);
-        else if (r && !r.ok) console.warn('[parts-inbox]', r.error);
+        for (const loc of pollLocations()) {
+          const r = await scanInboxInto(loc);
+          if (r && r.ok && r.processed) console.log(`[parts-inbox] filed ${r.processed} scanned invoice(s) into ${loc}`);
+          else if (r && !r.ok) console.warn(`[parts-inbox] ${loc}:`, r.error);
+        }
       } catch (e) { console.error('[parts-inbox] poll error:', e.message); }
       finally { running = false; }
     };
     setInterval(tick, POLL_MIN * 60 * 1000).unref?.();
     setTimeout(tick, 20 * 1000).unref?.();   // first pass shortly after boot
-    console.log(`[parts-inbox] poller on — every ${POLL_MIN}m into location ${POLL_LOC}`);
+    console.log(`[parts-inbox] poller on — every ${POLL_MIN}m across ${pollLocations().length} location(s)`);
   }
 
   return router;

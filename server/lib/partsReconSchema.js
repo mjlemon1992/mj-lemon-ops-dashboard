@@ -32,6 +32,30 @@ function ensurePartsReconTables(pool) {
     await pool.query('CREATE INDEX IF NOT EXISTS idx_vinv_loc_status ON vendor_invoice (location_id, match_status, created_at DESC)');
     // De-dupe re-sent scans: same vendor+number+total for a location = one row.
     await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_vinv_dedupe ON vendor_invoice (location_id, COALESCE(vendor,''), COALESCE(invoice_number,''), COALESCE(total_cents,0))");
+
+    // v1c — month-end vendor STATEMENT reconciliation. A supplier's statement
+    // lists every invoice they billed us; we match each line against the
+    // vendor_invoice rows we captured and flag the ones we're MISSING (never
+    // received/entered) — the invoices most likely to hide an unbilled part.
+    await pool.query(`CREATE TABLE IF NOT EXISTS vendor_statement (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      location_id UUID NOT NULL,
+      vendor TEXT,
+      statement_date DATE,
+      period_label TEXT,
+      total_cents INTEGER,               -- statement grand total if shown
+      line_count INTEGER,                -- invoices listed on the statement
+      found_count INTEGER,               -- lines we have a captured invoice for
+      missing_count INTEGER,             -- lines with NO captured invoice (chase list)
+      mismatch_count INTEGER,            -- number matched but amount differs
+      lines JSONB DEFAULT '[]',          -- [{invoice_number, invoice_date, amount_cents, status, matched_invoice_id, captured_cents}]
+      raw_extract JSONB,
+      source VARCHAR(16) DEFAULT 'upload',
+      created_at TIMESTAMPTZ DEFAULT now()
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_vstmt_loc ON vendor_statement (location_id, created_at DESC)');
+    // Re-uploading the same statement refreshes it rather than duplicating.
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_vstmt_dedupe ON vendor_statement (location_id, COALESCE(vendor,''), COALESCE(statement_date, '1900-01-01'), COALESCE(total_cents,0))");
   })();
   return _init;
 }

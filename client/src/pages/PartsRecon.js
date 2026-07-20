@@ -26,11 +26,11 @@ function PartsTabs({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        {[['margin', 'Margin / exposure'], ['invoices', 'Vendor invoices']].map(([k, l]) => (
+        {[['margin', 'Margin / exposure'], ['invoices', 'Vendor invoices'], ['statements', 'Statements']].map(([k, l]) => (
           <button key={k} onClick={() => setView(k)} className={view === k ? 'primary' : ''} style={{ fontSize: '13px', padding: '7px 16px' }}>{l}</button>
         ))}
       </div>
-      {view === 'margin' ? <MarginView locId={locId} /> : <InvoicesView locId={locId} />}
+      {view === 'margin' ? <MarginView locId={locId} /> : view === 'invoices' ? <InvoicesView locId={locId} /> : <StatementsView locId={locId} />}
     </div>
   );
 }
@@ -271,6 +271,109 @@ function InvoicesView({ locId }) {
 
       <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
         <b>Possible unbilled</b> = you paid the vendor more than the parts cost captured on the matched RO — worth a look. <b>Variance</b> = RO cost exceeds this invoice (multiple invoices / matrix). Ambiguous matches: tap <b>Match RO</b> to confirm.
+      </div>
+    </div>
+  );
+}
+
+// ── Month-end statements (v1c) ───────────────────────────────────────────
+// Upload a supplier's monthly statement → AI lists every invoice it billed →
+// we flag the ones we never captured (the chase list).
+function StatementsView({ locId }) {
+  const { api } = useAuth();
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState({});
+  const load = useCallback(() => {
+    api(`/parts/${locId}/statements`).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
+  }, [api, locId]);
+  useEffect(() => { load(); }, [load]);
+
+  const upload = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+      const out = await api(`/parts/${locId}/statement-intake`, { method: 'POST', body: JSON.stringify({ file: b64, media_type: file.type || 'application/pdf' }) });
+      showToast(out.missing ? `${out.vendor || 'Statement'}: ${out.missing} of ${out.line_count} invoices MISSING` : `${out.vendor || 'Statement'}: all ${out.line_count} invoices accounted for ✓`, out.missing ? 'error' : undefined);
+      load();
+    } catch (e) { showToast(e.message, 'error'); }
+    setBusy(false);
+  };
+  const del = async (s) => {
+    if (!await askConfirm({ title: 'Remove statement', body: `Remove ${s.vendor || 'statement'} ${s.statement_date || ''}?`, danger: true, confirmLabel: 'Remove' })) return;
+    try { await api(`/parts/statement/${s.id}`, { method: 'DELETE' }); load(); } catch (e) { showToast(e.message, 'error'); }
+  };
+
+  if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
+  if (!data) return <Skeleton rows={5} height={18} />;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', flex: '1 1 260px' }}>At month-end, upload a supplier statement — it lists every invoice they billed. We flag the ones we never received or entered, so you can chase them.</div>
+        <label className="primary" style={{ fontSize: '12px', padding: '7px 14px', cursor: busy ? 'default' : 'pointer', borderRadius: '8px' }}>
+          {busy ? 'Reading…' : '＋ Upload statement'}
+          <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={busy} onChange={(e) => upload(e.target.files[0])} />
+        </label>
+      </div>
+
+      {(!data.statements || !data.statements.length) && (
+        <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '28px' }}>No statements yet. Upload a month-end supplier statement to check for missing invoices.</div>
+      )}
+
+      {(data.statements || []).map((s) => {
+        const lines = Array.isArray(s.lines) ? s.lines : [];
+        const missing = lines.filter((l) => l.status === 'missing');
+        const mismatch = lines.filter((l) => l.status === 'amount_mismatch');
+        const isOpen = !!open[s.id];
+        return (
+          <div key={s.id} className="card" style={{ padding: '14px', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600 }}>{s.vendor || 'Statement'}{s.period_label ? ` · ${s.period_label}` : ''}</div>
+                <div style={{ fontSize: '12px', color: 'var(--text3)' }}>{s.statement_date || '—'} · {s.line_count} invoices{s.total != null ? ` · ${money(s.total)}` : ''}</div>
+              </div>
+              <span className="badge" style={{ background: s.missing_count ? 'rgba(255,77,77,0.12)' : 'var(--bg3)', color: s.missing_count ? 'var(--danger)' : 'var(--text2)', fontWeight: 700, padding: '4px 10px', borderRadius: '6px' }}>
+                {s.missing_count ? `${s.missing_count} MISSING` : 'ALL ACCOUNTED FOR ✓'}
+              </span>
+              {!!s.mismatch_count && <span className="badge" style={{ background: 'rgba(255,184,0,0.12)', color: 'var(--warning)', padding: '4px 10px', borderRadius: '6px', fontWeight: 600 }}>{s.mismatch_count} amount off</span>}
+              <button onClick={() => setOpen((o) => ({ ...o, [s.id]: !o[s.id] }))} style={{ fontSize: '12px' }}>{isOpen ? 'Hide' : 'Details'}</button>
+              <button onClick={() => del(s)} title="Remove" style={{ color: 'var(--danger)', border: 0, background: 'none' }}>🗑</button>
+            </div>
+            {isOpen && (
+              <div style={{ marginTop: '12px', overflowX: 'auto' }}>
+                {!missing.length && !mismatch.length
+                  ? <div style={{ fontSize: '12px', color: 'var(--text3)' }}>Every invoice on this statement is captured in the system.</div>
+                  : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                      <thead><tr style={{ textAlign: 'left', color: 'var(--text3)', borderBottom: '1px solid var(--border)' }}>
+                        <th style={th}>Invoice</th><th style={th}>Date</th><th style={{ ...th, textAlign: 'right' }}>Amount</th><th style={th}>Status</th>
+                      </tr></thead>
+                      <tbody>
+                        {[...missing, ...mismatch].map((l, i) => (
+                          <tr key={i} style={{ borderBottom: '0.5px solid var(--border)' }}>
+                            <td style={td}>{l.invoice_number || '—'}</td>
+                            <td style={td}>{fmtDate(l.invoice_date)}</td>
+                            <td style={{ ...td, textAlign: 'right' }}>{l.amount_cents != null ? money(l.amount_cents / 100) : '—'}</td>
+                            <td style={td}>
+                              {l.status === 'missing'
+                                ? <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Missing — not in system</span>
+                                : <span style={{ color: 'var(--warning)' }}>Amount off — we have {l.captured_cents != null ? money(l.captured_cents / 100) : '?'}</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
+        <b>Missing</b> = the vendor billed it but we never captured the invoice — chase it (likeliest place an unbilled part hides). <b>Amount off</b> = we have the invoice but the total doesn’t match the statement.
       </div>
     </div>
   );
