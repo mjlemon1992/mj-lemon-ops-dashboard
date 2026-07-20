@@ -186,7 +186,8 @@ function InvoicesView({ locId }) {
     try {
       const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
       const out = await api(`/parts/${locId}/invoice-intake`, { method: 'POST', body: JSON.stringify({ file: b64, media_type: file.type || 'image/jpeg' }) });
-      showToast(`Read: ${out.extracted?.vendor || '?'} · RO ${out.matched_order_number || out.extracted?.ro_ref || '—'} · ${out.recon_status}`);
+      if (out.type === 'statement') showToast(`That was a statement — ${out.vendor || 'vendor'}: ${out.missing} of ${out.line_count} invoices missing. See the Statements tab.`, out.missing ? 'error' : undefined);
+      else showToast(`Read: ${out.extracted?.vendor || '?'} · RO ${out.matched_order_number || out.extracted?.ro_ref || '—'} · ${out.recon_status}`);
       load();
     } catch (e) { showToast(e.message, 'error'); }
     setBusy(false);
@@ -217,7 +218,7 @@ function InvoicesView({ locId }) {
     setScanning(true);
     try {
       const out = await api(`/parts/${locId}/scan-inbox`, { method: 'POST', body: JSON.stringify({}) });
-      showToast(out.processed ? `Filed ${out.processed} scanned invoice${out.processed === 1 ? '' : 's'} from email` : 'No new scanned invoices in the inbox');
+      showToast(out.processed ? `Filed ${out.processed} document${out.processed === 1 ? '' : 's'} from email (invoices + statements)` : 'No new documents in the inbox');
       load();
     } catch (e) { showToast(e.message, 'error'); }
     setScanning(false);

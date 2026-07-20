@@ -185,22 +185,22 @@ module.exports = (pool) => {
       if (!smLoc) return fail(res, 'Location not connected to Shopmonkey', 400);
       const apiKey = process.env.SHOPMONKEY_API_KEY;
       const b = req.body || {};
-      let ex;
       if (b.file) {
-        ex = await extractInvoice(b.file, b.media_type || 'image/jpeg');
-      } else {
-        ex = {
-          vendor: b.vendor || null, invoice_number: b.invoice_number || null,
-          invoice_date: /^\d{4}-\d{2}-\d{2}$/.test(b.invoice_date || '') ? b.invoice_date : null,
-          subtotal_cents: b.subtotal != null ? Math.round(Number(b.subtotal) * 100) : null,
-          total_cents: b.total != null ? Math.round(Number(b.total) * 100) : null,
-          ro_ref: (b.ro_ref || '').toString().trim() || null,
-          line_items: Array.isArray(b.line_items) ? b.line_items : [], raw: b,
-        };
-        if (ex.total_cents == null && ex.subtotal_cents == null) return fail(res, 'Provide a file, or vendor + total (+ ro_ref)', 400);
+        // Auto-routes invoice vs statement (is_statement flag from the extractor).
+        const out = await ingestFile(req.params.locationId, smLoc, apiKey, b.file, b.media_type || 'image/jpeg', 'upload');
+        return res.json({ ok: true, ...out });
       }
-      const out = await processInvoice(req.params.locationId, smLoc, apiKey, ex, b.file ? 'upload' : (b.source || 'make'));
-      res.json({ ok: true, extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out });
+      const ex = {
+        vendor: b.vendor || null, invoice_number: b.invoice_number || null,
+        invoice_date: /^\d{4}-\d{2}-\d{2}$/.test(b.invoice_date || '') ? b.invoice_date : null,
+        subtotal_cents: b.subtotal != null ? Math.round(Number(b.subtotal) * 100) : null,
+        total_cents: b.total != null ? Math.round(Number(b.total) * 100) : null,
+        ro_ref: (b.ro_ref || '').toString().trim() || null,
+        line_items: Array.isArray(b.line_items) ? b.line_items : [], raw: b,
+      };
+      if (ex.total_cents == null && ex.subtotal_cents == null) return fail(res, 'Provide a file, or vendor + total (+ ro_ref)', 400);
+      const out = await processInvoice(req.params.locationId, smLoc, apiKey, ex, b.source || 'make');
+      res.json({ ok: true, type: 'invoice', extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out });
     } catch (e) { fail(res, e); }
   });
 
@@ -257,9 +257,9 @@ module.exports = (pool) => {
       let ok = false;
       for (const att of msg.attachments) {
         try {
-          const ex = await extractInvoice(att.base64, att.mediaType);
-          const out = await processInvoice(locationId, smLoc, apiKey, ex, 'email');
-          results.push({ from: msg.from, file: att.filename, vendor: out.vendor, ro_ref: out.ro_ref, match_status: out.match_status, recon_status: out.recon_status });
+          const out = await ingestFile(locationId, smLoc, apiKey, att.base64, att.mediaType, 'email');
+          if (out.type === 'statement') results.push({ from: msg.from, file: att.filename, type: 'statement', vendor: out.vendor, line_count: out.line_count, missing: out.missing });
+          else results.push({ from: msg.from, file: att.filename, type: 'invoice', vendor: out.vendor, ro_ref: out.ro_ref, match_status: out.match_status, recon_status: out.recon_status });
           ok = true;
         } catch (e) { results.push({ from: msg.from, file: att.filename, error: String(e.message || e) }); }
       }
@@ -315,6 +315,41 @@ module.exports = (pool) => {
     return { lines, found_count: found.length, missing_count: missing.length, mismatch_count: mismatch.length, missing, mismatch };
   };
 
+  // Upsert a statement + its reconciliation; returns the summary.
+  const saveStatement = async (locationId, sx, rec, source) => {
+    const { rows } = await pool.query(
+      `INSERT INTO vendor_statement (location_id, vendor, statement_date, period_label, total_cents, line_count, found_count, missing_count, mismatch_count, lines, raw_extract, source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (location_id, COALESCE(vendor,''), COALESCE(statement_date, '1900-01-01'), COALESCE(total_cents,0))
+       DO UPDATE SET period_label=EXCLUDED.period_label, line_count=EXCLUDED.line_count, found_count=EXCLUDED.found_count,
+         missing_count=EXCLUDED.missing_count, mismatch_count=EXCLUDED.mismatch_count, lines=EXCLUDED.lines,
+         raw_extract=EXCLUDED.raw_extract, created_at=now()
+       RETURNING id`,
+      [locationId, sx.vendor, sx.statement_date, sx.period, sx.total_cents, sx.invoices.length,
+        rec.found_count, rec.missing_count, rec.mismatch_count, JSON.stringify(rec.lines), JSON.stringify(sx.raw || sx), source]);
+    return { id: rows[0].id, vendor: sx.vendor, statement_date: sx.statement_date, period: sx.period,
+      line_count: sx.invoices.length, found: rec.found_count, missing: rec.missing_count, mismatch: rec.mismatch_count,
+      missing_list: rec.missing, mismatch_list: rec.mismatch };
+  };
+
+  // Ingest one attachment/file, auto-routing invoice vs statement. The invoice
+  // extractor flags is_statement (content-based, no reliance on subject/filename)
+  // so you can email either kind to the same mailbox and it files correctly.
+  const ingestFile = async (locationId, smLoc, apiKey, fileBase64, mediaType, source) => {
+    const ex = await extractInvoice(fileBase64, mediaType);
+    if (ex.is_statement) {
+      const sx = await extractStatement(fileBase64, mediaType);
+      if (sx.invoices && sx.invoices.length) {
+        const rec = await reconcileStatement(locationId, sx);
+        const s = await saveStatement(locationId, sx, rec, source);
+        return { type: 'statement', ...s };
+      }
+      // Looked like a statement but nothing parsed — fall back to invoice.
+    }
+    const out = await processInvoice(locationId, smLoc, apiKey, ex, source);
+    return { type: 'invoice', extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out };
+  };
+
   // Upload/receive a statement (base64 file or pre-extracted). syncAuth so the
   // scan pipeline can post statements the same way it posts invoices.
   router.post('/:locationId/statement-intake', syncAuth, async (req, res) => {
@@ -322,24 +357,12 @@ module.exports = (pool) => {
       if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
       await ensurePartsReconTables(pool);
       const b = req.body || {};
-      let ex;
-      if (b.file) ex = await extractStatement(b.file, b.media_type || 'application/pdf');
-      else return fail(res, 'Provide a statement file (base64)', 400);
-      if (!ex.invoices || !ex.invoices.length) return fail(res, 'No invoices could be read off this statement', 422);
-      const rec = await reconcileStatement(req.params.locationId, ex);
-      const { rows } = await pool.query(
-        `INSERT INTO vendor_statement (location_id, vendor, statement_date, period_label, total_cents, line_count, found_count, missing_count, mismatch_count, lines, raw_extract, source)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-         ON CONFLICT (location_id, COALESCE(vendor,''), COALESCE(statement_date, '1900-01-01'), COALESCE(total_cents,0))
-         DO UPDATE SET period_label=EXCLUDED.period_label, line_count=EXCLUDED.line_count, found_count=EXCLUDED.found_count,
-           missing_count=EXCLUDED.missing_count, mismatch_count=EXCLUDED.mismatch_count, lines=EXCLUDED.lines,
-           raw_extract=EXCLUDED.raw_extract, created_at=now()
-         RETURNING id`,
-        [req.params.locationId, ex.vendor, ex.statement_date, ex.period, ex.total_cents, ex.invoices.length,
-          rec.found_count, rec.missing_count, rec.mismatch_count, JSON.stringify(rec.lines), JSON.stringify(ex.raw || ex), b.file ? 'upload' : 'make']);
-      res.json({ ok: true, id: rows[0].id, vendor: ex.vendor, statement_date: ex.statement_date, period: ex.period,
-        line_count: ex.invoices.length, found: rec.found_count, missing: rec.missing_count, mismatch: rec.mismatch_count,
-        missing_list: rec.missing, mismatch_list: rec.mismatch });
+      if (!b.file) return fail(res, 'Provide a statement file (base64)', 400);
+      const sx = await extractStatement(b.file, b.media_type || 'application/pdf');
+      if (!sx.invoices || !sx.invoices.length) return fail(res, 'No invoices could be read off this statement', 422);
+      const rec = await reconcileStatement(req.params.locationId, sx);
+      const s = await saveStatement(req.params.locationId, sx, rec, b.file ? 'upload' : 'make');
+      res.json({ ok: true, ...s });
     } catch (e) { fail(res, e); }
   });
 
