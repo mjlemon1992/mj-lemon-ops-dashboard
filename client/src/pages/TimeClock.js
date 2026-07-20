@@ -322,7 +322,6 @@ function ClockAdmin({ locId }) {
 
   const pending = ((timeoff || {}).requests || []).filter((r) => r.status === 'pending');
   const answeredFu = followups.filter((f) => f.status === 'answered');
-  const pendingFu = followups.filter((f) => f.status === 'pending');
   const upcoming = ((timeoff || {}).requests || []).filter((r) => r.status === 'approved' && r.end_date >= new Date().toISOString().slice(0, 10));
   const totals = (timeoff || {}).totals || {};
 
