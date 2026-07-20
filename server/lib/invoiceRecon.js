@@ -72,10 +72,15 @@ async function matchInvoiceToRo(apiKey, smLocationId, { ro_ref, invoice_date }) 
   const ref = digits(ro_ref);
   if (!ref) return { status: 'unmatched', candidates: [] };
   const invDate = invoice_date ? new Date(invoice_date + 'T12:00:00Z') : new Date();
-  const since = new Date(invDate.getTime() - 90 * 86400000);
-  let orders;
-  try { orders = await fetchInvoicedOrdersForLocation(apiKey, smLocationId, since); }
-  catch (e) { return { status: 'unmatched', candidates: [], error: e.message }; }
+  const since = new Date(invDate.getTime() - 45 * 86400000);   // invoices land within weeks of the RO
+  // The lookup is a live ShopMonkey sweep and can transiently throttle — retry
+  // a couple of times before giving up (so a scan hiccup doesn't strand a match).
+  let orders, lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { orders = await fetchInvoicedOrdersForLocation(apiKey, smLocationId, since); lastErr = null; break; }
+    catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 600 * (attempt + 1))); }
+  }
+  if (lastErr) return { status: 'unmatched', candidates: [], error: lastErr.message };
   const last4 = ref.slice(-4);
   const exact = orders.filter((o) => digits(o.number) === ref);
   const pool = exact.length ? exact : orders.filter((o) => digits(o.number).endsWith(last4));

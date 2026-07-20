@@ -192,8 +192,15 @@ function InvoicesView({ locId }) {
     setBusy(false);
   };
   const pickMatch = async (inv) => {
-    const cands = inv.match_candidates || [];
-    if (!cands.length) { showToast('No candidate ROs for that reference', 'error'); return; }
+    // Re-scan first — refreshes candidates after a transient scan miss and
+    // auto-matches when it's unambiguous.
+    let cands = inv.match_candidates || [];
+    try {
+      const rm = await api(`/parts/invoice/${inv.id}/rematch`, { method: 'PUT', body: JSON.stringify({}) });
+      cands = rm.candidates || [];
+      if (rm.match_status === 'matched') { showToast(`Matched RO ${rm.matched_order_number} — ${rm.recon_status}`); load(); return; }
+    } catch (e) { showToast(e.message, 'error'); return; }
+    if (!cands.length) { showToast('No candidate ROs for that reference — check the number on the invoice', 'error'); load(); return; }
     const body = cands.map((c, i) => `${i + 1} = RO ${c.order_number} (${c.day_gap} days from the invoice)`).join('\n');
     const pick = await askInput({ title: `Which RO is this ${inv.vendor || 'invoice'}?`, body, label: 'Number' });
     const c = cands[Number(pick) - 1];
