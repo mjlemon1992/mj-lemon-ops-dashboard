@@ -368,7 +368,40 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
     if (f) onPick(f);
   };
 
-  const regen = async (id) => {
+  // Regenerate a draft. For a POSTER (we tagged it "<type> poster" at intake and
+  // image gen is available) this makes a NEW hero picture — flipping the photo
+  // engine (OpenAI <-> Gemini) so you can compare — re-overlays fresh copy, and
+  // replaces the stored image. For an uploaded floor photo (or if image gen is
+  // off) there's no picture to redraw, so it just re-writes the captions.
+  const regen = async (post) => {
+    const id = post.id;
+    const m = post.note && /^(seasonal|educational|testimonial) poster$/.exec(String(post.note).trim());
+    if (m && imageGen) {
+      const ptype = m[1];
+      setBusy(s => ({ ...s, [id]: true })); setErr(null); setNotice('Drawing a new picture… (this can take ~15s)');
+      try {
+        const copyData = await api('/marketing/posts/poster-copy', { method: 'POST', body: JSON.stringify({ type: ptype, topic: '' }) });
+        let bg = null, usedProvider = null;
+        try {
+          const q = imgProvider ? `?provider=${imgProvider}` : '';
+          const im = await api(`/marketing/posts/poster-image${q}`, { method: 'POST', body: JSON.stringify({ type: ptype, topic: '' }) });
+          bg = (im && im.image) || null; usedProvider = im && im.provider;
+        } catch (e) { /* fall back to flat template */ }
+        const blob = await renderPoster({ type: ptype, ...copyData, locName, bg });
+        const res = await fetch(`/api/marketing/posts/post/${id}/replace-image?recap=1`, {
+          method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: `Bearer ${token}` }, body: blob,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not replace the picture');
+        if (usedProvider) setImgProvider(usedProvider === 'openai' ? 'gemini' : 'openai');
+        const nextName = usedProvider === 'openai' ? 'Gemini' : 'OpenAI';
+        const art = usedProvider ? ` — art by ${usedProvider === 'openai' ? 'OpenAI' : 'Gemini'}; regenerate again to try ${nextName}` : '';
+        setNotice(`New picture created${art}.`);
+        refresh();
+      } catch (e) { setErr(String(e.message || e)); setNotice(null); }
+      finally { setBusy(s => { const n = { ...s }; delete n[id]; return n; }); }
+      return;
+    }
     setBusy(s => ({ ...s, [id]: true })); setErr(null);
     try { await api(`/marketing/posts/post/${id}/regenerate`, { method: 'POST' }); refresh(); }
     catch (e) { setErr(String(e.message || e)); }
@@ -600,7 +633,15 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
               <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '11px 14px', borderTop: '0.5px solid var(--border)', background: 'var(--bg3)' }}>
                 <button className="primary" onClick={() => act(p.id, 'approve')}>Approve</button>
                 {dirty && <button onClick={() => saveEdits(p.id)}>Save edits</button>}
-                <button onClick={() => regen(p.id)} disabled={!!busy[p.id]}>{busy[p.id] ? 'Regenerating…' : '✨ Regenerate'}</button>
+                {(() => {
+                  const isPoster = imageGen && p.note && /^(seasonal|educational|testimonial) poster$/.test(String(p.note).trim());
+                  return (
+                    <button onClick={() => regen(p)} disabled={!!busy[p.id]}
+                      title={isPoster ? 'New picture (flips the photo engine so you can compare)' : 'Re-write the captions'}>
+                      {busy[p.id] ? (isPoster ? 'Drawing…' : 'Regenerating…') : (isPoster ? '🎨 New picture' : '✨ Regenerate')}
+                    </button>
+                  );
+                })()}
                 <button onClick={() => download(p)}>⬇ Image</button>
                 <span style={{ marginLeft: 'auto' }} />
                 <span className="badge neutral">{p.location_name}</span>

@@ -529,6 +529,38 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
+  // Replace a draft's stored image with a freshly rendered one (poster "new
+  // picture" — the client re-renders with a new hero photo and posts it here).
+  // Raw image body like intake. ?recap=1 also re-writes captions from the new
+  // image (the overlaid copy changed, so the old captions no longer match).
+  router.post('/post/:postId/replace-image',
+    ...gate, postGuard,
+    express.raw({ type: ['image/*', 'application/octet-stream'], limit: '30mb' }),
+    async (req, res) => {
+      try {
+        await ensureTables();
+        if (!Buffer.isBuffer(req.body) || !req.body.length)
+          return res.status(400).json({ error: 'No image body. POST the picture with Content-Type: image/jpeg.' });
+        let mime = (req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        if (mime === 'application/octet-stream') mime = 'image/jpeg';
+        if (!OK_MIME.includes(mime)) return res.status(415).json({ error: `Unsupported image type "${mime}".` });
+        const { rows } = await pool.query('SELECT location_id, note FROM marketing_post WHERE id=$1 AND deleted_at IS NULL', [req.params.postId]);
+        if (!rows.length) return res.status(404).json({ error: 'Post not found' });
+        await pool.query('UPDATE marketing_post SET image_data=$1, image_mime=$2 WHERE id=$3', [req.body, mime, req.params.postId]);
+        await audit(req.params.postId, rows[0].location_id, 'image_replaced', actorOf(req), null);
+        let captionError = null;
+        if (req.query.recap === '1') {
+          try {
+            const caps = await generate(req.body.toString('base64'), mime, rows[0].note || '');
+            await pool.query('UPDATE marketing_post SET caption_ig=$1, caption_fb=$2, caption_gbp=$3 WHERE id=$4',
+              [caps.ig, caps.fb, caps.gbp, req.params.postId]);
+          } catch (e) { captionError = String(e.message || e); }
+        }
+        res.json({ ok: true, captionError });
+      } catch (e) { fail(res, e); }
+    }
+  );
+
   // Generate poster/ad COPY (headline/subline/cta). The client renders it into a
   // branded template and uploads the result as a normal image draft.
   const POSTER_SYSTEM = `You write copy for a BRANDED POSTER / social ad for a transmission repair shop
