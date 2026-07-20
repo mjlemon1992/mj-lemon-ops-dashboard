@@ -6,6 +6,18 @@ const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error('JWT_SECRET environment variable is required');
 
+// ADVISOR FIREWALL — enforced at the auth choke point, not per-route. The
+// advisor role exists for exactly one job (the re-order board), and several
+// older routes are authenticateToken-only with no role list; an allow-list
+// here means a new or forgotten route can never leak revenue/profit/payroll
+// to an advisor. Everything not matched 403s regardless of the route's guard.
+const ADVISOR_ALLOW = [
+  /^\/api\/auth\//,                        // login/me/change-password
+  /^\/api\/locations\/?$/,                 // scoped list (writes are owner-gated)
+  /^\/api\/clock\/[^/]+\/reorders$/,       // their board
+  /^\/api\/clock\/reorder\/[^/]+$/,        // mark ordered / received
+];
+
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -13,6 +25,12 @@ function authenticateToken(req, res, next) {
   try {
     const user = jwt.verify(token, JWT_SECRET);
     req.user = user;
+    if (user.role === 'advisor') {
+      const path = (req.originalUrl || '').split('?')[0];
+      if (!ADVISOR_ALLOW.some((rx) => rx.test(path))) {
+        return res.status(403).json({ error: 'Not available to the advisor role' });
+      }
+    }
     next();
   } catch {
     return res.status(403).json({ error: 'Invalid or expired token' });
