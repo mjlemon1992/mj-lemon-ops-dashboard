@@ -459,7 +459,9 @@ module.exports = (pool) => {
 
   // Entries for review + correction, with computed paid hours. Accepts either
   // ?from=YYYY-MM-DD&to=YYYY-MM-DD (payroll periods) or ?month=YYYY-MM.
-  router.get('/:locationId/entries', ...authed, scoped, async (req, res) => {
+  // Advisors may READ (hours only — no wages exist in the system); corrections
+  // stay owner/partner/manager.
+  router.get('/:locationId/entries', authenticateToken, requireRole('owner', 'partner', 'manager', 'advisor'), scoped, async (req, res) => {
     try {
       await ensure();
       const { month, from, to } = req.query;
@@ -505,7 +507,8 @@ module.exports = (pool) => {
 
   // Biweekly pay periods, anchored at locations.pay_period_anchor (a period
   // start date; default 2026-01-04). Returns the current + previous N periods.
-  router.get('/:locationId/pay-periods', ...authed, scoped, async (req, res) => {
+  // Advisors read it for the Home crew-paid deck (dates only).
+  router.get('/:locationId/pay-periods', authenticateToken, requireRole('owner', 'partner', 'manager', 'advisor'), scoped, async (req, res) => {
     try {
       await ensure();
       const { rows } = await pool.query('SELECT pay_period_anchor::text AS anchor FROM locations WHERE id=$1', [req.params.locationId]);
