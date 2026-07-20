@@ -39,7 +39,12 @@ export default function Targets() {
   useEffect(() => {
     if (!selectedLoc) return;
     api(`/targets/${selectedLoc}/${year}`)
-      .then(t => { if (t.length) setTargets(t); else setTargets(DEFAULT_TARGETS); })
+      .then(rows => {
+        // Slot i is always month i+1, regardless of which months the server
+        // returned — prevents index/month drift on partial target sets.
+        const byMonth = Object.fromEntries((rows || []).map(r => [Number(r.month), r]));
+        setTargets(DEFAULT_TARGETS.map((d, i) => byMonth[i + 1] || d));
+      })
       .catch(() => setTargets(DEFAULT_TARGETS));
   }, [selectedLoc, year]);
 
