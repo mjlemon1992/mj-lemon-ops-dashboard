@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import PerLocationPage from '../components/PerLocationPage';
 import { money } from '../utils/format';
-import { Skeleton } from '../components/Feedback';
+import { Skeleton, askInput, showToast } from '../components/Feedback';
+
+const REASON_LABEL = { warranty: 'Warranty', rebilled: 'Re-billed', vendor_query: 'Vendor query', ignore: 'Ignore' };
 
 // Parts reconciliation — v1a: ShopMonkey parts margin / exposure per RO.
 // A worklist of parts paid for but not (fully) billed, worst first. The
@@ -36,12 +38,28 @@ function PartsView({ locId }) {
   }, [api, locId]);
   useEffect(() => { load(); }, [load]);
 
+  const review = async (r) => {
+    const pick = await askInput({ title: `Reviewed — ${r.part_name}`, body: 'Why is this OK / how was it handled?\n1 = Warranty\n2 = Re-billed\n3 = Vendor query\n4 = Ignore', label: 'Number (1–4)' });
+    const reason = { 1: 'warranty', 2: 'rebilled', 3: 'vendor_query', 4: 'ignore' }[String(pick || '').trim()];
+    if (!reason) return;
+    try {
+      await api(`/parts/${locId}/review`, { method: 'PUT', body: JSON.stringify({ order_id: r.order_id, part_id: r.part_id, part_number: r.part_number, part_name: r.part_name, reason }) });
+      showToast(`Reviewed — ${REASON_LABEL[reason]}`);
+      load();
+    } catch (e) { showToast(e.message, 'error'); }
+  };
+  const undo = async (r) => {
+    try { await api(`/parts/${locId}/review`, { method: 'PUT', body: JSON.stringify({ order_id: r.order_id, part_id: r.part_id, undo: true }) }); showToast('Back on the worklist'); load(); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
+
   if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
   if (!data) return <Skeleton rows={6} height={18} />;
   if (data.connected === false) return <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '32px' }}>{data.message}</div>;
 
   const s = data.summary;
-  const items = filter === 'all' ? data.items : data.items.filter((i) => i.class === filter);
+  const isReviewed = filter === 'reviewed';
+  const items = isReviewed ? (data.reviewed || []) : (filter === 'all' ? data.items : data.items.filter((i) => i.class === filter));
   const Tile = ({ label, val, color }) => (
     <div className="metric-card"><div className="metric-label">{label}</div><div className="metric-value" style={color ? { color } : {}}>{val}</div></div>
   );
@@ -65,7 +83,7 @@ function PartsView({ locId }) {
       </div>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
-        {[['all', `All flagged (${data.items.length})`], ['leak', `Leaks (${s.leak_count})`], ['under_billed', `Under-billed (${s.underbilled_count})`], ['bundled', `Bundled (${s.bundled_count})`]].map(([k, l]) => (
+        {[['all', `All flagged (${data.items.length})`], ['leak', `Leaks (${s.leak_count})`], ['under_billed', `Under-billed (${s.underbilled_count})`], ['bundled', `Bundled (${s.bundled_count})`], ['reviewed', `Reviewed (${data.reviewed_count || 0})`]].map(([k, l]) => (
           <button key={k} onClick={() => setFilter(k)} className={filter === k ? 'primary' : ''} style={{ fontSize: '12px', padding: '5px 12px' }}>{l}</button>
         ))}
       </div>
@@ -81,7 +99,7 @@ function PartsView({ locId }) {
                   <th style={th}>RO</th><th style={th}>Inv</th><th style={th}>Part</th><th style={th}>Service</th>
                   <th style={{ ...th, textAlign: 'right' }}>Qty</th><th style={{ ...th, textAlign: 'right' }}>Cost</th>
                   <th style={{ ...th, textAlign: 'right' }}>Billed</th><th style={{ ...th, textAlign: 'right' }}>Margin</th>
-                  <th style={th}>Flag</th><th style={{ ...th, textAlign: 'right' }}>Exposure</th>
+                  <th style={th}>Flag</th><th style={{ ...th, textAlign: 'right' }}>Exposure</th><th style={th}></th>
                 </tr>
               </thead>
               <tbody>
@@ -99,6 +117,19 @@ function PartsView({ locId }) {
                       <td style={{ ...td, textAlign: 'right', color: r.margin_pct == null ? 'var(--text3)' : r.margin_pct < 0 ? 'var(--danger)' : 'var(--text2)' }}>{r.margin_pct == null ? '—' : `${r.margin_pct}%`}</td>
                       <td style={td}><span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', color: c.color, background: c.bg, whiteSpace: 'nowrap' }}>{c.label}</span></td>
                       <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: r.exposure > 0 ? c.color : 'var(--text3)' }}>{r.exposure > 0 ? money(r.exposure) : '—'}</td>
+                      <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                        {isReviewed ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{REASON_LABEL[r.reason] || r.reason}</span>
+                            <button onClick={() => undo(r)} style={{ fontSize: '11px', padding: '3px 9px' }}>Undo</button>
+                          </span>
+                        ) : (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                            {r.sm_url && <a href={r.sm_url} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: 'var(--accent)', textDecoration: 'none' }}>Open ↗</a>}
+                            <button onClick={() => review(r)} style={{ fontSize: '11px', padding: '3px 9px' }}>✓ Reviewed</button>
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
