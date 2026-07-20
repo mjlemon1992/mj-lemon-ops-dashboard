@@ -225,6 +225,29 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
+  // Re-run the match for an invoice (refreshes candidates after a transient
+  // scan failure, or after the ro_ref is corrected).
+  router.put('/invoice/:id/rematch', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      await ensurePartsReconTables(pool);
+      const { rows: ir } = await pool.query('SELECT * FROM vendor_invoice WHERE id=$1', [req.params.id]);
+      if (!ir.length) return fail(res, 'Invoice not found', 404);
+      const inv = ir[0];
+      if (!canAccessLocation(req.user, inv.location_id)) return fail(res, 'Access denied for this location', 403);
+      const { rows: lr } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [inv.location_id]);
+      const smLoc = lr[0] && lr[0].shopmonkey_location_id;
+      const apiKey = process.env.SHOPMONKEY_API_KEY;
+      const ref = (req.body || {}).ro_ref != null ? String(req.body.ro_ref).trim() : inv.ro_ref;
+      const m = await matchInvoiceToRo(apiKey, smLoc, { ro_ref: ref, invoice_date: inv.invoice_date });
+      let roCost = null, orderId = null, orderNum = null;
+      if (m.status === 'matched' && m.order) { orderId = m.order.order_id; orderNum = m.order.order_number; try { roCost = await roPartsCostCents(apiKey, orderId); } catch { /* null */ } }
+      const rec = reconcile(orderId ? paidCentsOf(inv) : null, roCost);
+      await pool.query('UPDATE vendor_invoice SET ro_ref=$2, matched_order_id=$3, matched_order_number=$4, match_status=$5, match_candidates=$6, ro_parts_cost_cents=$7, recon_status=$8, recon_note=$9 WHERE id=$1',
+        [inv.id, ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, rec.status, rec.note]);
+      res.json({ ok: true, match_status: m.status, matched_order_number: orderNum, candidates: m.candidates, recon_status: rec.status });
+    } catch (e) { fail(res, e); }
+  });
+
   // Owner picks the right RO for an ambiguous/unmatched invoice (or unmatches).
   router.put('/invoice/:id/confirm-match', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
     try {
