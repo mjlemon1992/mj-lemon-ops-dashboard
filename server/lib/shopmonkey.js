@@ -65,6 +65,35 @@ async function fetchInvoicedOrdersForLocation(apiKey, smLocationId, sinceDate) {
   return filtered;
 }
 
+// Exact order lookup by its number (string — integer 400s). Cheap, 1 call.
+async function fetchOrderByNumber(apiKey, smLocationId, number) {
+  const p = new URLSearchParams({ where: JSON.stringify({ number: String(number) }), limit: '5' });
+  const r = await fetch(`${SM}/order?${p}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+  if (!r.ok) throw new Error(`order by number ${r.status}`);
+  const b = await r.json();
+  const d = Array.isArray(b.data) ? b.data : (b.data && b.data.data) || [];
+  return d.filter((o) => !o.deleted && (!o.locationId || o.locationId === smLocationId));
+}
+
+// Most-recent invoiced orders for a location (single/few pages, NOT a full
+// sweep) — used to resolve a last-4 RO ref without the heavy sweep. Sort JSON
+// (separate sort/order params are ignored and return garbage).
+async function fetchRecentInvoicedOrders(apiKey, smLocationId, limit = 150) {
+  const sort = JSON.stringify([{ name: 'invoicedDate', order: 'desc' }]);
+  const where = JSON.stringify({ invoicedDate: { gte: '2000-01-01T00:00:00.000Z' } });
+  const out = [];
+  for (let skip = 0; skip < limit; skip += 100) {
+    const p = new URLSearchParams({ where, limit: '100', skip: String(skip), sort, locationId: smLocationId });
+    const r = await fetch(`${SM}/order?${p}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+    if (!r.ok) throw new Error(`recent orders ${r.status}`);
+    const b = await r.json();
+    const batch = Array.isArray(b.data) ? b.data : (b.data && b.data.data) || [];
+    out.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return out.filter((o) => !o.deleted && o.invoicedDate && (!o.locationId || o.locationId === smLocationId));
+}
+
 // One order's service lines (each carries labors[] + parts[]). limit 100.
 async function fetchOrderService(apiKey, orderId) {
   const res = await fetch(`${SM}/order/${orderId}/service?limit=100`, {
@@ -75,4 +104,4 @@ async function fetchOrderService(apiKey, orderId) {
   return (j && j.data && j.data.data) ? j.data.data : (j.data || []);
 }
 
-module.exports = { parseShopmonkeyDate, centsToDollars, monthStartFor, sweepOrders, fetchInvoicedOrdersForLocation, fetchOrderService };
+module.exports = { parseShopmonkeyDate, centsToDollars, monthStartFor, sweepOrders, fetchInvoicedOrdersForLocation, fetchOrderService, fetchOrderByNumber, fetchRecentInvoicedOrders };
