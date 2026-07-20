@@ -123,6 +123,14 @@ export default function ClockKiosk() {
     } catch { /* board is best-effort */ }
   }, [locationId, locPin]);
   useEffect(() => { if (entered && view === 'timeoff') loadBoard(); }, [entered, view, loadBoard]);
+  // The hub's "Today" strip needs the board too — load on entry and keep it
+  // gently fresh (5 min; approvals during the day should show up unprompted).
+  useEffect(() => {
+    if (!entered) return undefined;
+    loadBoard();
+    const t = setInterval(loadBoard, 5 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [entered, loadBoard]);
 
   const loadReorder = useCallback(async () => {
     try {
@@ -751,6 +759,30 @@ export default function ClockKiosk() {
         <div style={{ ...eyebrow, marginBottom: '6px' }}>OPS · Shop floor</div>
         <div style={{ ...kh, fontSize: '30px', marginBottom: '24px' }}>Shop hub</div>
         {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', marginBottom: '16px' }}>✓ {flash}</div>}
+
+        {/* Today strip — who's away right now, closures, next stat holiday.
+            Same data as the Time Off calendar, surfaced where everyone looks. */}
+        {(() => {
+          const todayIso = new Date().toLocaleDateString('en-CA');
+          const offToday = board.filter((r) => r.status === 'approved' && r.start_date <= todayIso && r.end_date >= todayIso);
+          const closed = offToday.some((r) => r.type === 'closure');
+          const away = offToday.filter((r) => r.type !== 'closure');
+          const nextHol = (holidays || []).filter((h) => h.date >= todayIso).sort((a, b) => (a.date < b.date ? -1 : 1))[0];
+          if (!closed && !away.length && !nextHol) return null;
+          const chip = (border, color) => ({ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 600, background: 'var(--bg2)', border: `1px solid ${border}`, color });
+          return (
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', width: '100%', maxWidth: '820px', marginBottom: '18px' }}>
+              {closed && <span style={chip('var(--danger)', 'var(--danger)')}>🚪 Shop closed today</span>}
+              {away.map((r) => (
+                <span key={r.id} style={chip('rgba(255,184,0,0.5)', 'var(--warning)')}>
+                  🏖 {r.person_name.split(' ')[0]} off{r.end_date > todayIso ? ` until ${fmtDayShort(r.end_date)}` : ' today'}
+                </span>
+              ))}
+              {nextHol && <span style={chip('rgba(10,132,255,0.5)', '#5aa9ff')}>🎌 {nextHol.name} — {fmtDayShort(nextHol.date)}</span>}
+            </div>
+          );
+        })()}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '18px', width: '100%', maxWidth: '820px' }}>
           <Tile icon="🕐" title="Clock" sub={onNow ? `${onNow} on the clock now` : 'Clock in / out & breaks'} onClick={() => { setView('roster'); loadRoster(locPin); setError(''); }} accent />
           <Tile icon="📅" title="Time off" sub="Request & who's away" onClick={() => { setView('timeoff'); loadBoard(); setError(''); }} />
