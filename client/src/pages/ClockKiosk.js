@@ -91,6 +91,15 @@ export default function ClockKiosk() {
   const [reqForm, setReqForm] = useState({ person: null, start: '', end: '', type: 'vacation', pin: '', paid: true });
   const [sheet, setSheet] = useState(null);         // my-timesheet payload (keeps person+pin for requests)
   const [rfid, setRfid] = useState(null);           // { tag, person, queue } — active fob card
+  // Kiosk theme comes from the URL, not the in-app toggle (no Layout here):
+  //   /clock/<id>             → dark (default, matches the display board)
+  //   /clock/<id>?theme=light → light, for brightly-lit counters
+  // Point Fully Kiosk's start URL at whichever reads best in the shop.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('theme');
+    if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    return () => { if (t === 'light') document.documentElement.removeAttribute('data-theme'); };
+  }, []);
   const [fuHours, setFuHours] = useState('');       // follow-up answer inputs
   const [fuMins, setFuMins] = useState('');
   const [fuTook, setFuTook] = useState(null);
@@ -405,7 +414,7 @@ export default function ClockKiosk() {
       <div style={wrap}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <Avatar p={people.find((p) => p.id === active.id) || active} size={52} />
-          <div style={{ fontSize: '24px', fontWeight: 700, color: active.color || 'var(--text1)' }}>{active.name}</div>
+          <div style={{ fontSize: '24px', fontWeight: 700, color: active.color || 'var(--text)' }}>{active.name}</div>
         </div>
         <div style={{ ...pill, background: STATUS[s].bg, color: STATUS[s].color, marginTop: '8px' }}>
           {s === 'break'
@@ -453,7 +462,7 @@ export default function ClockKiosk() {
       <div style={wrap}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <Avatar p={p} size={52} />
-          <div style={{ fontSize: '24px', fontWeight: 700, color: p.color || 'var(--text1)' }}>{p.name}</div>
+          <div style={{ fontSize: '24px', fontWeight: 700, color: p.color || 'var(--text)' }}>{p.name}</div>
         </div>
 
         {q ? (
@@ -551,7 +560,7 @@ export default function ClockKiosk() {
       <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '26px' }}>
         <div style={{ ...kh, fontSize: '24px' }}>{sheet.person.name} — timesheet</div>
         <div style={{ color: 'var(--text3)', margin: '4px 0 6px' }}>
-          {fmtDay(sheet.from + 'T12:00:00')} → {fmtDay(sheet.to + 'T12:00:00')} (this pay period) · <b style={{ color: 'var(--text1)' }}>{sheet.total_paid} h paid</b>
+          {fmtDay(sheet.from + 'T12:00:00')} → {fmtDay(sheet.to + 'T12:00:00')} (this pay period) · <b style={{ color: 'var(--text)' }}>{sheet.total_paid} h paid</b>
         </div>
         {sheet.holidays && (
           <div style={{ ...pill, marginBottom: '12px',
@@ -652,7 +661,7 @@ export default function ClockKiosk() {
           {PALETTE.map((c) => (
             <button key={c} disabled={busy} onClick={() => saveProfile({ color: c })}
               style={{ width: '46px', height: '46px', borderRadius: '50%', background: c, cursor: 'pointer',
-                border: me.color === c ? '4px solid var(--text1)' : '2px solid transparent' }} aria-label={c} />
+                border: me.color === c ? '4px solid var(--text)' : '2px solid transparent' }} aria-label={c} />
           ))}
         </div>
         {error && <div style={{ color: 'var(--danger)', marginTop: '12px' }}>{error}</div>}
@@ -806,7 +815,7 @@ export default function ClockKiosk() {
                       opacity: on ? 1 : 0.62, cursor: 'pointer' }}>
                     <Avatar p={p} size={34} />
                     <span style={{ minWidth: 0 }}>
-                      <span style={{ display: 'block', fontWeight: 700, fontSize: '14px', color: p.color || 'var(--text1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name.split(' ')[0]}</span>
+                      <span style={{ display: 'block', fontWeight: 700, fontSize: '14px', color: p.color || 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name.split(' ')[0]}</span>
                       <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: st.color }}>
                         {p.status === 'on' ? `IN · ${fmtTime(p.clock_in)}` : p.status === 'break' ? `BREAK · ${fmtTime(p.since)}` : 'OUT'}
                       </span>
@@ -888,7 +897,7 @@ export default function ClockKiosk() {
             style={{ ...card, opacity: p.has_pin ? 1 : 0.5, borderColor: STATUS[p.status].color }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'center' }}>
               <Avatar p={p} size={40} />
-              <div style={{ fontSize: '18px', fontWeight: 700, color: p.color || 'var(--text1)' }}>{p.name}</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: p.color || 'var(--text)' }}>{p.name}</div>
             </div>
             <div style={{ ...pill, background: STATUS[p.status].bg, color: STATUS[p.status].color, marginTop: '8px' }}>
               {p.status === 'break'
@@ -978,10 +987,10 @@ function CalLegend() {
 
 const kh = { fontFamily: 'var(--font-disp)', textTransform: 'uppercase', letterSpacing: '0.03em', fontWeight: 700 };
 const eyebrow = { fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '10px', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)' };
-const wrap = { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', background: 'var(--bg1)', color: 'var(--text1)' };
+const wrap = { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', background: 'var(--bg)', color: 'var(--text)' };
 const lbl = { display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: 'var(--text3)' };
 const inp = { fontSize: '17px', padding: '10px' };
 const pill = { display: 'inline-block', padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 600 };
 const card = { padding: '18px', borderRadius: '14px', background: 'var(--bg2)', border: '2px solid var(--border)', cursor: 'pointer', textAlign: 'center' };
-const key = { height: '72px', fontSize: '28px', fontFamily: 'var(--font-disp)', fontWeight: 700, borderRadius: '12px', background: 'var(--bg3)', border: '1px solid var(--border)', cursor: 'pointer', color: 'var(--text1)' };
+const key = { height: '72px', fontSize: '28px', fontFamily: 'var(--font-disp)', fontWeight: 700, borderRadius: '12px', background: 'var(--bg3)', border: '1px solid var(--border)', cursor: 'pointer', color: 'var(--text)' };
 const bigBtn = { fontSize: '19px', fontFamily: 'var(--font-disp)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '12px 26px', borderRadius: '12px', minWidth: '130px' };
