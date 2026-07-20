@@ -74,10 +74,11 @@ module.exports = (pool) => {
           `SELECT location_id FROM bonus_person
             WHERE location_id = ANY($1) AND active = true AND in_bonus IS NOT FALSE
             GROUP BY location_id`, [ids]),
-        // Re-order requests still awaiting an order decision.
+        // Re-order requests still live (awaiting order, or ordered & awaiting
+        // receipt). They clear once someone marks them received.
         pool.query(
-          `SELECT id, location_id, item, qty, person_name FROM reorder_request
-            WHERE location_id = ANY($1) AND status = 'requested' ORDER BY created_at`, [ids]),
+          `SELECT id, location_id, item, qty, person_name, status FROM reorder_request
+            WHERE location_id = ANY($1) AND status IN ('requested','ordered') ORDER BY created_at`, [ids]),
       ]);
 
       // Bonus prompt: previous month with no approved (unsuperseded) run.
