@@ -67,7 +67,7 @@ function ClockAdmin({ locId }) {
   };
 
   const decide = async (r, action) => {
-    if (action === 'approve' && !await askConfirm({ title: 'Approve time off', body: `${r.person_name} — ${OFF_LABEL[r.type] || r.type}, ${fmtD(r.start_date)} to ${fmtD(r.end_date)} (${r.working_days} working day${r.working_days === 1 ? '' : 's'}).\n\nShows on the kiosk and Shopmonkey calendars; the bonus schedule adjusts so it doesn't count against them.`, confirmLabel: 'Approve' })) return;
+    if (action === 'approve' && !await askConfirm({ title: 'Approve time off', body: `${r.person_name} — ${OFF_LABEL[r.type] || r.type}, ${fmtD(r.start_date)} to ${fmtD(r.end_date)} (${r.hours} h).\n\nShows on the kiosk and Shopmonkey calendars; the bonus schedule adjusts so it doesn't count against them.`, confirmLabel: 'Approve' })) return;
     setBusy(true); setErr(null);
     try {
       const out = await api(`/clock/timeoff/${r.id}/decide`, { method: 'PUT', body: JSON.stringify({ action }) });
@@ -77,12 +77,12 @@ function ClockAdmin({ locId }) {
     } catch (e) { setErr(e.message); }
     setBusy(false);
   };
-  // Annual holiday allowance per person (working days; stat holidays excluded).
+  // Annual holiday allowance per person, in HOURS (matches QuickBooks PTO).
   const setAllowance = async (p) => {
-    const v = await askInput({ title: `Holiday allowance — ${p.name}`, body: 'Working days per year, stat holidays excluded. Leave blank for no allowance.', label: 'Days per year', initial: p.vacation_days_per_year != null ? String(p.vacation_days_per_year) : '' });
+    const v = await askInput({ title: `Holiday allowance — ${p.name}`, body: 'Paid vacation HOURS per year (e.g. 80 = two 40-hour weeks). Stat holidays are separate. Leave blank for no allowance.', label: 'Hours per year', initial: p.vacation_hours_per_year != null ? String(p.vacation_hours_per_year) : '' });
     if (v === null) return;
     setBusy(true); setErr(null);
-    try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ vacation_days_per_year: v.trim() === '' ? null : Number(v) }) }); load(); showToast(`Allowance saved for ${p.name}`); }
+    try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ vacation_hours_per_year: v.trim() === '' ? null : Number(v) }) }); load(); showToast(`Allowance saved for ${p.name}`); }
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -346,17 +346,17 @@ function ClockAdmin({ locId }) {
           {pending.map((r) => {
             // Allowance check: what would approving this vacation leave them at?
             const person = people.find((p) => p.id === r.person_id);
-            const allowance = person && person.vacation_days_per_year;
+            const allowance = person && person.vacation_hours_per_year;
             const used = ((timeoff || {}).vacation_used || {})[r.person_id] || 0;
-            const wouldBe = used + (r.working_days || 0);
+            const wouldBe = Math.round((used + (r.hours || 0)) * 10) / 10;
             const over = r.type === 'vacation' && allowance != null && wouldBe > allowance;
             return (
             <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px', marginBottom: '6px', border: over ? '1px solid var(--danger)' : 'none' }}>
               <span style={{ fontWeight: 700 }}>{r.person_name}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{OFF_LABEL[r.type] || r.type} · {fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'} = {r.hours} h</b></span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{OFF_LABEL[r.type] || r.type} · {fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.hours} h</b></span>
               {r.type === 'vacation' && allowance != null && (
                 <span style={{ fontSize: '12px', fontWeight: 700, color: over ? 'var(--danger)' : 'var(--success)' }}>
-                  {over ? `⚠ exceeds allowance by ${wouldBe - allowance} day${wouldBe - allowance === 1 ? '' : 's'} (${wouldBe}/${allowance})` : `would use ${wouldBe} of ${allowance} days`}
+                  {over ? `⚠ exceeds allowance by ${Math.round((wouldBe - allowance) * 10) / 10} h (${wouldBe}/${allowance} h)` : `would use ${wouldBe} of ${allowance} h`}
                 </span>
               )}
               {r.note && <span style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic' }}>"{r.note}"</span>}
@@ -447,12 +447,12 @@ function ClockAdmin({ locId }) {
                   {stat > 0 ? ` + ${stat} h stat` : ''}
                   {holiday > 0 ? ` + ${holiday} h paid holiday` : ''}
                   {(data.off_days || {})[p.id] ? ` · 🏖 ${data.off_days[p.id]} day${data.off_days[p.id] === 1 ? '' : 's'} off` : ''}
-                  {p.vacation_days_per_year != null
-                    ? <span style={{ color: (((timeoff || {}).vacation_used || {})[p.id] || 0) > p.vacation_days_per_year ? 'var(--danger)' : 'var(--text3)' }}> · holidays {((timeoff || {}).vacation_used || {})[p.id] || 0}/{p.vacation_days_per_year}</span>
+                  {p.vacation_hours_per_year != null
+                    ? <span style={{ color: (((timeoff || {}).vacation_used || {})[p.id] || 0) > p.vacation_hours_per_year ? 'var(--danger)' : 'var(--text3)' }}> · holidays {((timeoff || {}).vacation_used || {})[p.id] || 0}/{p.vacation_hours_per_year} h</span>
                     : (totals[p.id] ? ` · ${totals[p.id]} day${totals[p.id] === 1 ? '' : 's'} this year` : '')}
                 </div>
               </div>
-              <button onClick={() => setAllowance(p)} disabled={busy} title="Set annual holiday allowance (working days)" style={{ fontSize: '11px', padding: '4px 8px' }}><Icon name="sun" size={12} /></button>
+              <button onClick={() => setAllowance(p)} disabled={busy} title="Set annual holiday allowance (hours/year)" style={{ fontSize: '11px', padding: '4px 8px' }}><Icon name="sun" size={12} /></button>
               <button onClick={() => setPin(p)} disabled={busy} title="Set kiosk PIN" style={{ fontSize: '11px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Icon name="key" size={12} /> PIN</button>
               <button onClick={() => uploadPhoto(p)} disabled={busy} title="Upload a profile photo" style={{ fontSize: '11px', padding: '4px 8px' }}><Icon name="camera" size={12} /></button>
               <button onClick={() => setPersonActive(p, false)} disabled={busy} title="Remove from the time clock" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)', borderColor: 'rgba(255,77,77,0.4)', marginLeft: '10px' }}><Icon name="x" size={12} /></button>
@@ -558,7 +558,7 @@ function ClockAdmin({ locId }) {
           {upcoming.map((r) => (
             <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '6px 10px', borderRadius: '8px', marginBottom: '4px' }}>
               <span style={{ fontWeight: 600 }}>{r.type === 'closure' ? 'Shop closed' : r.person_name}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{r.type === 'closure' ? '' : (OFF_LABEL[r.type] || r.type) + ' · '}{fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.working_days} day{r.working_days === 1 ? '' : 's'}{r.type === 'closure' ? '' : ` = ${r.hours} h`}</b></span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{r.type === 'closure' ? '' : (OFF_LABEL[r.type] || r.type) + ' · '}{fmtD(r.start_date)} – {fmtD(r.end_date)} · <b>{r.type === 'closure' ? `${r.working_days} day${r.working_days === 1 ? '' : 's'}` : `${r.hours} h`}</b></span>
               {r.type !== 'closure' && (
                 <button disabled={busy} onClick={() => setPaidFlag(r, !(r.paid === true))}
                   style={{ fontSize: '11px', padding: '3px 10px', fontWeight: 700, color: r.paid === true ? 'var(--success)' : r.paid === false ? 'var(--text3)' : 'var(--warning)' }}>

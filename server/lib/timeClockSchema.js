@@ -48,6 +48,10 @@ function ensureTimeClockTables(pool) {
     // Annual holiday allowance in working days (stat holidays excluded — they
     // never count against it). NULL = no allowance set, no warnings.
     await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS vacation_days_per_year INTEGER');
+    // Holiday allowance is now tracked in HOURS (matches QuickBooks PTO). The
+    // days column is retained for back-compat; one-time backfill at 8h/day.
+    await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS vacation_hours_per_year NUMERIC');
+    await pool.query('UPDATE bonus_person SET vacation_hours_per_year = vacation_days_per_year * 8 WHERE vacation_hours_per_year IS NULL AND vacation_days_per_year IS NOT NULL');
     await pool.query(`CREATE TABLE IF NOT EXISTS time_clock_entry (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       location_id UUID NOT NULL,

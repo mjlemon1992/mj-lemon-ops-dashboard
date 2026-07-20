@@ -41,11 +41,12 @@ module.exports = (pool) => {
         pool.query(
           `SELECT r.id, r.location_id, r.person_id, r.type, r.paid, r.working_days,
                   r.start_date::text AS start_date, r.end_date::text AS end_date,
-                  p.name AS person_name, p.vacation_days_per_year AS allowance,
-                  (SELECT COALESCE(SUM(a.working_days), 0)::int FROM time_off_request a
+                  p.name AS person_name, p.vacation_hours_per_year AS allowance,
+                  l.weekly_hours, l.open_days,
+                  (SELECT COALESCE(SUM(a.working_days), 0) FROM time_off_request a
                     WHERE a.person_id = r.person_id AND a.status = 'approved' AND a.type = 'vacation'
-                      AND to_char(a.start_date, 'YYYY') = to_char(now(), 'YYYY')) AS vacation_used
-             FROM time_off_request r JOIN bonus_person p ON p.id = r.person_id
+                      AND to_char(a.start_date, 'YYYY') = to_char(now(), 'YYYY')) AS vacation_days_used
+             FROM time_off_request r JOIN bonus_person p ON p.id = r.person_id JOIN locations l ON l.id = r.location_id
             WHERE r.location_id = ANY($1) AND r.status = 'pending'
             ORDER BY r.requested_at`, [ids]),
         pool.query(
@@ -102,12 +103,23 @@ module.exports = (pool) => {
       push(countByLoc(edits.rows), 'edit', 'punch change', '/time-clock');
       push(Object.fromEntries(fuel.rows.map((r) => [r.location_id, r.n])), 'fuel', 'unassigned fuel purchase', '/fuel-card');
 
+      // Time-off amounts to HOURS (QuickBooks unit): working_days × per-day hours.
+      const { openDaySet } = require('../lib/workdays');
+      const toHours = (r) => {
+        const perDay = Math.round(((Number(r.weekly_hours) || 40) / openDaySet(r.open_days).size) * 100) / 100;
+        return {
+          ...r, location_name: nameOf[r.location_id],
+          hours: Math.round((r.working_days || 0) * perDay * 100) / 100,
+          allowance: r.allowance != null ? Number(r.allowance) : null,
+          vacation_used: Math.round((Number(r.vacation_days_used) || 0) * perDay * 100) / 100,
+        };
+      };
       const withName = (r) => ({ ...r, location_name: nameOf[r.location_id] });
       res.json({
         items,
         total: items.reduce((s, i) => s + i.count, 0),
         detail: {
-          timeoff: timeoff.rows.map(withName),
+          timeoff: timeoff.rows.map(toHours),
           edits: edits.rows.map(withName),
           fuel: fuel.rows.map(withName),
           bonus,

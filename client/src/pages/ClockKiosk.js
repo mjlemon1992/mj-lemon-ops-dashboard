@@ -214,7 +214,7 @@ export default function ClockKiosk() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
-      setFlash(`${f.person.name} — time off requested (${body.working_days} working day${body.working_days === 1 ? '' : 's'}), awaiting approval`);
+      setFlash(`${f.person.name} — time off requested (${body.hours} h), awaiting approval`);
       setReqForm({ person: null, start: '', end: '', type: 'vacation', pin: '', paid: true });
       setView('timeoff'); loadBoard();
       setTimeout(() => setFlash(''), 4000);
@@ -319,8 +319,8 @@ export default function ClockKiosk() {
             background: sheet.holidays.allowance != null && sheet.holidays.used >= sheet.holidays.allowance ? 'rgba(255,69,58,0.14)' : 'rgba(10,132,255,0.12)',
             color: sheet.holidays.allowance != null && sheet.holidays.used >= sheet.holidays.allowance ? 'var(--danger)' : 'var(--accent)' }}>
             🏖 Holidays this year: {sheet.holidays.allowance != null
-              ? `${sheet.holidays.used} used of ${sheet.holidays.allowance} — ${sheet.holidays.left} left`
-              : `${sheet.holidays.used} day${sheet.holidays.used === 1 ? '' : 's'} used`}
+              ? `${sheet.holidays.used} h used of ${sheet.holidays.allowance} h — ${sheet.holidays.left} h left`
+              : `${sheet.holidays.used} h used`}
           </div>
         )}
         {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', marginBottom: '10px' }}>✓ {flash}</div>}
@@ -446,7 +446,7 @@ export default function ClockKiosk() {
           {board.map((r) => (
             <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px 12px', background: 'var(--bg2)', borderRadius: '10px', marginBottom: '6px', opacity: r.status === 'pending' ? 0.65 : 1, border: r.type === 'closure' ? '1px solid var(--danger)' : 'none' }}>
               <span style={{ fontWeight: 700 }}>{r.type === 'closure' ? '🚪 Shop closed' : r.person_name}</span>
-              <span style={{ color: 'var(--text3)', fontSize: '13px' }}>{r.start_date === r.end_date ? r.start_date : `${r.start_date} → ${r.end_date}`}{r.type !== 'closure' ? ` · ${r.type}` : ''} · {r.working_days} day{r.working_days === 1 ? '' : 's'}</span>
+              <span style={{ color: 'var(--text3)', fontSize: '13px' }}>{r.start_date === r.end_date ? r.start_date : `${r.start_date} → ${r.end_date}`}{r.type !== 'closure' ? ` · ${r.type}` : ''}{r.type !== 'closure' ? ` · ${r.hours} h` : ''}</span>
               <span style={{ ...pill, marginLeft: 'auto', fontSize: '11px', background: r.status === 'approved' ? 'rgba(52,199,89,0.14)' : 'var(--bg3)', color: r.status === 'approved' ? 'var(--success)' : 'var(--text3)' }}>{r.status === 'approved' ? '✓ approved' : 'awaiting approval'}</span>
             </div>
           ))}
