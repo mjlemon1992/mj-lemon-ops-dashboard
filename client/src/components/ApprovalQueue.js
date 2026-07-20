@@ -262,6 +262,9 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
   const [posterType, setPosterType] = useState('seasonal');
   const [posterTopic, setPosterTopic] = useState('');
   const [genPoster, setGenPoster] = useState(false);
+  // Poster art alternates engines each generate so you can A/B them: first the
+  // default (OpenAI), then Gemini, then back. '' = server default on the first run.
+  const [imgProvider, setImgProvider] = useState('');
   const [ideas, setIdeas] = useState([]);
   const [ideasLoading, setIdeasLoading] = useState(false);
   const [lightbox, setLightbox] = useState(null);
@@ -395,11 +398,14 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       // AI hero art (when an OpenAI key is set) — the photographic background the
       // copy is laid over. Best-effort: if it fails or is off, fall back to the
       // flat brand template so a poster always renders.
-      let bg = null;
+      let bg = null, usedProvider = null;
       if (imageGen) {
         setNotice('Generating poster art… (this can take ~15s)');
-        try { const im = await api('/marketing/posts/poster-image', { method: 'POST', body: JSON.stringify({ type: posterType, topic: posterTopic }) }); bg = (im && im.image) || null; }
-        catch (e) { /* fall back to flat template */ }
+        try {
+          const q = imgProvider ? `?provider=${imgProvider}` : '';
+          const im = await api(`/marketing/posts/poster-image${q}`, { method: 'POST', body: JSON.stringify({ type: posterType, topic: posterTopic }) });
+          bg = (im && im.image) || null; usedProvider = im && im.provider;
+        } catch (e) { /* fall back to flat template */ }
       }
       const blob = await renderPoster({ type: posterType, ...copyData, locName, bg });
       const res = await fetch(`/api/marketing/posts/${locId}/intake?note=${encodeURIComponent(posterType + ' poster')}`, {
@@ -408,7 +414,11 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Poster upload failed');
       setPosterTopic('');
-      setNotice(data.captionError ? 'Poster created — captions failed; write them in or hit Regenerate.' : 'Poster created — it’s in the queue below.');
+      // Flip the engine for next time so a second generate gives the other one.
+      const nextName = usedProvider === 'openai' ? 'Gemini' : 'OpenAI';
+      if (usedProvider) setImgProvider(usedProvider === 'openai' ? 'gemini' : 'openai');
+      const art = usedProvider ? ` — art by ${usedProvider === 'openai' ? 'OpenAI' : 'Gemini'}; generate again to try ${nextName}` : '';
+      setNotice(data.captionError ? 'Poster created — captions failed; write them in or hit Regenerate.' : `Poster created${art}. It’s in the queue below.`);
       refresh();
     } catch (e) { setErr(String(e.message || e)); setNotice(null); }
     finally { setGenPoster(false); }
@@ -529,6 +539,11 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
             {genPoster ? 'Designing…' : '🎨 Generate poster'}
           </button>
         </div>
+        {imageGen && (
+          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '6px' }}>
+            Next photo engine: <b>{imgProvider === 'gemini' ? 'Gemini' : 'OpenAI'}</b> — each generate flips to the other so you can compare.
+          </div>
+        )}
         {ideas.length > 0 && (
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
             <span style={{ fontSize: '11px', color: 'var(--text3)', alignSelf: 'center' }}>Timely ideas — click to use:</span>
