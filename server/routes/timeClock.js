@@ -61,10 +61,12 @@ module.exports = (pool) => {
   };
   const isOpenDay = (cfg, iso) => cfg.openSet.has(edmDow(iso));
 
-  // Insert a follow-up question once per (entry, kind).
+  // Insert a follow-up question once per (entry, kind). Params are cast
+  // explicitly — each is referenced twice, so Postgres can't infer the type.
   const addFollowup = (locationId, personId, entryId, kind, workDate) => pool.query(
     `INSERT INTO clock_followup (location_id, person_id, entry_id, kind, work_date)
-       SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS (SELECT 1 FROM clock_followup WHERE entry_id=$3 AND kind=$4)`,
+       SELECT $1::uuid,$2::uuid,$3::uuid,$4::varchar,$5::date
+        WHERE NOT EXISTS (SELECT 1 FROM clock_followup WHERE entry_id=$3::uuid AND kind=$4::varchar)`,
     [locationId, personId, entryId, kind, workDate]);
 
   // Close any punch left open past its day's shift end — bounds forgotten
