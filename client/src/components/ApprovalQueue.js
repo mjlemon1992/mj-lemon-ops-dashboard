@@ -457,10 +457,31 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
     finally { setGenPoster(false); }
   };
 
-  // Ask AI for timely, seasonal poster ideas to build.
+  // Suggest ideas. For a TESTIMONIAL poster we pull the shop's real Google
+  // reviews (5★ first) and offer each as a pick — the words come straight from
+  // a real customer, never AI-invented (no fake reviews). For other types we
+  // ask the AI for timely, seasonal ideas.
+  const snippet = (t, n = 64) => { t = (t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
   const suggestIdeas = async () => {
-    setIdeasLoading(true); setErr(null);
+    setIdeasLoading(true); setErr(null); setNotice(null);
     try {
+      if (posterType === 'testimonial') {
+        if (!locId) { setErr('Pick a location first.'); setIdeas([]); return; }
+        let data;
+        try { data = await api(`/marketing/reviews/${locId}`); }
+        catch (e) { setErr('Google reviews aren’t connected for this location yet — add its Google place in settings.'); setIdeas([]); return; }
+        const all = Array.isArray(data.reviews) ? data.reviews : [];
+        const five = all.filter(r => Number(r.rating) === 5);
+        const pick = five.length ? five : all;   // fall back to 4★+ only if there are no recent 5★
+        if (!pick.length) { setErr('No recent 5★ reviews to turn into a poster yet.'); setIdeas([]); return; }
+        setIdeas(pick.map(r => ({
+          type: 'testimonial',
+          topic: r.text,
+          label: `★${r.rating} ${r.author || 'Customer'} — “${snippet(r.text)}”`,
+          why: r.text,
+        })));
+        return;
+      }
       const month = new Date().toLocaleDateString('en-CA', { month: 'long' });
       const res = await api('/marketing/posts/poster-ideas', { method: 'POST', body: JSON.stringify({ month }) });
       setIdeas(Array.isArray(res.ideas) ? res.ideas : []);
@@ -565,9 +586,12 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
             <option value="testimonial">Testimonial</option>
           </select>
           <input value={posterTopic} onChange={e => setPosterTopic(e.target.value)}
-            placeholder={posterType === 'testimonial' ? 'paste a customer quote (optional)' : 'topic / offer (optional)'}
+            placeholder={posterType === 'testimonial' ? 'a customer quote — or hit “Pull 5★ reviews”' : 'topic / offer (optional)'}
             style={{ flex: 1, minWidth: '160px' }} />
-          <button onClick={suggestIdeas} disabled={!configured || ideasLoading}>{ideasLoading ? 'Thinking…' : '💡 Suggest ideas'}</button>
+          <button onClick={suggestIdeas} disabled={!configured || ideasLoading}
+            title={posterType === 'testimonial' ? 'Pull your real 5★ Google reviews to build a testimonial poster' : 'Get timely, seasonal poster ideas'}>
+            {ideasLoading ? (posterType === 'testimonial' ? 'Fetching reviews…' : 'Thinking…') : (posterType === 'testimonial' ? '★ Pull 5★ reviews' : '💡 Suggest ideas')}
+          </button>
           <button className="primary" disabled={!configured || genPoster || !locId} onClick={makePoster}>
             {genPoster ? 'Designing…' : '🎨 Generate poster'}
           </button>
