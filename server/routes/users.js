@@ -5,6 +5,16 @@ const { authenticateToken, requireOwner } = require('../middleware/auth');
 module.exports = (pool) => {
   const router = express.Router();
 
+  // Existing databases carry the original 3-role CHECK constraint; widen it
+  // once so the advisor role can be stored (schema.sql matches for fresh DBs).
+  let _ensured = null;
+  const ensureRoles = () => {
+    if (!_ensured) _ensured = pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+      ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('owner','partner','manager','advisor'))`)
+      .catch((e) => { _ensured = null; throw e; });
+    return _ensured;
+  };
+
   router.get('/', authenticateToken, requireOwner, async (req, res) => {
     try {
       const result = await pool.query(
@@ -23,6 +33,7 @@ module.exports = (pool) => {
     // Advisors are location-scoped by definition — without one they'd see nothing.
     if (role === 'advisor' && !location_id) return res.status(400).json({ error: 'An advisor needs a location' });
     try {
+      await ensureRoles();
       const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
       if (existing.rows.length) return res.status(409).json({ error: 'Email already in use' });
       const hash = await bcrypt.hash(password, 12);
@@ -52,6 +63,7 @@ module.exports = (pool) => {
     if (role && !['owner', 'partner', 'manager', 'advisor'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
     if (role === 'advisor' && !location_id) return res.status(400).json({ error: 'An advisor needs a location' });
     try {
+      await ensureRoles();
       if ((role && role !== 'owner') || active === false) {
         const last = await lastActiveOwner(req.params.id);
         if (last) return res.status(400).json({ error: 'This is the last active owner — promote someone else to owner first.' });
