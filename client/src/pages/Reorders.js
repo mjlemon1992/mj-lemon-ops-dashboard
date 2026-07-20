@@ -50,7 +50,8 @@ function Board({ locId }) {
       {r.qty && <span style={{ color: 'var(--text2)', fontSize: '13px' }}>· {r.qty}</span>}
       {r.person_name && <span style={{ color: 'var(--text3)', fontSize: '12px' }}>· flagged by {r.person_name.split(' ')[0]}</span>}
       {r.note && <span style={{ color: 'var(--text3)', fontSize: '12px', fontStyle: 'italic' }}>"{r.note}"</span>}
-      <span style={{ color: 'var(--text3)', fontSize: '11px' }}>{fmtShortDate(r.created_at)}</span>
+      {/* created_at is a full timestamp — trim to the date part for fmtShortDate */}
+      <span style={{ color: 'var(--text3)', fontSize: '11px' }}>{fmtShortDate(String(r.created_at || '').slice(0, 10))}</span>
       <span style={{ marginLeft: 'auto' }}>
         {r.status === 'requested'
           ? <button className="primary" disabled={busy} onClick={() => act(r, 'ordered')} style={{ fontSize: '12px', padding: '5px 14px' }}>Mark ordered</button>

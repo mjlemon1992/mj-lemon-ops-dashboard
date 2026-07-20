@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   email VARCHAR(255) UNIQUE NOT NULL,
   name VARCHAR(255) NOT NULL,
-  role VARCHAR(20) NOT NULL CHECK (role IN ('owner', 'partner', 'manager')),
+  role VARCHAR(20) NOT NULL CHECK (role IN ('owner', 'partner', 'manager', 'advisor')),
   location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
   password_hash VARCHAR(255) NOT NULL,
   active BOOLEAN DEFAULT true,
