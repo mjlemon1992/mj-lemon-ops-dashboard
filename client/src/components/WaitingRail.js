@@ -18,8 +18,8 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
   const ownerish = ['owner', 'partner'].includes(user?.role);
   const [busy, setBusy] = useState(false);
   const dismiss = (key) => onDismiss && onDismiss(key);
-  const { timeoff = [], edits = [], fuel = [], reorders = [], bonus = [] } = detail || {};
-  const total = timeoff.length + edits.length + fuel.length + reorders.length + bonus.length;
+  const { timeoff = [], edits = [], fuel = [], reorders = [], clockq = [], bonus = [] } = detail || {};
+  const total = timeoff.length + edits.length + fuel.length + reorders.length + clockq.length + bonus.length;
   // Deep-links must land on the card's own shop, not whatever is globally selected.
   const goTo = (locationId, path) => { select(locationId); navigate(path); };
 
@@ -41,6 +41,10 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
   const decideReorder = (r, action) => act(
     () => api(`/clock/reorder/${r.id}`, { method: 'PUT', body: JSON.stringify({ action }) }),
     action === 'ordered' ? `Ordered — ${r.item}` : action === 'received' ? `Received — ${r.item} cleared` : 'Dismissed'
+  );
+  const decideClockq = (r, action) => act(
+    () => api(`/clock/followup/${r.id}/decide`, { method: 'PUT', body: JSON.stringify({ action }) }),
+    action === 'approve' ? 'Applied to pay' : 'Dismissed'
   );
 
   return (
@@ -118,6 +122,22 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
               ? <button className="primary" disabled={busy} onClick={() => decideReorder(r, 'received')}>Mark received</button>
               : <button className="primary" disabled={busy} onClick={() => decideReorder(r, 'ordered')}>Mark ordered</button>}
             <button disabled={busy} onClick={() => decideReorder(r, 'dismissed')}>Dismiss</button>
+          </div>
+        </div>
+      ))}
+
+      {clockq.map((r) => (
+        <div key={`clockq-${r.id}`} className="wr-card hot">
+          <div className="wr-card-title">{r.person_name} — {r.kind === 'overtime' ? 'overtime' : 'missed break'}</div>
+          <div className="wr-card-body">
+            {fmtD(r.work_date)} · {r.kind === 'overtime'
+              ? `+${r.answer_hours} h claimed`
+              : (r.took_break ? `${Math.round((r.answer_hours || 0) * 60)} min break` : 'no break taken')}
+            {multiLoc && <span className="wr-loc"> · {r.location_name}</span>}
+          </div>
+          <div className="wr-actions">
+            <button className="primary" disabled={busy} onClick={() => decideClockq(r, 'approve')}>Apply to pay</button>
+            <button disabled={busy} onClick={() => decideClockq(r, 'dismiss')}>Dismiss</button>
           </div>
         </div>
       ))}
