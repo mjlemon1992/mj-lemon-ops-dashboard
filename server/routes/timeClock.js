@@ -1103,6 +1103,46 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
+  // ── "My work" — a tech's own invoiced labour this month (kiosk) ─────────
+  // Hours only, never dollars (shop-floor rule). Reads tech_work_detail rows
+  // persisted by the 2h refresh-tech sync; matches the person to Shopmonkey
+  // tech names the same way the bonus billed-hours pull does (first name,
+  // accents/case folded). Auth: the person's own PIN or their fob.
+  const normName = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  router.post('/:locationId/my-work', async (req, res) => {
+    try {
+      await ensure();
+      if (!(await checkLocPin(req, res))) return;
+      const { tag } = req.body || {};
+      let person;
+      if (tag) {
+        const { rows } = await pool.query('SELECT id, name FROM bonus_person WHERE location_id=$1 AND rfid_tag=$2 AND active=true', [req.params.locationId, String(tag).trim().slice(0, 64)]);
+        if (!rows.length) return fail(res, 'Unknown fob', 404);
+        person = rows[0];
+      } else {
+        person = await personAuth(req, res);
+        if (!person) return;
+      }
+      const month = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' }).slice(0, 7);
+      const first = normName(person.name).split(' ')[0];
+      const work = await pool.query(
+        `SELECT order_number, invoiced_date::text AS invoiced_date, vehicle, tech_name, hours_sold, hours_billed, synced_at
+           FROM tech_work_detail WHERE location_id=$1 AND month=$2
+          ORDER BY invoiced_date DESC NULLS LAST, order_number DESC`, [req.params.locationId, month]).then((r) => r.rows).catch(() => []);
+      const mine = work.filter((w) => normName(w.tech_name).startsWith(first));
+      const clocked = (await paidHoursByMonth(pool, req.params.locationId, month))[person.id] || 0;
+      res.json({
+        name: person.name, month,
+        synced_at: work.length ? work[0].synced_at : null,
+        total_hours: Math.round(mine.reduce((s, w) => s + Number(w.hours_sold), 0) * 10) / 10,
+        total_billed: Math.round(mine.reduce((s, w) => s + Number(w.hours_billed), 0) * 10) / 10,
+        vehicles: new Set(mine.map((w) => w.order_number)).size,
+        clocked_hours: clocked,
+        rows: mine.map((w) => ({ date: w.invoiced_date, ro: w.order_number, vehicle: w.vehicle, hours: Number(w.hours_sold) })),
+      });
+    } catch (e) { fail(res, e); }
+  });
+
   // ── Admin: RFID enroll + break toggle + shift settings + approvals ──────
   router.put('/:locationId/person/:pid/rfid', ...authed, scoped, async (req, res) => {
     try {

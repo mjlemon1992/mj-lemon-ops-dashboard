@@ -152,6 +152,24 @@ export default function ClockKiosk() {
     setBusy(false);
   };
 
+  // ── My work: this month's invoiced labour (hours only, per shop-floor rule) ──
+  const [myWork, setMyWork] = useState(null);
+  const openMyWork = async (auth) => {
+    setBusy(true); setError('');
+    try {
+      const res = await fetch(`/api/clock/${locationId}/my-work`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loc_pin: locPin, ...auth }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
+      setMyWork(body);
+      setActive(null); setPin(''); setRfid(null);
+      setView('mywork');
+    } catch { setError('Network error'); }
+    setBusy(false);
+  };
+
   // ── Tech self-service (uses the PIN already typed on the person screen) ──
   const openTimesheet = async () => {
     if (!active || pin.length < 4) return;
@@ -410,6 +428,7 @@ export default function ClockKiosk() {
         </div>
         <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
           <button disabled={busy} onClick={() => (pin.length < 4 ? setError('Enter your PIN first, then tap again') : openTimesheet())} style={{ fontSize: '14px', padding: '9px 16px' }}>📋 My timesheet</button>
+          <button disabled={busy} onClick={() => (pin.length < 4 ? setError('Enter your PIN first, then tap again') : openMyWork({ person_id: active.id, pin }))} style={{ fontSize: '14px', padding: '9px 16px' }}>🔧 My work</button>
           <button disabled={busy} onClick={() => (pin.length < 4 ? setError('Enter your PIN first, then tap again') : openProfile())} style={{ fontSize: '14px', padding: '9px 16px' }}>🎨 My profile</button>
         </div>
         {pin.length < 4 && <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '8px' }}>Punching, timesheet, and profile all unlock with your PIN.</div>}
@@ -473,10 +492,47 @@ export default function ClockKiosk() {
               {p.status === 'break' && <button disabled={busy} onClick={() => rfidCall(rfid.tag, 'break_end').then((b) => b && finishAction(p.name, 'break_end', b))} style={{ ...bigBtn, background: 'var(--success)', color: '#000', fontWeight: 700 }}>Back from break</button>}
               {p.status === 'off' && <button className="primary" disabled={busy} onClick={() => rfidCall(rfid.tag, 'in').then((b) => b && finishAction(p.name, 'in', b))} style={bigBtn}>Clock in</button>}
             </div>
+            <button disabled={busy} onClick={() => openMyWork({ tag: rfid.tag })} style={{ marginTop: '16px', fontSize: '14px', padding: '9px 16px' }}>🔧 My work this month</button>
             {error && <div style={{ color: 'var(--danger)', marginTop: '12px' }}>{error}</div>}
           </>
         )}
         <button onClick={() => { setRfid(null); setView('home'); setError(''); }} style={{ marginTop: '22px', fontSize: '15px', padding: '10px 18px' }}>Cancel</button>
+      </div>
+    );
+  }
+
+  // ── My work: month's invoiced labour — vehicle · RO · hours (no dollars) ──
+  if (view === 'mywork' && myWork) {
+    const monthLbl = new Date(myWork.month + '-15T12:00:00Z').toLocaleDateString('en-CA', { month: 'long', year: 'numeric' });
+    const Stat = ({ label, value, accent }) => (
+      <div style={{ background: 'var(--bg2)', borderRadius: '12px', padding: '12px 18px', textAlign: 'center', border: '1px solid var(--border)', minWidth: '120px' }}>
+        <div style={{ fontFamily: 'var(--font-disp)', fontWeight: 700, fontSize: '30px', color: accent ? 'var(--accent)' : 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+        <div style={{ ...eyebrow, color: 'var(--text3)' }}>{label}</div>
+      </div>
+    );
+    return (
+      <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '26px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', width: '100%', maxWidth: '760px' }}>
+          <div style={{ ...kh, fontSize: '24px' }}>{myWork.name.split(' ')[0]} — my work · {monthLbl}</div>
+          <button onClick={() => { setMyWork(null); setView('home'); setError(''); }} style={{ marginLeft: 'auto', fontSize: '15px', padding: '10px 18px' }}>← Home</button>
+        </div>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '16px' }}>
+          <Stat label="Hours flagged" value={myWork.total_hours} accent />
+          <Stat label="Cars" value={myWork.vehicles} />
+          <Stat label="Hours clocked" value={myWork.clocked_hours} />
+        </div>
+        <div style={{ width: '100%', maxWidth: '760px', marginTop: '18px' }}>
+          {myWork.rows.length === 0 && <div style={{ color: 'var(--text3)', textAlign: 'center' }}>No invoiced labour yet this month — this list fills as ROs are invoiced.</div>}
+          {myWork.rows.map((r, i) => (
+            <div key={i} style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '10px 14px', background: 'var(--bg2)', borderRadius: '10px', marginBottom: '6px' }}>
+              <span style={{ color: 'var(--text3)', fontSize: '13px', minWidth: '72px' }}>{r.date ? fmtDayShort(r.date) : '—'}</span>
+              <span style={{ fontWeight: 700, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.vehicle || 'Vehicle'}</span>
+              {r.ro && <span style={{ color: 'var(--text3)', fontSize: '12px' }}>RO {r.ro}</span>}
+              <span style={{ fontFamily: 'var(--font-disp)', fontWeight: 700, fontSize: '18px', fontVariantNumeric: 'tabular-nums' }}>{r.hours} h</span>
+            </div>
+          ))}
+        </div>
+        {myWork.synced_at && <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>Fresh as of {fmtTime(myWork.synced_at)} — updates with the 2-hour Shopmonkey sync.</div>}
       </div>
     );
   }

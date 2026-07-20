@@ -516,6 +516,10 @@ module.exports = (pool) => {
       };
 
       const monthVehicles = new Set();
+      // Per-order/per-tech detail for the kiosk "My work" view (hours only —
+      // no dollars reach the shop floor). Keyed order|tech, replaced wholesale
+      // after a fully successful crawl.
+      const workDetail = new Map();
       let svcFail = 0;
       for (const o of monthOrders) {
         if (o.vehicleId) monthVehicles.add(o.vehicleId);
@@ -545,6 +549,16 @@ module.exports = (pool) => {
               ? lineLaborDollars * (hrs / lineHours)
               : lineLaborDollars / labs.length;
             if (o.vehicleId) b._vehicles.add(o.vehicleId);
+            const wk = `${o.id}|${tid}`;
+            let w = workDetail.get(wk);
+            if (!w) workDetail.set(wk, w = {
+              order_id: o.id, order_number: o.number != null ? String(o.number) : null,
+              invoiced_date: parseShopmonkeyDate(o.invoicedDate), vehicle: o.generatedVehicleName || null,
+              tech_id: tid, tech_name: techNames[tid] || `Tech ${String(tid).slice(0, 6)}`,
+              hours_sold: 0, hours_billed: 0,
+            });
+            w.hours_sold += hrs;
+            if (lineGeneratedRevenue) w.hours_billed += hrs;
           }
         }
       }
@@ -594,6 +608,32 @@ module.exports = (pool) => {
             `INSERT INTO tech_efficiency (location_id, snapshot_date, period_type, tech_id, tech_name, hours_available, hours_worked, hours_sold, hours_billed, vehicle_count, efficiency, labour_revenue, parts_gp)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
             [req.params.locationId, date, 'mtd', t.tech_id, t.tech_name, t.hours_available, t.hours_worked, t.hours_sold, t.hours_billed, t.vehicle_count, t.efficiency, t.labour_revenue, t.parts_gp]
+          );
+        }
+        // Per-RO tech hours for the kiosk "My work" view. Replaced wholesale for
+        // the month — the crawl was complete (svcFail = 0) or we never got here.
+        const month = date.slice(0, 7);
+        await client.query(`CREATE TABLE IF NOT EXISTS tech_work_detail (
+          location_id UUID NOT NULL,
+          month VARCHAR(7) NOT NULL,
+          order_id TEXT NOT NULL,
+          order_number TEXT,
+          invoiced_date DATE,
+          vehicle TEXT,
+          tech_id TEXT NOT NULL,
+          tech_name TEXT,
+          hours_sold NUMERIC NOT NULL DEFAULT 0,
+          hours_billed NUMERIC NOT NULL DEFAULT 0,
+          synced_at TIMESTAMPTZ DEFAULT now(),
+          PRIMARY KEY (location_id, month, order_id, tech_id)
+        )`);
+        await client.query('DELETE FROM tech_work_detail WHERE location_id = $1 AND month = $2', [req.params.locationId, month]);
+        for (const w of workDetail.values()) {
+          await client.query(
+            `INSERT INTO tech_work_detail (location_id, month, order_id, order_number, invoiced_date, vehicle, tech_id, tech_name, hours_sold, hours_billed)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            [req.params.locationId, month, w.order_id, w.order_number, w.invoiced_date, w.vehicle, w.tech_id, w.tech_name,
+             Math.round(w.hours_sold * 100) / 100, Math.round(w.hours_billed * 100) / 100]
           );
         }
         await client.query('COMMIT');
