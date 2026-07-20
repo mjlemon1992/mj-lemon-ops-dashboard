@@ -27,6 +27,11 @@ const ADVISOR_ALLOW = [
   /^\/api\/notices(\/|$)/,                 // shop notice board
   /^\/api\/sync\/[^/]+\/comebacks$/,       // comebacks list (read)
   /^\/api\/cos\/alerts\//,                 // alert ack/dismissed state
+  // Hero band (2026-07-20): revenue-vs-target pace, same figures as the bay
+  // display board. Targets + metrics responses are field-filtered for the role.
+  /^\/api\/targets\/[^/]+\/\d{4}$/,        // filtered: revenue/cars/hours/efficiency targets only
+  /^\/api\/clock\/[^/]+\/pay-periods$/,    // period dates for crew-paid hours
+  /^\/api\/clock\/[^/]+\/entries$/,        // punch hours (no wages exist in the system)
 ];
 
 function authenticateToken(req, res, next) {

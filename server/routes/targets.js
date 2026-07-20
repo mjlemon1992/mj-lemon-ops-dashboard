@@ -13,13 +13,22 @@ module.exports = (pool) => {
 
   router.get('/:locationId/:year', authenticateToken, async (req, res) => {
     try {
-      if (req.user.role === 'manager' && req.user.location_id !== req.params.locationId) {
+      if (['manager', 'advisor'].includes(req.user.role) && req.user.location_id !== req.params.locationId) {
         return res.status(403).json({ error: 'Access denied' });
       }
       const result = await pool.query(
         'SELECT * FROM targets WHERE location_id = $1 AND year = $2 ORDER BY month',
         [req.params.locationId, req.params.year]
       );
+      // Advisors get the shop-floor targets only (revenue pace, car count,
+      // hours, efficiency) — margin/ARO/pph targets are stripped server-side.
+      if (req.user.role === 'advisor') {
+        return res.json(result.rows.map((r) => ({
+          location_id: r.location_id, year: r.year, month: r.month,
+          revenue: r.revenue, car_count: r.car_count,
+          labour_hours: r.labour_hours, efficiency: r.efficiency,
+        })));
+      }
       res.json(result.rows);
     } catch (err) {
       res.status(500).json({ error: err.message });

@@ -33,12 +33,14 @@ module.exports = (pool) => {
         [req.params.locationId]
       );
       const row = result.rows[0] || null;
-      // Advisors get the operational slice only — alerts, car count, hours.
-      // Money fields (revenue, margins, profit, pph, RO values, rates) are
-      // stripped SERVER-side so they never reach the browser at all.
+      // Advisors get the shop-floor slice: MTD revenue (the same figure the bay
+      // display board shows), car count, hours, alerts. Margins, profit, pph,
+      // RO values and rates are stripped SERVER-side so they never reach the
+      // browser at all.
       if (row && req.user.role === 'advisor') {
         return res.json({
           location_id: row.location_id,
+          revenue_mtd: row.revenue_mtd,
           car_count_mtd: row.car_count_mtd,
           labour_hours_sold: row.labour_hours_sold,
           labour_hours_worked: row.labour_hours_worked,

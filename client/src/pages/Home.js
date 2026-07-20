@@ -353,8 +353,10 @@ export default function Home() {
         );
       })()}
 
-      {/* Advisor: cars + efficiency only — the allowed operational metrics. */}
-      {isAdvisor && (
+      {/* Advisor: cars + efficiency only — the allowed operational metrics.
+          Fallback like the owner cards: the hero band covers these when a
+          revenue target exists. */}
+      {isAdvisor && !(gRevTarget > 0) && (
         <div className="stat-grid" style={{ marginBottom: '20px' }}>
           <div className="metric-card">
             <div className="metric-label">Car count MTD</div>
