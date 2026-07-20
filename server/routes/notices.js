@@ -79,7 +79,7 @@ module.exports = (pool) => {
 
   // Admin list (all notices incl. inactive/expired, newest first). Image bytes
   // stay out of the list; has_image + the /:id/image endpoint cover previews.
-  router.get('/', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+  router.get('/', authenticateToken, requireRole('owner', 'partner', 'manager', 'advisor'), async (req, res) => {
     try {
       await ensureTable();
       const mgrFilter = req.user.role === 'manager';
@@ -99,7 +99,7 @@ module.exports = (pool) => {
   // Upload a poster/graphic for a notice: raw image body (Content-Type: image/*).
   // Mirrors the marketing intake pattern — no multipart, works from the phone.
   router.post('/:id/image',
-    syncAuth, requireRole('owner', 'partner', 'manager'),
+    syncAuth, requireRole('owner', 'partner', 'manager', 'advisor'),
     express.raw({ type: ['image/*', 'application/octet-stream'], limit: '15mb' }),
     async (req, res) => {
       try {
@@ -120,7 +120,7 @@ module.exports = (pool) => {
 
   // Serve a stored image (admin preview). The display board gets images inlined
   // as data URIs in its own payload, so this stays JWT-only.
-  router.get('/:id/image', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+  router.get('/:id/image', authenticateToken, requireRole('owner', 'partner', 'manager', 'advisor'), async (req, res) => {
     try {
       await ensureTable();
       const r = await pool.query('SELECT image_data, image_mime, location_id FROM shop_notices WHERE id = $1', [req.params.id]);
@@ -179,7 +179,7 @@ Rules:
     } catch { return 'Mister Transmission'; }
   };
 
-  router.post('/design-poster', syncAuth, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+  router.post('/design-poster', syncAuth, requireRole('owner', 'partner', 'manager', 'advisor'), async (req, res) => {
     try {
       const KEY = process.env.ANTHROPIC_API_KEY;
       if (!KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set' });
@@ -227,7 +227,7 @@ Rules:
 
   // 👍/👎 on a generated design. Stored with the SVG; recent rows steer the
   // next generations (see the taste block in design-poster).
-  router.post('/poster-feedback', syncAuth, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+  router.post('/poster-feedback', syncAuth, requireRole('owner', 'partner', 'manager', 'advisor'), async (req, res) => {
     try {
       await ensureTable();
       const { rating, kind, title, svg } = req.body || {};
@@ -258,7 +258,7 @@ Encouragement rules: if metrics are provided, ground the praise in them — cite
 Financial privacy (hard rule): the ONLY business numbers allowed on the board are month-to-date REVENUE, CAR COUNT, LABOUR HOURS SOLD, and TECH EFFICIENCY vs its target. NEVER mention profit, margins, parts margin, profit-per-hour, costs, or average repair-order value — internal financial detail stays off the shop floor, even if it appears in the data you're given.
 Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fluff, no CTAs.`;
 
-  router.post('/poster-ideas', syncAuth, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+  router.post('/poster-ideas', syncAuth, requireRole('owner', 'partner', 'manager', 'advisor'), async (req, res) => {
     try {
       const KEY = process.env.ANTHROPIC_API_KEY;
       if (!KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set' });
@@ -318,7 +318,7 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
 
   // Create (no id) or update (with id). syncAuth: the CoS agent may post
   // notices with the machine key; it acts as owner.
-  router.post('/', syncAuth, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+  router.post('/', syncAuth, requireRole('owner', 'partner', 'manager', 'advisor'), async (req, res) => {
     try {
       await ensureTable();
       let { id, location_id, kind, title, body, image_url, priority, active, expires_at, pending_image } = req.body || {};
@@ -365,7 +365,7 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
   });
 
   // Quick on/off from the admin list.
-  router.post('/:id/toggle', syncAuth, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+  router.post('/:id/toggle', syncAuth, requireRole('owner', 'partner', 'manager', 'advisor'), async (req, res) => {
     try {
       await ensureTable();
       if (!(await assertManages(req, res))) return;
@@ -378,7 +378,7 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  router.delete('/:id', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+  router.delete('/:id', authenticateToken, requireRole('owner', 'partner', 'manager', 'advisor'), async (req, res) => {
     try {
       await ensureTable();
       if (!(await assertManages(req, res))) return;

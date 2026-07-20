@@ -537,7 +537,8 @@ module.exports = (pool) => {
 
   // Year's requests + per-person approved totals (working days). Closure days
   // are location-wide and deliberately NOT charged to personal totals.
-  router.get('/:locationId/timeoff', ...authed, scoped, async (req, res) => {
+  // Advisors may READ (Home decks); deciding stays owner/partner/manager.
+  router.get('/:locationId/timeoff', authenticateToken, requireRole('owner', 'partner', 'manager', 'advisor'), scoped, async (req, res) => {
     try {
       await ensure();
       const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : String(new Date().getFullYear());
@@ -703,8 +704,9 @@ module.exports = (pool) => {
   });
 
   // Live clock status for the dashboards (Technicians page polls this): who's
-  // clocked in / on break (and since when) right now.
-  router.get('/:locationId/status', ...authed, scoped, async (req, res) => {
+  // clocked in / on break (and since when) right now. Advisors read it for
+  // the Home crew deck.
+  router.get('/:locationId/status', authenticateToken, requireRole('owner', 'partner', 'manager', 'advisor'), scoped, async (req, res) => {
     try {
       await ensure();
       const { rows } = await pool.query(

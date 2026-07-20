@@ -32,7 +32,21 @@ module.exports = (pool) => {
         `SELECT * FROM metrics_cache WHERE location_id = $1 ORDER BY created_at DESC LIMIT 1`,
         [req.params.locationId]
       );
-      res.json(result.rows[0] || null);
+      const row = result.rows[0] || null;
+      // Advisors get the operational slice only — alerts, car count, hours.
+      // Money fields (revenue, margins, profit, pph, RO values, rates) are
+      // stripped SERVER-side so they never reach the browser at all.
+      if (row && req.user.role === 'advisor') {
+        return res.json({
+          location_id: row.location_id,
+          car_count_mtd: row.car_count_mtd,
+          labour_hours_sold: row.labour_hours_sold,
+          labour_hours_worked: row.labour_hours_worked,
+          alerts: row.alerts,
+          created_at: row.created_at,
+        });
+      }
+      res.json(row);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

@@ -181,7 +181,9 @@ module.exports = (pool) => {
           vehicle_count: h && h.vehicle_count != null ? Number(h.vehicle_count) : null,
           hours_worked: h && h.hours_worked != null ? Number(h.hours_worked) : null,
           efficiency: h && h.efficiency != null ? Number(h.efficiency) : null,
-          labour_revenue: h && h.labour_revenue != null ? Number(h.labour_revenue) : null,
+          // Advisors see hours and efficiency, never per-tech revenue.
+          labour_revenue: req.user.role === 'advisor' ? null
+            : (h && h.labour_revenue != null ? Number(h.labour_revenue) : null),
           hours_per_week: whByTech[t.tech_id] != null ? Number(whByTech[t.tech_id]) : null
         };
       });

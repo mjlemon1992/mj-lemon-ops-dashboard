@@ -16,6 +16,17 @@ const ADVISOR_ALLOW = [
   /^\/api\/locations\/?$/,                 // scoped list (writes are owner-gated)
   /^\/api\/clock\/[^/]+\/reorders$/,       // their board
   /^\/api\/clock\/reorder\/[^/]+$/,        // mark ordered / received
+  // Home decks + Alerts + Comebacks + Notices (2026-07-20). Money endpoints
+  // stay out; metrics summary and technicians STRIP money fields server-side
+  // for advisor tokens before responding.
+  /^\/api\/metrics\/[^/]+\/summary$/,      // filtered: alerts, car count, hours only
+  /^\/api\/technicians\/[^/]+$/,           // filtered: no per-tech revenue
+  /^\/api\/clock\/[^/]+\/status$/,         // crew-now deck
+  /^\/api\/clock\/[^/]+\/timeoff$/,        // two-weeks deck / who's off
+  /^\/api\/meta\//,                        // holiday calendars
+  /^\/api\/notices(\/|$)/,                 // shop notice board
+  /^\/api\/sync\/[^/]+\/comebacks$/,       // comebacks list (read)
+  /^\/api\/cos\/alerts\//,                 // alert ack/dismissed state
 ];
 
 function authenticateToken(req, res, next) {
