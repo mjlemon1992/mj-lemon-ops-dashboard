@@ -60,7 +60,10 @@ export default function Layout() {
   const canQueue = user && ['owner', 'partner', 'manager', 'advisor'].includes(user.role);
   // Chime + toast when something NEW lands in the queue (count rose since the
   // last poll) — the audible half of notifications; Web Push covers app-closed.
+  // `unseen` keeps the pill SHAKING (and the tab title flashing) until the
+  // queue is actually opened — the chime alone is easy to miss under a hoist.
   const prevTotal = React.useRef(null);
+  const [unseen, setUnseen] = useState(false);
   const loadAttention = React.useCallback(() => {
     if (!canQueue) return;
     api('/attention')
@@ -68,13 +71,24 @@ export default function Layout() {
         if (!d || !Array.isArray(d.items)) return;
         if (prevTotal.current != null && d.total > prevTotal.current) {
           playChime();
+          setUnseen(true);
           showToast(`⏳ ${d.total - prevTotal.current} new item${d.total - prevTotal.current === 1 ? '' : 's'} waiting on you`);
         }
+        if (d.total === 0) setUnseen(false);
         prevTotal.current = d.total;
         setAttention(d);
       })
       .catch(() => {});
   }, [api, canQueue]);
+
+  // Flash the browser-tab title while unseen — a background tab still shows it.
+  useEffect(() => {
+    if (!unseen) return undefined;
+    const original = document.title;
+    let flip = false;
+    const t = setInterval(() => { flip = !flip; document.title = flip ? '📦 New — OPS' : original; }, 1200);
+    return () => { clearInterval(t); document.title = original; };
+  }, [unseen]);
 
   // 🔔 per-device push enrolment state.
   const [pushOn, setPushOn] = useState('off');   // on | off | denied | unsupported
@@ -114,6 +128,7 @@ export default function Layout() {
   const railCount = d.timeoff.length + d.edits.length + d.fuel.length + d.reorders.length + d.clockq.length + d.bonus.length;
   const showRail = !isMobile && railOpen && railCount > 0;
   const toggleRail = () => {
+    setUnseen(false);   // queue opened — stop the shake + title flash
     if (isMobile) { setAttnOpen(o => !o); return; }
     setRailOpen(o => { localStorage.setItem('ops_rail', o ? 'off' : 'on'); return !o; });
   };
@@ -268,7 +283,7 @@ export default function Layout() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, position: 'relative' }}>
             {railCount > 0 && (
               <>
-                <div className="badge warning" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={toggleRail}>
+                <div className={`badge warning${unseen ? ' pill-shake' : ''}`} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={toggleRail}>
                   ⏳ {railCount}{isMobile ? '' : ' waiting on you'}
                 </div>
                 {isMobile && attnOpen && (

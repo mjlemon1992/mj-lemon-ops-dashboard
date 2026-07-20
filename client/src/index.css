@@ -276,3 +276,23 @@ table { font-variant-numeric: tabular-nums; }
 .wr-foot { font-size: 11px; color: var(--text3); line-height: 1.6; margin-top: 14px; }
 .wr-x { float: right; background: none; border: none; color: var(--text3); cursor: pointer; font-size: 13px; padding: 0 0 0 8px; line-height: 1.2; }
 .wr-x:hover { color: var(--text); background: none; }
+
+/* ⏳ pill attention shake — runs until the queue is opened. A 2.4s cycle:
+   a sharp wiggle burst, then rest, so it nags without being seizure bait. */
+@keyframes ops-pill-shake {
+  0%, 55%, 100% { transform: rotate(0) scale(1); }
+  58% { transform: rotate(-6deg) scale(1.06); }
+  62% { transform: rotate(6deg) scale(1.06); }
+  66% { transform: rotate(-5deg) scale(1.06); }
+  70% { transform: rotate(5deg) scale(1.06); }
+  74% { transform: rotate(-3deg) scale(1.04); }
+  78% { transform: rotate(2deg) scale(1.02); }
+  82% { transform: rotate(0) scale(1); }
+}
+.pill-shake {
+  animation: ops-pill-shake 2.4s ease-in-out infinite;
+  box-shadow: 0 0 0 1px var(--warning), 0 0 14px rgba(255,184,0,0.35);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill-shake { animation: none; }
+}
