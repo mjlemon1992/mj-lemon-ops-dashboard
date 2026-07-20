@@ -466,6 +466,7 @@ export default function ClockKiosk() {
           <OffMonth offset={0} board={board} holidays={holidays} />
           <OffMonth offset={1} board={board} holidays={holidays} />
         </div>
+        <CalLegend />
         {holidays.length > 0 && (
           <div style={{ fontSize: '12px', color: 'var(--accent)', marginTop: '10px', textAlign: 'center' }}>
             🎌 {holidays.map((h) => `${h.name} — ${new Date(h.date + 'T12:00:00Z').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}`).join(' · ')}
@@ -663,12 +664,12 @@ function OffMonth({ offset, board, holidays }) {
   for (let d = 1; d <= daysIn; d++) cells.push(d);
   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   return (
-    <div style={{ background: 'var(--bg2)', borderRadius: '14px', padding: '14px', width: '390px' }}>
-      <div style={{ fontWeight: 700, marginBottom: '8px', textAlign: 'center' }}>{first.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' })}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px', fontSize: '10px', color: 'var(--text3)', textAlign: 'center', marginBottom: '4px' }}>
-        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <div key={i}>{d}</div>)}
+    <div style={{ background: 'var(--bg2)', borderRadius: '16px', padding: '16px', width: '390px', border: '1px solid var(--border)' }}>
+      <div style={{ fontFamily: 'var(--font-disp)', textTransform: 'uppercase', letterSpacing: '0.03em', fontWeight: 700, fontSize: '19px', color: 'var(--text)', marginBottom: '12px', textAlign: 'center' }}>{first.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' })}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '11px', fontWeight: 600, letterSpacing: '0.1em', textAlign: 'center', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid var(--border)' }}>
+        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <div key={i} style={{ color: i >= 5 ? 'var(--text3)' : 'var(--text2)' }}>{d}</div>)}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
         {cells.map((d, i) => {
           if (d == null) return <div key={i} />;
           const dd = iso(d);
@@ -677,22 +678,38 @@ function OffMonth({ offset, board, holidays }) {
           const offs = byDay[dd] || [];
           const hol = holByDay[dd];
           const closed = offs.some((r) => r.type === 'closure' && r.status === 'approved');
+          const isToday = dd === todayIso;
+          const bg = closed ? 'rgba(255,77,77,0.18)' : isToday ? 'rgba(240,84,35,0.16)' : hol ? 'rgba(10,132,255,0.16)' : weekend ? 'var(--bg)' : 'var(--bg3)';
+          const border = isToday ? '1.5px solid var(--accent)' : closed ? '1px solid var(--danger)' : hol ? '1px solid rgba(10,132,255,0.45)' : '1px solid var(--border)';
+          const numColor = isToday ? 'var(--accent)' : hol ? '#5aa9ff' : weekend ? 'var(--text2)' : 'var(--text)';
           return (
-            <div key={i} title={hol ? hol.name : undefined} style={{ minHeight: '44px', borderRadius: '6px', padding: '3px', fontSize: '10px',
-              background: closed ? 'rgba(255,69,58,0.16)' : hol ? 'rgba(10,132,255,0.12)' : dd === todayIso ? 'rgba(10,132,255,0.18)' : weekend ? 'transparent' : 'var(--bg3)',
-              opacity: weekend && !hol ? 0.45 : 1, border: dd === todayIso ? '1px solid var(--accent)' : closed ? '1px solid var(--danger)' : '1px solid transparent' }}>
-              <div style={{ color: 'var(--text3)', fontSize: '10px' }}>{d}{hol ? ' 🎌' : ''}</div>
-              {hol && <div style={{ color: 'var(--accent)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hol.name}</div>}
-              {closed && <div style={{ color: 'var(--danger)', fontWeight: 700 }}>CLOSED</div>}
+            <div key={i} title={hol ? hol.name : undefined} style={{ minHeight: '50px', borderRadius: '8px', padding: '4px 5px', background: bg, border }}>
+              <div style={{ color: numColor, fontSize: '15px', fontWeight: isToday ? 800 : 600, lineHeight: 1.05 }}>{d}{hol ? ' 🎌' : ''}</div>
+              {hol && <div style={{ color: '#5aa9ff', fontWeight: 600, fontSize: '9.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hol.name}</div>}
+              {closed && <div style={{ color: 'var(--danger)', fontWeight: 700, fontSize: '10px' }}>CLOSED</div>}
               {offs.filter((r) => r.type !== 'closure').map((r, j) => (
-                <div key={j} style={{ color: r.status === 'approved' ? 'var(--warning)' : 'var(--text3)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {r.person_name.split(' ')[0]}{r.status === 'pending' ? '?' : ''}
+                <div key={j} style={{ color: r.status === 'approved' ? 'var(--warning)' : 'var(--text2)', fontWeight: 600, fontSize: '10.5px', fontStyle: r.status === 'pending' ? 'italic' : 'normal', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {r.person_name.split(' ')[0]}{r.status === 'pending' ? ' ?' : ''}
                 </div>
               ))}
             </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Colour key so the calendar reads at a glance from across the bay.
+function CalLegend() {
+  const sw = (bg, border) => ({ display: 'inline-block', width: '11px', height: '11px', borderRadius: '3px', background: bg, border: border || 'none', marginRight: '6px', verticalAlign: 'middle' });
+  const item = { display: 'inline-flex', alignItems: 'center', fontSize: '12px', color: 'var(--text2)' };
+  return (
+    <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '14px' }}>
+      <span style={item}><span style={sw('rgba(240,84,35,0.35)', '1.5px solid var(--accent)')} />Today</span>
+      <span style={item}><span style={sw('rgba(10,132,255,0.5)', '1px solid rgba(10,132,255,0.6)')} />Stat holiday</span>
+      <span style={item}><span style={sw('var(--warning)')} />Off — approved</span>
+      <span style={{ ...item, fontStyle: 'italic' }}><span style={sw('var(--text2)')} />Pending  ?</span>
     </div>
   );
 }
