@@ -1,6 +1,8 @@
 const express = require('express');
-const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
+const { authenticateToken, requireRole, canAccessLocation, syncAuth } = require('../middleware/auth');
 const { monthStartFor, fetchInvoicedOrdersForLocation, fetchOrderService } = require('../lib/shopmonkey');
+const { ensurePartsReconTables } = require('../lib/partsReconSchema');
+const { extractInvoice, roPartsCostCents, matchInvoiceToRo, reconcile } = require('../lib/invoiceRecon');
 
 // Parts reconciliation — v1a: ShopMonkey-only parts margin / exposure per RO.
 // For each invoiced order in the window, compare each part's wholesale cost
@@ -142,6 +144,117 @@ module.exports = (pool) => {
          ON CONFLICT (location_id, order_id, part_id) DO UPDATE SET reason=EXCLUDED.reason, reviewed_by=EXCLUDED.reviewed_by, reviewed_at=now()`,
         [req.params.locationId, String(b.order_id), String(b.part_id), b.part_number || null, b.part_name || null, reason, req.user.email || req.user.name || 'owner']);
       res.json({ ok: true, reason });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ══ v1b — VENDOR INVOICE INGESTION + RECONCILIATION ════════════════════
+  const who = (req) => req.user.email || req.user.name || req.user.role;
+  const paidCentsOf = (inv) => (inv.subtotal_cents != null ? inv.subtotal_cents : inv.total_cents);
+
+  // Match + reconcile an extracted invoice, then upsert it.
+  const processInvoice = async (locId, smLoc, apiKey, ex, source) => {
+    const m = await matchInvoiceToRo(apiKey, smLoc, { ro_ref: ex.ro_ref, invoice_date: ex.invoice_date });
+    let roCost = null, orderId = null, orderNum = null;
+    if (m.status === 'matched' && m.order) { orderId = m.order.order_id; orderNum = m.order.order_number; try { roCost = await roPartsCostCents(apiKey, orderId); } catch { /* leave null */ } }
+    const paid = ex.subtotal_cents != null ? ex.subtotal_cents : ex.total_cents;
+    const rec = reconcile(orderId ? paid : null, roCost);
+    const { rows } = await pool.query(
+      `INSERT INTO vendor_invoice (location_id, vendor, invoice_number, invoice_date, total_cents, subtotal_cents, ro_ref, matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents, recon_status, recon_note, line_items, source, raw_extract)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+       ON CONFLICT (location_id, COALESCE(vendor,''), COALESCE(invoice_number,''), COALESCE(total_cents,0))
+       DO UPDATE SET invoice_date=EXCLUDED.invoice_date, subtotal_cents=EXCLUDED.subtotal_cents, ro_ref=EXCLUDED.ro_ref,
+         matched_order_id=EXCLUDED.matched_order_id, matched_order_number=EXCLUDED.matched_order_number, match_status=EXCLUDED.match_status,
+         match_candidates=EXCLUDED.match_candidates, ro_parts_cost_cents=EXCLUDED.ro_parts_cost_cents, recon_status=EXCLUDED.recon_status,
+         recon_note=EXCLUDED.recon_note, line_items=EXCLUDED.line_items
+       RETURNING id`,
+      [locId, ex.vendor, ex.invoice_number, ex.invoice_date, ex.total_cents, ex.subtotal_cents, ex.ro_ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, rec.status, rec.note, JSON.stringify(ex.line_items || []), source, JSON.stringify(ex.raw || ex)]);
+    return { id: rows[0].id, vendor: ex.vendor, ro_ref: ex.ro_ref, match_status: m.status, matched_order_number: orderNum, recon_status: rec.status, recon_note: rec.note, candidates: m.candidates };
+  };
+
+  // Intake — fed by the scan pipeline (email/Make) or a direct upload. Accepts a
+  // base64 file (AI-extracted here) OR pre-extracted structured fields.
+  // syncAuth = owner JWT or the X-Sync-Key the automation already uses.
+  router.post('/:locationId/invoice-intake', syncAuth, async (req, res) => {
+    try {
+      if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
+      await ensurePartsReconTables(pool);
+      const { rows } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [req.params.locationId]);
+      if (!rows.length) return fail(res, 'Location not found', 404);
+      const smLoc = rows[0].shopmonkey_location_id;
+      if (!smLoc) return fail(res, 'Location not connected to Shopmonkey', 400);
+      const apiKey = process.env.SHOPMONKEY_API_KEY;
+      const b = req.body || {};
+      let ex;
+      if (b.file) {
+        ex = await extractInvoice(b.file, b.media_type || 'image/jpeg');
+      } else {
+        ex = {
+          vendor: b.vendor || null, invoice_number: b.invoice_number || null,
+          invoice_date: /^\d{4}-\d{2}-\d{2}$/.test(b.invoice_date || '') ? b.invoice_date : null,
+          subtotal_cents: b.subtotal != null ? Math.round(Number(b.subtotal) * 100) : null,
+          total_cents: b.total != null ? Math.round(Number(b.total) * 100) : null,
+          ro_ref: (b.ro_ref || '').toString().trim() || null,
+          line_items: Array.isArray(b.line_items) ? b.line_items : [], raw: b,
+        };
+        if (ex.total_cents == null && ex.subtotal_cents == null) return fail(res, 'Provide a file, or vendor + total (+ ro_ref)', 400);
+      }
+      const out = await processInvoice(req.params.locationId, smLoc, apiKey, ex, b.file ? 'upload' : (b.source || 'make'));
+      res.json({ ok: true, extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out });
+    } catch (e) { fail(res, e); }
+  });
+
+  router.get('/:locationId/invoices', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
+    try {
+      await ensurePartsReconTables(pool);
+      const { rows } = await pool.query(
+        `SELECT id, vendor, invoice_number, invoice_date::text AS invoice_date, total_cents, subtotal_cents, ro_ref,
+                matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents,
+                recon_status, recon_note, source, created_at
+           FROM vendor_invoice WHERE location_id=$1 ORDER BY created_at DESC LIMIT 200`, [req.params.locationId]);
+      const base = ORDER_URL;
+      res.json({
+        invoices: rows.map((r) => ({
+          ...r,
+          total: r.total_cents != null ? r.total_cents / 100 : null,
+          subtotal: r.subtotal_cents != null ? r.subtotal_cents / 100 : null,
+          ro_parts_cost: r.ro_parts_cost_cents != null ? r.ro_parts_cost_cents / 100 : null,
+          sm_url: r.matched_order_id ? base.replace('{id}', r.matched_order_id) : null,
+        })),
+      });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Owner picks the right RO for an ambiguous/unmatched invoice (or unmatches).
+  router.put('/invoice/:id/confirm-match', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      await ensurePartsReconTables(pool);
+      const { rows: ir } = await pool.query('SELECT * FROM vendor_invoice WHERE id=$1', [req.params.id]);
+      if (!ir.length) return fail(res, 'Invoice not found', 404);
+      const inv = ir[0];
+      if (!canAccessLocation(req.user, inv.location_id)) return fail(res, 'Access denied for this location', 403);
+      const b = req.body || {};
+      if (b.unmatch) {
+        await pool.query("UPDATE vendor_invoice SET matched_order_id=NULL, matched_order_number=NULL, match_status='unmatched', ro_parts_cost_cents=NULL, recon_status='pending', recon_note='Unmatched', decided_by=$2, decided_at=now() WHERE id=$1", [inv.id, who(req)]);
+        return res.json({ ok: true, unmatched: true });
+      }
+      if (!b.order_id || !b.order_number) return fail(res, 'order_id + order_number required', 400);
+      const apiKey = process.env.SHOPMONKEY_API_KEY;
+      let roCost = null; try { roCost = await roPartsCostCents(apiKey, b.order_id); } catch { /* null */ }
+      const rec = reconcile(paidCentsOf(inv), roCost);
+      await pool.query("UPDATE vendor_invoice SET matched_order_id=$2, matched_order_number=$3, match_status='confirmed', ro_parts_cost_cents=$4, recon_status=$5, recon_note=$6, decided_by=$7, decided_at=now() WHERE id=$1",
+        [inv.id, b.order_id, String(b.order_number), roCost, rec.status, rec.note, who(req)]);
+      res.json({ ok: true, recon_status: rec.status, recon_note: rec.note });
+    } catch (e) { fail(res, e); }
+  });
+
+  router.delete('/invoice/:id', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      const { rows: ir } = await pool.query('SELECT location_id FROM vendor_invoice WHERE id=$1', [req.params.id]);
+      if (!ir.length) return res.json({ ok: true });
+      if (!canAccessLocation(req.user, ir[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      await pool.query('DELETE FROM vendor_invoice WHERE id=$1', [req.params.id]);
+      res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
 

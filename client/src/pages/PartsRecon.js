@@ -2,27 +2,41 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import PerLocationPage from '../components/PerLocationPage';
 import { money } from '../utils/format';
-import { Skeleton, askInput, showToast } from '../components/Feedback';
+import { Skeleton, askInput, askConfirm, showToast } from '../components/Feedback';
 
+// Parts reconciliation. Two tabs:
+//  • Margin / exposure — ShopMonkey parts billed vs cost (v1a)
+//  • Vendor invoices — scanned supplier invoices matched to their RO + reconciled (v1b)
 const REASON_LABEL = { warranty: 'Warranty', rebilled: 'Re-billed', vendor_query: 'Vendor query', ignore: 'Ignore' };
-
-// Parts reconciliation — v1a: ShopMonkey parts margin / exposure per RO.
-// A worklist of parts paid for but not (fully) billed, worst first. The
-// vendor-invoice reconciliation (three-way check) layers on in v1b.
-const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '—';
 const CLASS = {
   leak: { label: 'LEAK', color: 'var(--danger)', bg: 'rgba(255,77,77,0.12)' },
   under_billed: { label: 'UNDER-BILLED', color: 'var(--warning)', bg: 'rgba(255,184,0,0.12)' },
   bundled: { label: 'BUNDLED', color: 'var(--text2)', bg: 'var(--bg3)' },
 };
+const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '—';
 const th = { padding: '8px 12px', fontWeight: 500 };
 const td = { padding: '8px 12px' };
 
 export default function PartsRecon() {
-  return <PerLocationPage>{(locId) => <PartsView locId={locId} />}</PerLocationPage>;
+  return <PerLocationPage>{(locId) => <PartsTabs locId={locId} />}</PerLocationPage>;
 }
 
-function PartsView({ locId }) {
+function PartsTabs({ locId }) {
+  const [view, setView] = useState('margin');
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+        {[['margin', 'Margin / exposure'], ['invoices', 'Vendor invoices']].map(([k, l]) => (
+          <button key={k} onClick={() => setView(k)} className={view === k ? 'primary' : ''} style={{ fontSize: '13px', padding: '7px 16px' }}>{l}</button>
+        ))}
+      </div>
+      {view === 'margin' ? <MarginView locId={locId} /> : <InvoicesView locId={locId} />}
+    </div>
+  );
+}
+
+// ── Margin / exposure (v1a) ──────────────────────────────────────────────
+function MarginView({ locId }) {
   const { api } = useAuth();
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
@@ -141,6 +155,99 @@ function PartsView({ locId }) {
 
       <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
         <b>Leak</b> = paid for, $0 billed, not on a flat-rate job. <b>Under-billed</b> = billed below cost. <b>Bundled</b> = $0 part inside a lump-sum/flat-rate service (normal — shown for review). {data.cached ? 'Cached' : 'Fresh'} as of {new Date(data.generated_at).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })}.
+      </div>
+    </div>
+  );
+}
+
+// ── Vendor invoices (v1b) ────────────────────────────────────────────────
+const RECON = {
+  underlogged: { t: 'POSSIBLE UNBILLED', c: 'var(--danger)' },
+  variance: { t: 'VARIANCE', c: 'var(--warning)' },
+  ok: { t: 'OK', c: 'var(--success)' },
+  pending: { t: 'PENDING', c: 'var(--text3)' },
+};
+const MATCH_COLOR = { matched: 'var(--success)', confirmed: 'var(--success)', ambiguous: 'var(--warning)', unmatched: 'var(--danger)', pending: 'var(--text3)' };
+
+function InvoicesView({ locId }) {
+  const { api } = useAuth();
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    api(`/parts/${locId}/invoices`).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
+  }, [api, locId]);
+  useEffect(() => { load(); }, [load]);
+
+  const upload = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+      const out = await api(`/parts/${locId}/invoice-intake`, { method: 'POST', body: JSON.stringify({ file: b64, media_type: file.type || 'image/jpeg' }) });
+      showToast(`Read: ${out.extracted?.vendor || '?'} · RO ${out.matched_order_number || out.extracted?.ro_ref || '—'} · ${out.recon_status}`);
+      load();
+    } catch (e) { showToast(e.message, 'error'); }
+    setBusy(false);
+  };
+  const pickMatch = async (inv) => {
+    const cands = inv.match_candidates || [];
+    if (!cands.length) { showToast('No candidate ROs for that reference', 'error'); return; }
+    const body = cands.map((c, i) => `${i + 1} = RO ${c.order_number} (${c.day_gap} days from the invoice)`).join('\n');
+    const pick = await askInput({ title: `Which RO is this ${inv.vendor || 'invoice'}?`, body, label: 'Number' });
+    const c = cands[Number(pick) - 1];
+    if (!c) return;
+    try { const out = await api(`/parts/invoice/${inv.id}/confirm-match`, { method: 'PUT', body: JSON.stringify({ order_id: c.order_id, order_number: c.order_number }) }); showToast(`Matched RO ${c.order_number} — ${out.recon_status}`); load(); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
+  const del = async (inv) => {
+    if (!await askConfirm({ title: 'Remove invoice', body: `Remove ${inv.vendor || 'invoice'} ${inv.invoice_number || ''}?`, danger: true, confirmLabel: 'Remove' })) return;
+    try { await api(`/parts/invoice/${inv.id}`, { method: 'DELETE' }); load(); } catch (e) { showToast(e.message, 'error'); }
+  };
+
+  if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
+  if (!data) return <Skeleton rows={5} height={18} />;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', flex: '1 1 260px' }}>Supplier invoices matched to their RO by the number written on them. Photos flow in from the scan pipeline; you can also add one here.</div>
+        <label className="primary" style={{ fontSize: '12px', padding: '7px 14px', cursor: busy ? 'default' : 'pointer', borderRadius: '8px' }}>
+          {busy ? 'Reading…' : '＋ Upload invoice'}
+          <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={busy} onChange={(e) => upload(e.target.files[0])} />
+        </label>
+      </div>
+
+      {(!data.invoices || !data.invoices.length) && (
+        <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '28px' }}>No invoices yet. Forward or upload a supplier invoice to start reconciling.</div>
+      )}
+
+      {(data.invoices || []).map((inv) => {
+        const rs = RECON[inv.recon_status] || RECON.pending;
+        return (
+          <div key={inv.id} className="card" style={{ marginBottom: '8px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+              <div style={{ fontWeight: 700 }}>{inv.vendor || 'Unknown vendor'} {inv.invoice_number && <span style={{ fontSize: '11px', color: 'var(--text3)', fontWeight: 400 }}>#{inv.invoice_number}</span>}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>{inv.invoice_date || '—'} · paid {money(inv.subtotal != null ? inv.subtotal : inv.total)} · ref {inv.ro_ref || '—'}</div>
+            </div>
+            <div style={{ fontSize: '12px', minWidth: '120px' }}>
+              {inv.matched_order_number
+                ? <span style={{ color: MATCH_COLOR[inv.match_status] }}>RO {inv.matched_order_number}{inv.sm_url && <> · <a href={inv.sm_url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>Open ↗</a></>}</span>
+                : <span style={{ color: MATCH_COLOR[inv.match_status] || 'var(--text3)' }}>{inv.match_status}</span>}
+            </div>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: rs.c, minWidth: '130px', textAlign: 'right' }}>{rs.t}</div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button onClick={() => pickMatch(inv)} style={{ fontSize: '11px', padding: '4px 10px' }}>{inv.matched_order_number ? 'Re-match' : 'Match RO'}</button>
+              <button onClick={() => del(inv)} title="Remove" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>✕</button>
+            </div>
+            {inv.recon_note && <div style={{ flexBasis: '100%', fontSize: '11px', color: 'var(--text3)' }}>{inv.recon_note}</div>}
+          </div>
+        );
+      })}
+
+      <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
+        <b>Possible unbilled</b> = you paid the vendor more than the parts cost captured on the matched RO — worth a look. <b>Variance</b> = RO cost exceeds this invoice (multiple invoices / matrix). Ambiguous matches: tap <b>Match RO</b> to confirm.
       </div>
     </div>
   );
