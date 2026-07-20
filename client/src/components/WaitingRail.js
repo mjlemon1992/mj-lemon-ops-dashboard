@@ -121,7 +121,8 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
             {r.status === 'ordered'
               ? <button className="primary" disabled={busy} onClick={() => decideReorder(r, 'received')}>Mark received</button>
               : <button className="primary" disabled={busy} onClick={() => decideReorder(r, 'ordered')}>Mark ordered</button>}
-            <button disabled={busy} onClick={() => decideReorder(r, 'dismissed')}>Dismiss</button>
+            {/* Killing a tech's request is an owner/manager call — advisors order and receive. */}
+            {user?.role !== 'advisor' && <button disabled={busy} onClick={() => decideReorder(r, 'dismissed')}>Dismiss</button>}
           </div>
         </div>
       ))}

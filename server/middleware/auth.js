@@ -32,6 +32,7 @@ const ADVISOR_ALLOW = [
   /^\/api\/targets\/[^/]+\/\d{4}$/,        // filtered: revenue/cars/hours/efficiency targets only
   /^\/api\/clock\/[^/]+\/pay-periods$/,    // period dates for crew-paid hours
   /^\/api\/clock\/[^/]+\/entries$/,        // punch hours (no wages exist in the system)
+  /^\/api\/attention$/,                    // ⏳ pill — route returns re-orders ONLY for advisors
 ];
 
 function authenticateToken(req, res, next) {
