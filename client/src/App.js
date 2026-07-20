@@ -38,11 +38,10 @@ function ProtectedRoute({ children, ownerOnly, ownerOrPartner }) {
   return children;
 }
 
-// Advisors land on their board — Home is revenue metrics they can't (and
-// shouldn't) load.
+// Everyone gets Home now — for advisors it renders the operational decks only
+// (the server strips money fields from their responses regardless).
 function RoleHome() {
-  const { user } = useAuth();
-  return user?.role === 'advisor' ? <Navigate to="/reorders" replace /> : <Home />;
+  return <Home />;
 }
 
 export default function App() {

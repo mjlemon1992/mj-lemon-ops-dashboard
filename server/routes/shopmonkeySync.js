@@ -744,12 +744,15 @@ module.exports = (pool) => {
         if (!byTechMap[key]) byTechMap[key] = { tech_name: key, count: 0, hours: 0, cost: 0 };
         byTechMap[key].count++; byTechMap[key].hours += Number(r.labour_hours || 0); byTechMap[key].cost += Number(r.unbilled_wage_cost || 0);
       }
+      // Advisors see the operational side (which jobs, whose, how many hours) —
+      // wage-cost dollars are stripped server-side.
+      const isAdvisor = req.user.role === 'advisor';
       res.json({
         snapshot_date: d, count: rows.length,
         total_unbilled_hours: Math.round(totalHours * 10) / 10,
-        total_unbilled_wage_cost: Math.round(totalCost * 100) / 100,
-        comebacks: rows,
-        by_tech: Object.values(byTechMap).map(t => ({ tech_name: t.tech_name, count: t.count, hours: Math.round(t.hours * 10) / 10, cost: Math.round(t.cost * 100) / 100 }))
+        total_unbilled_wage_cost: isAdvisor ? null : Math.round(totalCost * 100) / 100,
+        comebacks: isAdvisor ? rows.map(({ unbilled_wage_cost, ...r }) => r) : rows,
+        by_tech: Object.values(byTechMap).map(t => ({ tech_name: t.tech_name, count: t.count, hours: Math.round(t.hours * 10) / 10, cost: isAdvisor ? null : Math.round(t.cost * 100) / 100 }))
       });
     } catch (err) {
       res.status(500).json({ error: err.message });

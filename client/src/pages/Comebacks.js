@@ -10,7 +10,10 @@ const fmtDate = s => {
 };
 
 function ComebacksView({ locId }) {
-  const { api } = useAuth();
+  const { api, user } = useAuth();
+  // Advisors see jobs/hours; wage-cost dollars are stripped by the server and
+  // the cost UI is hidden here so the page doesn't show $0.00 shells.
+  const isAdvisor = user?.role === 'advisor';
   const [data, setData] = useState(null);
   const [revenueCount, setRevenueCount] = useState(null); // for comeback-rate denominator
   const [loading, setLoading] = useState(true);
@@ -90,11 +93,13 @@ function ComebacksView({ locId }) {
               <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--text)', marginTop: '4px' }}>{hours.toFixed(1)}</div>
               <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>labour given away</div>
             </div>
+            {!isAdvisor && (
             <div className="card" style={{ padding: '14px 16px' }}>
               <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Cost leakage</div>
               <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--danger)', marginTop: '4px' }}>{money(cost)}</div>
               <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>wage cost of those hours</div>
             </div>
+            )}
           </div>
 
           {/* Per-tech rollup */}
@@ -106,7 +111,7 @@ function ComebacksView({ locId }) {
                   <div key={t.tech_name} className="card" style={{ padding: '10px 14px', flex: '0 0 auto' }}>
                     <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text)' }}>{t.tech_name}</div>
                     <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>
-                      {t.count} {t.count === 1 ? 'job' : 'jobs'} · {Number(t.hours).toFixed(1)}h · {money(t.cost)}
+                      {t.count} {t.count === 1 ? 'job' : 'jobs'} · {Number(t.hours).toFixed(1)}h{!isAdvisor && ` · ${money(t.cost)}`}
                     </div>
                   </div>
                 ))}
@@ -125,7 +130,7 @@ function ComebacksView({ locId }) {
                   <th style={{ padding: '8px 12px', fontWeight: '500' }}>Customer / Vehicle</th>
                   <th style={{ padding: '8px 12px', fontWeight: '500' }}>Tech</th>
                   <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Hours</th>
-                  <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Wage cost</th>
+                  {!isAdvisor && <th style={{ padding: '8px 12px', fontWeight: '500', textAlign: 'right' }}>Wage cost</th>}
                 </tr>
               </thead>
               <tbody>
@@ -139,7 +144,7 @@ function ComebacksView({ locId }) {
                     </td>
                     <td style={{ padding: '8px 12px', color: 'var(--text2)' }}>{r.tech_name || 'Unassigned'}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text2)' }}>{Number(r.labour_hours || 0).toFixed(1)}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text2)' }}>{money(r.unbilled_wage_cost)}</td>
+                    {!isAdvisor && <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text2)' }}>{money(r.unbilled_wage_cost)}</td>}
                   </tr>
                 ))}
               </tbody>

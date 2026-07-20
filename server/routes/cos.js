@@ -541,9 +541,18 @@ module.exports = (pool) => {
 
   // ---------- ALERT ACKNOWLEDGE ("clear the alerts") ----------
 
+  // The Alerts PAGE is broader than the CoS itself: managers and advisors see
+  // their shop's alerts and may resolve them (operational, not money).
+  const alertRoles = (req, res, next) => {
+    if (!['owner', 'partner', 'manager', 'advisor'].includes(req.user && req.user.role)) {
+      return res.status(403).json({ error: 'Not available for this role' });
+    }
+    next();
+  };
+
   // Clear one or more alerts by their stable alertId key. Used by the Alerts
   // page Resolve button AND the voice chief of staff ("clear the alerts").
-  router.post('/alerts/ack', syncAuth, ownerOrPartner, async (req, res) => {
+  router.post('/alerts/ack', syncAuth, alertRoles, async (req, res) => {
     try {
       await ensureTables();
       const keys = Array.isArray(req.body && req.body.keys) ? req.body.keys.filter(k => typeof k === 'string' && k) : [];
@@ -561,7 +570,7 @@ module.exports = (pool) => {
   });
 
   // The set of currently-cleared alert keys (so the UI + badge filter them out).
-  router.get('/alerts/dismissed', syncAuth, ownerOrPartner, async (req, res) => {
+  router.get('/alerts/dismissed', syncAuth, alertRoles, async (req, res) => {
     try {
       await ensureTables();
       const r = await pool.query(`SELECT alert_key FROM cos_dismissed_alerts`);

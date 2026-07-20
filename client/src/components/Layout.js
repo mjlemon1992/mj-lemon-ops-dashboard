@@ -12,17 +12,17 @@ import WaitingRail from './WaitingRail';
 // carries its section so labels survive role filtering (showSection compares
 // against the previous VISIBLE item).
 const NAV = [
-  { path: '/', label: 'Home', icon: 'home', section: 'Overview' },
+  { path: '/', label: 'Home', icon: 'home', section: 'Overview', roles: ['owner', 'partner', 'manager', 'advisor'] },
   { path: '/scorecard', label: 'Scorecard', icon: 'chart', section: 'Overview', roles: ['owner', 'partner'] },
   { path: '/performance', label: 'Performance', icon: 'gauge', section: 'Overview' },
-  { path: '/alerts', label: 'Alerts', icon: 'bell', section: 'Overview' },
+  { path: '/alerts', label: 'Alerts', icon: 'bell', section: 'Overview', roles: ['owner', 'partner', 'manager', 'advisor'] },
   { path: '/technicians', label: 'Technicians', icon: 'wrench', section: 'Crew' },
   { path: '/time-clock', label: 'Time Clock', icon: 'clock', section: 'Crew', roles: ['owner', 'partner', 'manager'] },
   { path: '/bonus', label: 'Bonus', icon: 'award', section: 'Crew', roles: ['owner', 'partner', 'manager'] },
   { path: '/fuel-card', label: 'Fuel Card', icon: 'fuel', section: 'Crew', roles: ['owner', 'partner', 'manager'] },
-  { path: '/comebacks', label: 'Comebacks', icon: 'undo', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
+  { path: '/comebacks', label: 'Comebacks', icon: 'undo', section: 'Shop', roles: ['owner', 'partner', 'manager', 'advisor'] },
   { path: '/wip', label: 'Committed WIP', icon: 'clipboard', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
-  { path: '/notices', label: 'Shop Notices', icon: 'megaphone', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
+  { path: '/notices', label: 'Shop Notices', icon: 'megaphone', section: 'Shop', roles: ['owner', 'partner', 'manager', 'advisor'] },
   // The service advisor's whole dashboard: the re-order board, nothing money.
   { path: '/reorders', label: 'Re-orders', icon: 'clipboard', section: 'Shop', roles: ['advisor'] },
   { path: '/finance', label: 'Finance', icon: 'dollar', section: 'Money', roles: ['owner', 'partner', 'manager'] },

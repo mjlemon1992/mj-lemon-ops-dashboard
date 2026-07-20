@@ -177,8 +177,14 @@ export default function Home() {
   const staleDays = firstPos(activeLocations.map(l => parseInt(l.stale_threshold_days, 10) || 0)) || 5;
   const marginTarget = Math.round(firstPos(activeLocations.map(l => parseFloat(l.parts_margin_target) || 0)) || 55);
 
+  // Advisor Home = the operational decks (crew, efficiency, two weeks) plus
+  // alerts. Money sections stay off; the server strips those fields from the
+  // advisor's API responses anyway — this just keeps the layout honest.
+  const isAdvisor = user?.role === 'advisor';
+
   return (
     <div>
+      {!isAdvisor && (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
         {lastSync && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Last synced {lastSync.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })}</span>}
         <button onClick={handleRefresh} disabled={refreshing}
@@ -187,6 +193,7 @@ export default function Home() {
           {refreshing ? 'Syncing…' : 'Refresh now'}
         </button>
       </div>
+      )}
       {alertCount > 0 && (
         <div className="alert-strip">
           <span style={{ fontSize: '14px', color: 'var(--warning)' }}>⚠</span>
@@ -346,9 +353,25 @@ export default function Home() {
         );
       })()}
 
+      {/* Advisor: cars + efficiency only — the allowed operational metrics. */}
+      {isAdvisor && (
+        <div className="stat-grid" style={{ marginBottom: '20px' }}>
+          <div className="metric-card">
+            <div className="metric-label">Car count MTD</div>
+            <div className="metric-value">{groupCarCount > 0 ? groupCarCount : '—'}</div>
+            <div className="metric-sub">{groupCarCount > 0 ? 'invoiced this month' : 'awaiting sync'}</div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-label">Avg efficiency</div>
+            <div className="metric-value">{groupEff > 0 ? `${groupEff}%` : '—'}</div>
+            <div className="metric-sub">{groupEff > 0 ? 'hours sold / worked' : 'no hours yet'}</div>
+          </div>
+        </div>
+      )}
+
       {/* Full metric block for every role — a manager's "group" is just their own
           location (the locations list is already server-filtered to it). */}
-      {(
+      {!isAdvisor && (
         <div className="stat-grid" style={{ marginBottom: '20px' }}>
           {/* Revenue / cars / efficiency live on the glance board when a target
               exists — only fall back to cards when the board is hidden. */}
@@ -394,6 +417,9 @@ export default function Home() {
       )}
 
 
+      {/* Location money cards — not for advisors (their nav has no Performance
+          to click through to either). */}
+      {!isAdvisor && (<>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
         <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>Locations</div>
       </div>
@@ -451,6 +477,7 @@ export default function Home() {
           </div>
         </div>
       ))}
+      </>)}
     </div>
   );
 }
