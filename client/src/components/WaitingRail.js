@@ -40,7 +40,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
   );
   const decideReorder = (r, action) => act(
     () => api(`/clock/reorder/${r.id}`, { method: 'PUT', body: JSON.stringify({ action }) }),
-    action === 'ordered' ? `Ordered — ${r.item}` : 'Dismissed'
+    action === 'ordered' ? `Ordered — ${r.item}` : action === 'received' ? `Received — ${r.item} cleared` : 'Dismissed'
   );
 
   return (
@@ -108,9 +108,15 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
       {reorders.map((r) => (
         <div key={`reorder-${r.id}`} className="wr-card hot">
           <div className="wr-card-title">Re-order: {r.item}{r.qty ? ` (${r.qty})` : ''}</div>
-          <div className="wr-card-body">{r.person_name ? `flagged by ${r.person_name.split(' ')[0]}` : 'low stock flagged'}{multiLoc && <span className="wr-loc"> · {r.location_name}</span>}</div>
+          <div className="wr-card-body">
+            {r.status === 'ordered' && <span style={{ color: 'var(--accent)', fontWeight: 700 }}>Ordered · </span>}
+            {r.person_name ? `flagged by ${r.person_name.split(' ')[0]}` : 'low stock flagged'}
+            {multiLoc && <span className="wr-loc"> · {r.location_name}</span>}
+          </div>
           <div className="wr-actions">
-            <button className="primary" disabled={busy} onClick={() => decideReorder(r, 'ordered')}>Mark ordered</button>
+            {r.status === 'ordered'
+              ? <button className="primary" disabled={busy} onClick={() => decideReorder(r, 'received')}>Mark received</button>
+              : <button className="primary" disabled={busy} onClick={() => decideReorder(r, 'ordered')}>Mark ordered</button>}
             <button disabled={busy} onClick={() => decideReorder(r, 'dismissed')}>Dismiss</button>
           </div>
         </div>

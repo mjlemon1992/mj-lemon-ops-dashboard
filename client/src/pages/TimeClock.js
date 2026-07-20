@@ -93,9 +93,8 @@ function ClockAdmin({ locId }) {
   const reorderAction = async (r, action) => {
     setBusy(true); setErr(null);
     try {
-      const out = await api(`/clock/reorder/${r.id}`, { method: 'PUT', body: JSON.stringify({ action }) });
-      if (action === 'ordered' && out.shopmonkey) showToast(/failed|not configured/i.test(out.shopmonkey) ? `Marked ordered (${out.shopmonkey})` : 'Ordered — on the Shopmonkey calendar');
-      else showToast(action === 'received' ? 'Marked received' : action === 'dismissed' ? 'Dismissed' : 'Updated');
+      await api(`/clock/reorder/${r.id}`, { method: 'PUT', body: JSON.stringify({ action }) });
+      showToast(action === 'ordered' ? 'Marked ordered' : action === 'received' ? 'Received — cleared from the board' : action === 'dismissed' ? 'Dismissed' : 'Updated');
       load();
     } catch (e) { setErr(e.message); }
     setBusy(false);
@@ -573,10 +572,10 @@ function ClockAdmin({ locId }) {
                 {r.qty && <span style={{ color: 'var(--text2)', fontSize: '13px' }}>· {r.qty}</span>}
                 {r.person_name && <span style={{ color: 'var(--text3)', fontSize: '12px' }}>· {r.person_name}</span>}
                 {r.note && <span style={{ color: 'var(--text3)', fontSize: '12px', fontStyle: 'italic' }}>"{r.note}"</span>}
-                <span style={{ fontSize: '11px', fontWeight: 700, color: chip[1] }}>{chip[0]}{r.sm_note && r.status === 'ordered' ? ` · ${r.sm_note}` : ''}</span>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: chip[1] }}>{chip[0]}</span>
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
                   {r.status === 'requested' && <button className="primary" disabled={busy} onClick={() => reorderAction(r, 'ordered')} style={{ fontSize: '12px', padding: '5px 12px' }}>Mark ordered</button>}
-                  {r.status === 'ordered' && <button disabled={busy} onClick={() => reorderAction(r, 'received')} style={{ fontSize: '12px', padding: '5px 12px', color: 'var(--success)' }}>Received</button>}
+                  {r.status === 'ordered' && <button className="primary" disabled={busy} onClick={() => reorderAction(r, 'received')} style={{ fontSize: '12px', padding: '5px 12px' }}>Mark received</button>}
                   {r.status !== 'dismissed' && r.status !== 'received' && <button disabled={busy} onClick={() => reorderAction(r, 'dismissed')} title="Dismiss" style={{ fontSize: '12px', padding: '5px 10px', color: 'var(--text3)' }}>✕</button>}
                 </span>
               </div>

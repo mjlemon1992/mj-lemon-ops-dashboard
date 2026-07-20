@@ -912,9 +912,11 @@ module.exports = (pool) => {
 
   // ══ RE-ORDER BOARD ════════════════════════════════════════════════════
   // A tech flags low misc stock from the kiosk (shop-PIN gated, tagged to the
-  // name they tap — no personal PIN, keep it frictionless). Owner/manager
-  // marks it ordered/received; marking "ordered" best-efforts a Shopmonkey
-  // calendar note as a reminder (the appointment API we already use).
+  // name they tap — no personal PIN, keep it frictionless). It sits on the
+  // board as "requested" until anyone with board access (owner/partner/manager
+  // for the location) marks it "ordered" (stays visible), then "received" —
+  // which clears it from the kiosk board AND the ops dashboard. Every surface
+  // reads the same rows, so the status is identical everywhere.
 
   // Kiosk: create a request.
   router.post('/:locationId/reorder', async (req, res) => {
@@ -936,7 +938,8 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
-  // Kiosk: see the board (open + recently actioned) so a tech knows it's handled.
+  // Kiosk: see the board so a tech knows it's handled. Requested + ordered
+  // stay; "received"/"dismissed" drop off immediately (cleared everywhere).
   router.get('/:locationId/reorder-board', async (req, res) => {
     try {
       await ensure();
@@ -944,24 +947,26 @@ module.exports = (pool) => {
       const { rows } = await pool.query(
         `SELECT id, person_name, item, qty, note, status, created_at
            FROM reorder_request
-          WHERE location_id=$1 AND (status IN ('requested','ordered') OR created_at > now() - interval '7 days')
+          WHERE location_id=$1 AND status IN ('requested','ordered')
           ORDER BY (status='requested') DESC, created_at DESC LIMIT 40`, [req.params.locationId]);
       res.json({ requests: rows });
     } catch (e) { fail(res, e); }
   });
 
-  // Admin: list (all statuses, recent).
+  // Admin: the active board (requested + ordered) — same rows the kiosk shows.
   router.get('/:locationId/reorders', ...authed, scoped, async (req, res) => {
     try {
       await ensure();
       const { rows } = await pool.query(
-        `SELECT * FROM reorder_request WHERE location_id=$1
+        `SELECT * FROM reorder_request WHERE location_id=$1 AND status IN ('requested','ordered')
           ORDER BY (status='requested') DESC, created_at DESC LIMIT 100`, [req.params.locationId]);
       res.json({ requests: rows });
     } catch (e) { fail(res, e); }
   });
 
-  // Admin: advance a request. ordered → best-effort Shopmonkey calendar note.
+  // Advance a request: requested → ordered → received (or dismissed). Anyone
+  // with board access for the location can do it — the status is shared, so it
+  // updates identically on the kiosk, the Time Clock tab and the rail.
   router.put('/reorder/:id', ...authed, async (req, res) => {
     try {
       await ensure();
@@ -971,38 +976,10 @@ module.exports = (pool) => {
       if (!rr.length) return fail(res, 'Request not found', 404);
       const r = rr[0];
       if (!canAccessLocation(req.user, r.location_id)) return fail(res, 'Access denied for this location', 403);
-      let smNote = r.sm_note;
-      if (action === 'ordered' && !r.sm_note) {
-        const apiKey = process.env.SHOPMONKEY_API_KEY;
-        const { rows: lr } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [r.location_id]);
-        const smLoc = lr[0] && lr[0].shopmonkey_location_id;
-        if (apiKey && smLoc) {
-          const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
-          try {
-            const resp = await fetch('https://api.shopmonkey.cloud/v3/appointment', {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                locationId: smLoc,
-                name: `📦 Re-order: ${r.item}${r.qty ? ` (${r.qty})` : ''}`,
-                note: `Ordered${r.person_name ? ` — flagged by ${r.person_name}` : ''}${r.note ? `. ${r.note}` : ''}. Via the ops dashboard re-order board.`,
-                allDay: true,
-                startDate: `${today}T15:00:00.000Z`,
-                endDate: `${today}T23:00:00.000Z`,
-                color: 'green', sendConfirmation: false, sendReminder: false,
-              }),
-            });
-            const body = await resp.json().catch(() => ({}));
-            smNote = resp.ok ? 'On Shopmonkey calendar ✓' : `Shopmonkey push failed: ${body.message || resp.status}`;
-          } catch (e) { smNote = `Shopmonkey push failed: ${e.message}`; }
-        } else {
-          smNote = 'Shopmonkey not configured for this location';
-        }
-      }
       await pool.query(
-        'UPDATE reorder_request SET status=$2, sm_note=$3, decided_by=$4, decided_at=now() WHERE id=$1',
-        [r.id, action, smNote, who(req)]);
-      res.json({ ok: true, id: r.id, status: action, shopmonkey: smNote });
+        'UPDATE reorder_request SET status=$2, decided_by=$3, decided_at=now() WHERE id=$1',
+        [r.id, action, who(req)]);
+      res.json({ ok: true, id: r.id, status: action });
     } catch (e) { fail(res, e); }
   });
 
