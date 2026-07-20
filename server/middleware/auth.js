@@ -19,7 +19,7 @@ const ADVISOR_ALLOW = [
   // Home decks + Alerts + Comebacks + Notices (2026-07-20). Money endpoints
   // stay out; metrics summary and technicians STRIP money fields server-side
   // for advisor tokens before responding.
-  /^\/api\/metrics\/[^/]+\/summary$/,      // filtered: alerts, car count, hours only
+  /^\/api\/metrics\/(?!group\/)[^/]+\/summary$/,  // per-location only (NOT /group/summary — that's all-locations revenue); filtered to alerts/car count/hours
   /^\/api\/technicians\/[^/]+$/,           // filtered: no per-tech revenue
   /^\/api\/clock\/[^/]+\/status$/,         // crew-now deck
   /^\/api\/clock\/[^/]+\/timeoff$/,        // two-weeks deck / who's off
