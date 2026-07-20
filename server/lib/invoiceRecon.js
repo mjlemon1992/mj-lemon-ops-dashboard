@@ -1,5 +1,5 @@
 // Vendor-invoice extraction + RO matching + reconciliation (parts recon v1b).
-const { fetchInvoicedOrdersForLocation, fetchOrderService } = require('./shopmonkey');
+const { fetchOrderService, fetchOrderByNumber, fetchRecentInvoicedOrders } = require('./shopmonkey');
 
 const digits = (s) => String(s || '').replace(/\D/g, '');
 const dollarsToCents = (v) => (v == null ? null : Math.round(Number(v) * 100));
@@ -72,18 +72,22 @@ async function matchInvoiceToRo(apiKey, smLocationId, { ro_ref, invoice_date }) 
   const ref = digits(ro_ref);
   if (!ref) return { status: 'unmatched', candidates: [] };
   const invDate = invoice_date ? new Date(invoice_date + 'T12:00:00Z') : new Date();
-  const since = new Date(invDate.getTime() - 45 * 86400000);   // invoices land within weeks of the RO
-  // The lookup is a live ShopMonkey sweep and can transiently throttle — retry
-  // a couple of times before giving up (so a scan hiccup doesn't strand a match).
-  let orders, lastErr;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try { orders = await fetchInvoicedOrdersForLocation(apiKey, smLocationId, since); lastErr = null; break; }
-    catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 600 * (attempt + 1))); }
-  }
-  if (lastErr) return { status: 'unmatched', candidates: [], error: lastErr.message };
-  const last4 = ref.slice(-4);
-  const exact = orders.filter((o) => digits(o.number) === ref);
-  const pool = exact.length ? exact : orders.filter((o) => digits(o.number).endsWith(last4));
+  const retry = async (fn) => { let e; for (let a = 0; a < 3; a++) { try { return await fn(); } catch (x) { e = x; await new Promise((r) => setTimeout(r, 500 * (a + 1))); } } throw e; };
+
+  // Full RO number → exact lookup (1 cheap call). Last-4/partial → the most
+  // recent invoiced orders (single page, not a full sweep) filtered by suffix.
+  let exact = [], pool = [];
+  try {
+    if (ref.length >= 7) {
+      exact = await retry(() => fetchOrderByNumber(apiKey, smLocationId, ref));
+      pool = exact;
+    } else {
+      const recent = await retry(() => fetchRecentInvoicedOrders(apiKey, smLocationId, 200));
+      const last4 = ref.slice(-4);
+      exact = recent.filter((o) => digits(o.number) === ref);
+      pool = exact.length ? exact : recent.filter((o) => digits(o.number).endsWith(last4));
+    }
+  } catch (e) { return { status: 'unmatched', candidates: [], error: e.message }; }
   if (!pool.length) return { status: 'unmatched', candidates: [] };
   const scored = pool.map((o) => {
     const od = o.invoicedDate ? new Date(o.invoicedDate).getTime() : 0;
