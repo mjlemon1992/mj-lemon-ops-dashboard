@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, canAccessLocation } = require('../middleware/auth');
 
 module.exports = (pool) => {
   const router = express.Router();
@@ -24,6 +24,7 @@ module.exports = (pool) => {
 
   // Bulk upsert tech efficiency from Make (one snapshot = all techs for a date)
   router.post('/:locationId/update', authenticateToken, async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const { snapshot_date, techs } = req.body;
     if (!Array.isArray(techs)) return res.status(400).json({ error: 'techs must be an array' });
     const date = snapshot_date || new Date().toISOString().slice(0, 10);
