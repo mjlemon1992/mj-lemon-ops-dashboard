@@ -19,6 +19,14 @@ const NOTICE_STYLE = {
 
 export default function Display() {
   const { locationId } = useParams();
+  // Board theme comes from the URL (no Layout/toggle on this route):
+  //   /display/<id>             → dark (default — right for a TV in the bay)
+  //   /display/<id>?theme=light → light, for bright showroom walls
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('theme');
+    if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    return () => { if (t === 'light') document.documentElement.removeAttribute('data-theme'); };
+  }, []);
   const pinKey = `display_pin_${locationId}`;
   const [pin, setPin] = useState(() => sessionStorage.getItem(pinKey) || '');
   const [entered, setEntered] = useState(() => !!sessionStorage.getItem(pinKey));
