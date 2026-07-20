@@ -171,7 +171,7 @@ export default function Display() {
           <span style={{ fontFamily: 'var(--font-disp)', fontSize: '26px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: 'var(--text)' }}>{data.location.name}</span>
         </div>
         <div style={{ fontSize: '13px', color: 'var(--text3)' }}>
-          {loading ? 'Refreshing…' : `Updated ${updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : ''}`} · auto-refresh 5 min
+          {loading ? 'Refreshing…' : `Updated ${updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : ''}`} · auto-refresh 1 min
         </div>
       </div>
 
