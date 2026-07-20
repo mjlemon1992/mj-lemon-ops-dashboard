@@ -3,6 +3,7 @@ const { authenticateToken, requireRole, canAccessLocation, syncAuth } = require(
 const { monthStartFor, fetchInvoicedOrdersForLocation, fetchOrderService } = require('../lib/shopmonkey');
 const { ensurePartsReconTables } = require('../lib/partsReconSchema');
 const { extractInvoice, roPartsCostCents, matchInvoiceToRo, reconcile } = require('../lib/invoiceRecon');
+const { fetchInvoiceEmails, markSeen } = require('../lib/invoiceInbox');
 
 // Parts reconciliation — v1a: ShopMonkey-only parts margin / exposure per RO.
 // For each invoiced order in the window, compare each part's wholesale cost
@@ -203,6 +204,58 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
+  // ══ SCAN FRONT DOOR — pull scanned invoices out of an email inbox ══════════
+  // ScanSnap "scan to email" → an OPS inbox → this reads the PDF/image
+  // attachments, runs each through the same extract→match→reconcile pipeline,
+  // and marks the email read. Config (all env, dark until set):
+  //   PARTS_IMAP_USER / PARTS_IMAP_PASS  dedicated invoice inbox (preferred), OR
+  //   GMAIL_IMAP_USER / GMAIL_IMAP_PASS  the shared hub inbox — but then a
+  //   PARTS_INTAKE_SUBJECT_TAG is REQUIRED so we only touch tagged scans and
+  //   never hoover unrelated attachments out of the hub.
+  const scanInboxInto = async (locationId) => {
+    const user = process.env.PARTS_IMAP_USER || process.env.GMAIL_IMAP_USER;
+    const pass = process.env.PARTS_IMAP_PASS || process.env.GMAIL_IMAP_PASS;
+    const tag = (process.env.PARTS_INTAKE_SUBJECT_TAG || '').trim();
+    const dedicated = !!(process.env.PARTS_IMAP_USER && process.env.PARTS_IMAP_PASS);
+    if (!user || !pass) return { ok: false, error: 'Invoice inbox not configured (set PARTS_IMAP_USER/PASS or GMAIL_IMAP_USER/PASS)', processed: 0, results: [] };
+    if (!dedicated && !tag) return { ok: false, error: 'Refusing to scan the shared inbox without a filter — set PARTS_INTAKE_SUBJECT_TAG, or use a dedicated PARTS_IMAP_USER/PASS inbox', processed: 0, results: [] };
+    const { rows } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [locationId]);
+    if (!rows.length) return { ok: false, error: 'Location not found', processed: 0, results: [] };
+    const smLoc = rows[0].shopmonkey_location_id;
+    if (!smLoc) return { ok: false, error: 'Location not connected to Shopmonkey', processed: 0, results: [] };
+    const apiKey = process.env.SHOPMONKEY_API_KEY;
+
+    const inbox = await fetchInvoiceEmails({ user, pass, subjectTag: tag });
+    if (!inbox.ok) return { ok: false, error: inbox.error, processed: 0, results: [] };
+    await ensurePartsReconTables(pool);
+    const results = [];
+    const doneUids = [];
+    for (const msg of inbox.messages) {
+      let ok = false;
+      for (const att of msg.attachments) {
+        try {
+          const ex = await extractInvoice(att.base64, att.mediaType);
+          const out = await processInvoice(locationId, smLoc, apiKey, ex, 'email');
+          results.push({ from: msg.from, file: att.filename, vendor: out.vendor, ro_ref: out.ro_ref, match_status: out.match_status, recon_status: out.recon_status });
+          ok = true;
+        } catch (e) { results.push({ from: msg.from, file: att.filename, error: String(e.message || e) }); }
+      }
+      if (ok) doneUids.push(msg.uid);   // only mark read if at least one attachment filed
+    }
+    if (doneUids.length) { try { await markSeen({ user, pass, uids: doneUids }); } catch (e) { /* leave unread to retry */ } }
+    return { ok: true, scanned: inbox.messages.length, processed: results.filter((r) => !r.error).length, results };
+  };
+
+  // Manual "Scan inbox now" (owner/partner via JWT, or the automation's X-Sync-Key).
+  router.post('/:locationId/scan-inbox', syncAuth, async (req, res) => {
+    try {
+      if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
+      const out = await scanInboxInto(req.params.locationId);
+      if (!out.ok) return fail(res, out.error, 400);
+      res.json(out);
+    } catch (e) { fail(res, e); }
+  });
+
   router.get('/:locationId/invoices', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
     if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
     try {
@@ -280,6 +333,28 @@ module.exports = (pool) => {
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
+
+  // Always-on poller (dark until configured): every PARTS_INBOX_POLL_MIN minutes,
+  // scan the inbox and file any new scans under PARTS_INBOX_LOCATION. Single
+  // Railway instance, re-entrancy-guarded, and \Seen prevents double-ingest.
+  const POLL_MIN = Number(process.env.PARTS_INBOX_POLL_MIN || 0);
+  const POLL_LOC = process.env.PARTS_INBOX_LOCATION || null;
+  if (POLL_MIN > 0 && POLL_LOC && (process.env.PARTS_IMAP_USER || process.env.GMAIL_IMAP_USER)) {
+    let running = false;
+    const tick = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const r = await scanInboxInto(POLL_LOC);
+        if (r && r.ok && r.processed) console.log(`[parts-inbox] filed ${r.processed} scanned invoice(s)`);
+        else if (r && !r.ok) console.warn('[parts-inbox]', r.error);
+      } catch (e) { console.error('[parts-inbox] poll error:', e.message); }
+      finally { running = false; }
+    };
+    setInterval(tick, POLL_MIN * 60 * 1000).unref?.();
+    setTimeout(tick, 20 * 1000).unref?.();   // first pass shortly after boot
+    console.log(`[parts-inbox] poller on — every ${POLL_MIN}m into location ${POLL_LOC}`);
+  }
 
   return router;
 };

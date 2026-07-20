@@ -212,6 +212,16 @@ function InvoicesView({ locId }) {
     if (!await askConfirm({ title: 'Remove invoice', body: `Remove ${inv.vendor || 'invoice'} ${inv.invoice_number || ''}?`, danger: true, confirmLabel: 'Remove' })) return;
     try { await api(`/parts/invoice/${inv.id}`, { method: 'DELETE' }); load(); } catch (e) { showToast(e.message, 'error'); }
   };
+  const [scanning, setScanning] = useState(false);
+  const scanNow = async () => {
+    setScanning(true);
+    try {
+      const out = await api(`/parts/${locId}/scan-inbox`, { method: 'POST', body: JSON.stringify({}) });
+      showToast(out.processed ? `Filed ${out.processed} scanned invoice${out.processed === 1 ? '' : 's'} from email` : 'No new scanned invoices in the inbox');
+      load();
+    } catch (e) { showToast(e.message, 'error'); }
+    setScanning(false);
+  };
 
   if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
   if (!data) return <Skeleton rows={5} height={18} />;
@@ -220,10 +230,16 @@ function InvoicesView({ locId }) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
         <div style={{ fontSize: '12px', color: 'var(--text3)', flex: '1 1 260px' }}>Supplier invoices matched to their RO by the number written on them. Photos flow in from the scan pipeline; you can also add one here.</div>
-        <label className="primary" style={{ fontSize: '12px', padding: '7px 14px', cursor: busy ? 'default' : 'pointer', borderRadius: '8px' }}>
-          {busy ? 'Reading…' : '＋ Upload invoice'}
-          <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={busy} onChange={(e) => upload(e.target.files[0])} />
-        </label>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button onClick={scanNow} disabled={scanning} title="Pull scanned invoices sent to the OPS inbox"
+            style={{ fontSize: '12px', padding: '7px 14px', borderRadius: '8px' }}>
+            {scanning ? 'Checking…' : '📥 Scan inbox'}
+          </button>
+          <label className="primary" style={{ fontSize: '12px', padding: '7px 14px', cursor: busy ? 'default' : 'pointer', borderRadius: '8px' }}>
+            {busy ? 'Reading…' : '＋ Upload invoice'}
+            <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={busy} onChange={(e) => upload(e.target.files[0])} />
+          </label>
+        </div>
       </div>
 
       {(!data.invoices || !data.invoices.length) && (
