@@ -148,13 +148,16 @@ module.exports = (pool) => {
             AND (clock_in AT TIME ZONE 'America/Edmonton')::date BETWEEN $3::date AND $4::date
           ORDER BY clock_in DESC`, [req.params.locationId, person.id, from, to]);
       const total = Math.round(entries.reduce((s, e) => s + (e.paid_hours != null ? Number(e.paid_hours) : 0), 0) * 100) / 100;
-      // Personal holiday balance: allowance vs approved vacation days this year.
-      const { rows: vp } = await pool.query('SELECT vacation_days_per_year FROM bonus_person WHERE id=$1', [person.id]);
+      // Personal holiday balance in HOURS (matches QuickBooks): allowance hours
+      // vs approved vacation hours (working days × the contractual daily hours).
+      const { rows: vp } = await pool.query('SELECT vacation_hours_per_year FROM bonus_person WHERE id=$1', [person.id]);
       const { rows: vu } = await pool.query(
         "SELECT COALESCE(SUM(working_days),0) AS d FROM time_off_request WHERE person_id=$1 AND status='approved' AND type='vacation' AND to_char(start_date,'YYYY')=$2",
         [person.id, String(new Date().getFullYear())]);
-      const allowance = vp[0] ? vp[0].vacation_days_per_year : null;
-      const used = Number(vu[0].d) || 0;
+      const { rows: lrb } = await pool.query('SELECT open_days, weekly_hours FROM locations WHERE id=$1', [req.params.locationId]);
+      const perDayB = Math.round(((Number((lrb[0] || {}).weekly_hours) || 40) / openDaySet((lrb[0] || {}).open_days).size) * 100) / 100;
+      const allowance = vp[0] && vp[0].vacation_hours_per_year != null ? Number(vp[0].vacation_hours_per_year) : null;
+      const used = Math.round((Number(vu[0].d) || 0) * perDayB * 100) / 100;
       res.json({
         from, to, entries, total_paid: total, name: person.name,
         holidays: { allowance, used, left: allowance != null ? Math.max(0, allowance - used) : null },
@@ -263,7 +266,9 @@ module.exports = (pool) => {
             AND r.end_date >= (now() AT TIME ZONE 'America/Edmonton')::date - 7
             AND r.start_date <= (now() AT TIME ZONE 'America/Edmonton')::date + 70
           ORDER BY r.start_date`, [req.params.locationId]);
-      const { rows: lr } = await pool.query('SELECT province FROM locations WHERE id=$1', [req.params.locationId]);
+      const { rows: lr } = await pool.query('SELECT province, open_days, weekly_hours FROM locations WHERE id=$1', [req.params.locationId]);
+      const perDayBd = Math.round(((Number((lr[0] || {}).weekly_hours) || 40) / openDaySet((lr[0] || {}).open_days).size) * 100) / 100;
+      for (const r of rows) r.hours = Math.round((r.working_days || 0) * perDayBd * 100) / 100;
       const today = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' }) + 'T12:00:00Z');
       const winFrom = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-01`;
       const nextEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 2, 0));
@@ -301,7 +306,8 @@ module.exports = (pool) => {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
         [req.params.locationId, person_id, start_date, end_date, type || 'vacation', String(note || '').slice(0, 300), days,
          typeof paid === 'boolean' ? paid : null]);
-      res.json({ ok: true, id: rows[0].id, working_days: days, name: pr[0].name });
+      const perDayR = Math.round(((Number((locRows[0] || {}).weekly_hours) || 40) / openDaySet((locRows[0] || {}).open_days).size) * 100) / 100;
+      res.json({ ok: true, id: rows[0].id, working_days: days, hours: Math.round(days * perDayR * 100) / 100, name: pr[0].name });
     } catch (e) { fail(res, e); }
   });
 
@@ -478,19 +484,18 @@ module.exports = (pool) => {
            FROM time_off_request r LEFT JOIN bonus_person p ON p.id = r.person_id
           WHERE r.location_id=$1 AND (to_char(r.start_date,'YYYY')=$2 OR to_char(r.end_date,'YYYY')=$2)
           ORDER BY r.status='pending' DESC, r.start_date DESC`, [req.params.locationId, year]);
-      const totals = {}, vacation_used = {};
-      for (const r of requests) {
-        if (r.status !== 'approved' || !r.person_id) continue;
-        totals[r.person_id] = (totals[r.person_id] || 0) + (r.working_days || 0);
-        // Allowance tracking counts VACATION type only — sick/unpaid/other and
-        // stat holidays never eat the holiday budget.
-        if (r.type === 'vacation') vacation_used[r.person_id] = (vacation_used[r.person_id] || 0) + (r.working_days || 0);
-      }
-      // Requests as HOURS too — days × the contractual daily hours.
+      // Per-day contractual hours (weekly ÷ open days) — the days→hours factor.
       const { rows: lr } = await pool.query('SELECT open_days, weekly_hours FROM locations WHERE id=$1', [req.params.locationId]);
       const openSet = openDaySet((lr[0] || {}).open_days);
       const perDay = Math.round(((Number((lr[0] || {}).weekly_hours) || 40) / openSet.size) * 100) / 100;
       for (const r of requests) r.hours = Math.round((r.working_days || 0) * perDay * 100) / 100;
+      // totals + vacation_used tracked in HOURS (QuickBooks-native unit).
+      const totals = {}, vacation_used = {};
+      for (const r of requests) {
+        if (r.status !== 'approved' || !r.person_id) continue;
+        totals[r.person_id] = Math.round(((totals[r.person_id] || 0) + r.hours) * 100) / 100;
+        if (r.type === 'vacation') vacation_used[r.person_id] = Math.round(((vacation_used[r.person_id] || 0) + r.hours) * 100) / 100;
+      }
       res.json({ year, requests, totals, vacation_used, per_day_hours: perDay });
     } catch (e) { fail(res, e); }
   });

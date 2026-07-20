@@ -54,10 +54,10 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
         <div key={r.id} className="wr-card hot">
           <div className="wr-card-title">{r.person_name} — {OFF_LABEL[r.type] || r.type}</div>
           <div className="wr-card-body">
-            {fmtD(r.start_date)}–{fmtD(r.end_date)} · {r.working_days} day{r.working_days === 1 ? '' : 's'}
+            {fmtD(r.start_date)}–{fmtD(r.end_date)} · {r.hours} h
             {r.type === 'vacation' && r.allowance != null && (
-              <> · <span style={{ color: (r.vacation_used + r.working_days) > r.allowance ? 'var(--danger)' : 'var(--warning)' }}>
-                {r.vacation_used + r.working_days} of {r.allowance} used</span></>
+              <> · <span style={{ color: (r.vacation_used + r.hours) > r.allowance ? 'var(--danger)' : 'var(--warning)' }}>
+                {Math.round((r.vacation_used + r.hours) * 10) / 10} of {r.allowance} h used</span></>
             )}
             {multiLoc && <span className="wr-loc"> · {r.location_name}</span>}
           </div>
