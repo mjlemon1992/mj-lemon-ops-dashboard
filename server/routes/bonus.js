@@ -523,7 +523,10 @@ module.exports = (pool) => {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await client.query("UPDATE bonus_run SET status='approved', approved_by=$2, approved_at=NOW() WHERE id=$1", [run.id, who(req)]);
+        // Status-guarded so two concurrent approvals can't both post credits:
+        // only the request that flips draft→approved proceeds; the loser aborts.
+        const lock = await client.query("UPDATE bonus_run SET status='approved', approved_by=$2, approved_at=NOW() WHERE id=$1 AND status='draft'", [run.id, who(req)]);
+        if (lock.rowCount === 0) { await client.query('ROLLBACK'); client.release(); return fail(res, 'Run is already approved', 409); }
         const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
         if (run.supersedes) {
           // Ledger net effect must equal the NEW run (spec §3.1): post per-person deltas.

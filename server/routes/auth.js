@@ -6,15 +6,33 @@ const { authenticateToken, JWT_SECRET } = require('../middleware/auth');
 module.exports = (pool) => {
   const router = express.Router();
 
+  // In-memory login throttle: slows online password guessing. 8 fails per
+  // email+IP in 15 min locks that pair out. Resets on restart (acceptable —
+  // a determined attacker restarting our server is not the threat model).
+  const loginFails = new Map();
+  const LOGIN_MAX = 8, LOGIN_WINDOW = 15 * 60 * 1000;
+  const loginKey = (req, email) => ((req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || '?') + '|' + email;
+
   router.post('/login', async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    const lk = loginKey(req, String(email).toLowerCase());
+    const lf = loginFails.get(lk);
+    if (lf && lf.count >= LOGIN_MAX && Date.now() - lf.first < LOGIN_WINDOW) {
+      return res.status(429).json({ error: 'Too many attempts. Wait a few minutes and try again.' });
+    }
+    const bumpFail = () => {
+      const e = loginFails.get(lk);
+      if (!e || Date.now() - e.first > LOGIN_WINDOW) loginFails.set(lk, { count: 1, first: Date.now() });
+      else e.count++;
+    };
     try {
       const result = await pool.query('SELECT * FROM users WHERE email = $1 AND active = true', [email.toLowerCase()]);
-      if (!result.rows.length) return res.status(401).json({ error: 'Invalid credentials' });
+      if (!result.rows.length) { bumpFail(); return res.status(401).json({ error: 'Invalid credentials' }); }
       const user = result.rows[0];
       const valid = await bcrypt.compare(password, user.password_hash);
-      if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+      if (!valid) { bumpFail(); return res.status(401).json({ error: 'Invalid credentials' }); }
+      loginFails.delete(lk);
       const token = jwt.sign(
         { id: user.id, email: user.email, role: user.role, name: user.name, location_id: user.location_id },
         JWT_SECRET,

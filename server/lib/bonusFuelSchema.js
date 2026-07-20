@@ -96,6 +96,9 @@ function ensureBonusFuelTables(pool) {
       memo TEXT,
       created_by VARCHAR(120), created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
+    // One bonus_credit row per (run, person): DB backstop against double-posting
+    // if two approvals ever slip past the status guard.
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_fuel_bonus_once ON fuel_ledger (bonus_run_id, person_id) WHERE type='bonus_credit' AND bonus_run_id IS NOT NULL");
     await pool.query(`CREATE TABLE IF NOT EXISTS card_snapshot (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       location_id UUID NOT NULL,

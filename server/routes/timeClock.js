@@ -19,14 +19,26 @@ module.exports = (pool) => {
 
   // ── Brute-force throttle for the public PIN surface (per IP+location) ──
   const WINDOW_MS = 10 * 60 * 1000, MAX_FAILS = 10, LOCK_MS = 15 * 60 * 1000;
+  const LOC_MAX_FAILS = 60;   // per-location backstop: survives X-Forwarded-For spoofing
   const fails = new Map();
+  const locFails = new Map();  // keyed by locationId only — IP-independent
   const rlKey = (req, loc) => ((req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown') + '|' + loc;
-  const isLocked = (k) => { const e = fails.get(k); return !!(e && e.lockedUntil > Date.now()); };
-  const recordFail = (k) => {
-    const now = Date.now(); let e = fails.get(k);
+  const isLocked = (k, loc) => {
+    const e = fails.get(k); if (e && e.lockedUntil > Date.now()) return true;
+    const l = locFails.get(loc); return !!(l && l.lockedUntil > Date.now());
+  };
+  const recordFail = (k, loc) => {
+    const now = Date.now();
+    let e = fails.get(k);
     if (!e || now - e.first > WINDOW_MS) e = { first: now, count: 0, lockedUntil: 0 };
     e.count++; if (e.count >= MAX_FAILS) e.lockedUntil = now + LOCK_MS; fails.set(k, e);
+    if (loc) {
+      let l = locFails.get(loc);
+      if (!l || now - l.first > WINDOW_MS) l = { first: now, count: 0, lockedUntil: 0 };
+      l.count++; if (l.count >= LOC_MAX_FAILS) l.lockedUntil = now + LOC_MS; locFails.set(loc, l);
+    }
   };
+  const LOC_MS = 15 * 60 * 1000;
   const pinEqual = (a, b) => {
     const ab = Buffer.from(String(a || '')), bb = Buffer.from(String(b || ''));
     if (!ab.length || ab.length !== bb.length) return false;
@@ -38,12 +50,12 @@ module.exports = (pool) => {
   // ══ KIOSK (public, PIN-gated) ══════════════════════════════════════════
   const checkLocPin = async (req, res) => {
     const rk = rlKey(req, req.params.locationId);
-    if (isLocked(rk)) { res.status(429).json({ error: 'Too many attempts. Try again later.' }); return null; }
+    if (isLocked(rk, req.params.locationId)) { res.status(429).json({ error: 'Too many attempts. Try again later.' }); return null; }
     const { rows } = await pool.query('SELECT display_pin FROM locations WHERE id=$1', [req.params.locationId]);
     if (!rows.length) { res.status(404).json({ error: 'Location not found' }); return null; }
     const pin = (req.query.pin || (req.body || {}).loc_pin || '').toString();
     if (!rows[0].display_pin) { res.status(403).json({ error: 'Set a display PIN for this location first (under Locations).' }); return null; }
-    if (!pinEqual(pin, rows[0].display_pin)) { recordFail(rk); res.status(401).json({ error: 'Incorrect PIN' }); return null; }
+    if (!pinEqual(pin, rows[0].display_pin)) { recordFail(rk, req.params.locationId); res.status(401).json({ error: 'Incorrect PIN' }); return null; }
     fails.delete(rk);
     return true;
   };
@@ -82,8 +94,8 @@ module.exports = (pool) => {
     if (!rows.length) { fail(res, 'Person not found', 404); return null; }
     if (!rows[0].clock_pin) { fail(res, 'No clock PIN set — ask the owner to set one.', 400); return null; }
     const rk = rlKey(req, req.params.locationId) + '|' + person_id;
-    if (isLocked(rk)) { fail(res, 'Too many incorrect PINs. Try again later.', 429); return null; }
-    if (!pinEqual(pin, rows[0].clock_pin)) { recordFail(rk); fail(res, 'Incorrect PIN', 401); return null; }
+    if (isLocked(rk, req.params.locationId)) { fail(res, 'Too many incorrect PINs. Try again later.', 429); return null; }
+    if (!pinEqual(pin, rows[0].clock_pin)) { recordFail(rk, req.params.locationId); fail(res, 'Incorrect PIN', 401); return null; }
     fails.delete(rk);
     return rows[0];
   };
@@ -188,8 +200,8 @@ module.exports = (pool) => {
       const person = pr[0];
       if (!person.clock_pin) return fail(res, 'No clock PIN set for this person — ask the owner to set one.', 400);
       const rk = rlKey(req, req.params.locationId) + '|' + person_id;
-      if (isLocked(rk)) return fail(res, 'Too many incorrect PINs for this person. Try again later.', 429);
-      if (!pinEqual(pin, person.clock_pin)) { recordFail(rk); return fail(res, 'Incorrect PIN', 401); }
+      if (isLocked(rk, req.params.locationId)) return fail(res, 'Too many incorrect PINs for this person. Try again later.', 429);
+      if (!pinEqual(pin, person.clock_pin)) { recordFail(rk, req.params.locationId); return fail(res, 'Incorrect PIN', 401); }
       fails.delete(rk);
 
       const { rows: openRows } = await pool.query('SELECT * FROM time_clock_entry WHERE person_id=$1 AND clock_out IS NULL', [person_id]);
@@ -273,8 +285,8 @@ module.exports = (pool) => {
       if (!pr.length) return fail(res, 'Person not found', 404);
       if (!pr[0].clock_pin) return fail(res, 'No clock PIN set — ask the owner to set one.', 400);
       const rk = rlKey(req, req.params.locationId) + '|' + person_id;
-      if (isLocked(rk)) return fail(res, 'Too many incorrect PINs. Try again later.', 429);
-      if (!pinEqual(pin, pr[0].clock_pin)) { recordFail(rk); return fail(res, 'Incorrect PIN', 401); }
+      if (isLocked(rk, req.params.locationId)) return fail(res, 'Too many incorrect PINs. Try again later.', 429);
+      if (!pinEqual(pin, pr[0].clock_pin)) { recordFail(rk, req.params.locationId); return fail(res, 'Incorrect PIN', 401); }
       fails.delete(rk);
       const { rows: overlap } = await pool.query(
         `SELECT 1 FROM time_off_request WHERE person_id=$1 AND status IN ('pending','approved') AND start_date <= $3 AND end_date >= $2 LIMIT 1`,
@@ -559,7 +571,14 @@ module.exports = (pool) => {
       await ensure();
       const { person_id, clock_in, clock_out, break_minutes, note } = req.body || {};
       if (!person_id || !clock_in) return fail(res, 'person_id + clock_in required', 400);
+      if (isNaN(new Date(clock_in).getTime()) || (clock_out && isNaN(new Date(clock_out).getTime()))) return fail(res, 'Invalid clock time', 400);
       if (clock_out && new Date(clock_out) <= new Date(clock_in)) return fail(res, 'clock_out must be after clock_in', 400);
+      // Reject a punch that overlaps an existing one for this person (double-pay guard).
+      const ov = await pool.query(
+        `SELECT 1 FROM time_clock_entry WHERE person_id=$1 AND clock_out IS NOT NULL
+           AND clock_in < $3 AND clock_out > $2 LIMIT 1`,
+        [person_id, clock_in, clock_out || clock_in]);
+      if (ov.rows.length) return fail(res, 'That overlaps an existing punch for this person', 409);
       const { rows } = await pool.query(
         `INSERT INTO time_clock_entry (location_id, person_id, clock_in, clock_out, break_seconds, note, source, created_by, corrected_by, corrected_at)
          VALUES ($1,$2,$3,$4,$5,$6,'manual',$7,$7,now()) RETURNING *`,
@@ -578,7 +597,15 @@ module.exports = (pool) => {
       const b = req.body || {};
       const clockIn = b.clock_in || er[0].clock_in;
       const clockOut = b.clock_out === undefined ? er[0].clock_out : b.clock_out;
+      if (isNaN(new Date(clockIn).getTime()) || (clockOut && isNaN(new Date(clockOut).getTime()))) return fail(res, 'Invalid clock time', 400);
       if (clockOut && new Date(clockOut) <= new Date(clockIn)) return fail(res, 'clock_out must be after clock_in', 400);
+      if (clockOut) {
+        const ov = await pool.query(
+          `SELECT 1 FROM time_clock_entry WHERE person_id=$1 AND id<>$2 AND clock_out IS NOT NULL
+             AND clock_in < $4 AND clock_out > $3 LIMIT 1`,
+          [er[0].person_id, er[0].id, clockIn, clockOut]);
+        if (ov.rows.length) return fail(res, 'That overlaps an existing punch for this person', 409);
+      }
       let breakSec = b.break_minutes === undefined ? er[0].break_seconds : Math.round(Number(b.break_minutes) * 60);
       // Editing PAID hours directly: keep the punch times, back-compute the
       // break so paid = (out − in) − break stays consistent.
