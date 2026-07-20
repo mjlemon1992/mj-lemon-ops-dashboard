@@ -49,13 +49,17 @@ export default function Home() {
   const [clockByLoc, setClockByLoc] = useState({});
   const [offByLoc, setOffByLoc] = useState({});
   const [paidByLoc, setPaidByLoc] = useState({});
-  const [holidays, setHolidays] = useState([]);   // [{date,name}] next 12 months, shop province
+  // Holidays per PROVINCE — a Red Deer (AB) view must never show BC Day just
+  // because a BC shop sorts first. Fetched once per distinct province; the
+  // deck below picks the calendars matching the locations actually in scope.
+  const [holidaysByProv, setHolidaysByProv] = useState({});
   useEffect(() => {
-    const first = locations.find(l => l.active);
-    if (!first) return;
-    api(`/meta/holidays/${first.province || 'ab'}`)
-      .then(d => setHolidays(d.holidays || []))
-      .catch(() => {});
+    const provs = [...new Set(locations.filter(l => l.active).map(l => (l.province || 'ab').toLowerCase()))];
+    provs.forEach(pv => {
+      api(`/meta/holidays/${pv}`)
+        .then(d => setHolidaysByProv(prev => ({ ...prev, [pv]: d.holidays || [] })))
+        .catch(() => {});
+    });
   }, [locations, api]);
   useEffect(() => {
     // Only the shops the decks will actually render (global selection scope).
@@ -264,18 +268,25 @@ export default function Home() {
           .map(t => { const w = num(t.hours_worked), so = num(t.hours_sold); return w > 0 ? { name: t.tech_name, eff: Math.round((so / w) * 100) } : null; })
           .filter(Boolean);
         // Build the 14-day strip from the SHOP's calendar day (noon-UTC stepping
-        // avoids DST edges); holidays come from the server's 13-province calendar.
+        // avoids DST edges); holidays come from the server's 13-province calendar,
+        // limited to the provinces of the locations in scope (AB view ≠ BC Day).
         const base = new Date(todayIso + 'T12:00:00Z');
         const days = Array.from({ length: 14 }, (_, i) => new Date(base.getTime() + i * 86400000));
-        const hset = new Set(holidays.map(x => x.date));
+        const scopeProvs = [...new Set(activeLocations.map(l => (l.province || 'ab').toLowerCase()))];
+        const scopeHolidays = scopeProvs
+          .flatMap(pv => (holidaysByProv[pv] || []).map(h => ({ ...h, prov: pv })))
+          .sort((a, b) => (a.date < b.date ? -1 : 1));
+        const hset = new Set(scopeHolidays.map(x => x.date));
         const offDates = (iso) => { let approved = false, pending = false;
           scopeIds.forEach(id => ((offByLoc[id] || {}).requests || []).forEach(r => {
             if (r.start_date <= iso && r.end_date >= iso) { if (r.status === 'approved') approved = true; else if (r.status === 'pending') pending = true; }
           }));
           return { approved, pending };
         };
-        const nh = holidays.find(x => x.date >= todayIso);
-        const nextStat = nh ? { label: `${nh.name} ${fmtD2(nh.date)}` } : null;
+        const nh = scopeHolidays.find(x => x.date >= todayIso);
+        // On the all-locations view a holiday may belong to only one province —
+        // tag it so "BC Day" can't read as a Red Deer day off.
+        const nextStat = nh ? { label: `${nh.name} ${fmtD2(nh.date)}${scopeProvs.length > 1 ? ` (${nh.prov.toUpperCase()})` : ''}` } : null;
         const nextOff = upcoming.find(r => r.person_id);
         return (
           <div className="deck-row">
