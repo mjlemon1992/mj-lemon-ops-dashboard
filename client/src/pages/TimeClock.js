@@ -45,6 +45,9 @@ function ClockAdmin({ locId }) {
   const [editReqs, setEditReqs] = useState([]);     // pending timesheet-alteration requests
   const [live, setLive] = useState([]);             // who's on the clock right now (summary strip)
   const [reorders, setReorders] = useState([]);     // re-order board requests
+  const [shift, setShift] = useState(null);         // per-location shift window + break, + per-person fob/break flags
+  const [followups, setFollowups] = useState([]);   // overtime / missed-break claims awaiting review
+  const [shiftForm, setShiftForm] = useState({ shift_start: '', shift_end: '', break_minutes: '' });
   const load = useCallback(() => {
     if (!sel) return;
     Promise.all([
@@ -54,10 +57,14 @@ function ClockAdmin({ locId }) {
       api(`/clock/${locId}/edit-requests`).catch(() => ({ requests: [] })),
       api(`/clock/${locId}/status`).catch(() => ({ people: [] })),
       api(`/clock/${locId}/reorders`).catch(() => ({ requests: [] })),
-    ]).then(([e, ov, toff, er, st, ro]) => { setData(e); setAllPeople(ov.people || []); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setEditReqs(er.requests || []); setLive(st.people || []); setReorders(ro.requests || []); setErr(null); })
+      api(`/clock/${locId}/shift-settings`).catch(() => null),
+      api(`/clock/${locId}/followups`).catch(() => ({ followups: [] })),
+    ]).then(([e, ov, toff, er, st, ro, ss, fu]) => { setData(e); setAllPeople(ov.people || []); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setEditReqs(er.requests || []); setLive(st.people || []); setReorders(ro.requests || []); setShift(ss); setFollowups(fu.followups || []); setErr(null); })
       .catch((ex) => setErr(ex.message));
   }, [api, locId, sel]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (shift) setShiftForm({ shift_start: shift.shift_start || '', shift_end: shift.shift_end || '', break_minutes: shift.break_minutes != null ? String(shift.break_minutes) : '' }); }, [shift]);
+  const clockFlags = Object.fromEntries((shift && shift.people ? shift.people : []).map((p) => [p.id, p]));
 
   const setAnchor = async () => {
     const v = await askInput({ title: 'Pay cycle', body: 'Pick the first day of any real biweekly pay period — all periods count 14 days from it.', label: 'Period start date (YYYY-MM-DD)', initial: (periods && periods.anchor) || '2026-01-04' });
@@ -97,6 +104,42 @@ function ClockAdmin({ locId }) {
       showToast(action === 'ordered' ? 'Marked ordered' : action === 'received' ? 'Received — cleared from the board' : action === 'dismissed' ? 'Dismissed' : 'Updated');
       load();
     } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  // RFID: link/replace/clear a person's fob. The reader "types" the id into the
+  // prompt, or the owner can type it by hand.
+  const setRfidTag = async (p) => {
+    const cur = clockFlags[p.id];
+    const v = await askInput({ title: `Clock fob — ${p.name}`, body: cur && cur.has_tag ? 'A fob is linked. Tap a new fob on the reader to replace it, or clear the field to remove.' : 'Tap the fob on the Bluetooth reader now — it types the id — or type it by hand.', label: 'Fob id (blank to remove)', type: 'text', initial: '' });
+    if (v === null) return;
+    setBusy(true); setErr(null);
+    try { const out = await api(`/clock/${locId}/person/${p.id}/rfid`, { method: 'PUT', body: JSON.stringify({ tag: v.trim() === '' ? null : v.trim() }) }); load(); showToast(out.has_tag ? `Fob linked to ${p.name}` : `Fob removed for ${p.name}`); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  const toggleBreak = async (p, on) => {
+    setBusy(true); setErr(null);
+    try { await api(`/clock/${locId}/person/${p.id}/track-break`, { method: 'PUT', body: JSON.stringify({ track_break: on }) }); load(); showToast(`${p.name} — break tracking ${on ? 'on' : 'off'}`); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  const saveShift = async () => {
+    const patch = { shift_start: shiftForm.shift_start.trim(), shift_end: shiftForm.shift_end.trim(), break_minutes: shiftForm.break_minutes.trim() };
+    setBusy(true); setErr(null);
+    try { const out = await api(`/clock/${locId}/shift-settings`, { method: 'PUT', body: JSON.stringify(patch) }); setShift((s) => ({ ...(s || {}), ...out })); showToast('Shift rules saved'); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  // Approve (apply to the entry's pay) or dismiss a tech's overtime / break answer.
+  const decideFollowup = async (f, action) => {
+    if (action === 'approve') {
+      const what = f.kind === 'overtime' ? `add ${f.answer_hours} h overtime to ${f.person_name}'s ${fmtD(f.work_date)} shift` : (f.took_break ? `deduct a ${Math.round((f.answer_hours || 0) * 60)} min break from ${f.person_name}'s ${fmtD(f.work_date)} shift` : `record no break for ${f.person_name} on ${fmtD(f.work_date)}`);
+      if (!await askConfirm({ title: 'Apply to pay', body: `This will ${what}.`, confirmLabel: 'Approve' })) return;
+    }
+    setBusy(true); setErr(null);
+    try { await api(`/clock/followup/${f.id}/decide`, { method: 'PUT', body: JSON.stringify({ action }) }); load(); showToast(action === 'approve' ? 'Approved — applied to pay' : 'Dismissed'); }
+    catch (e) { setErr(e.message); }
     setBusy(false);
   };
 
@@ -278,6 +321,8 @@ function ClockAdmin({ locId }) {
   const grandPaid = Math.round((totPaid + holidayTot + statTot) * 100) / 100;
 
   const pending = ((timeoff || {}).requests || []).filter((r) => r.status === 'pending');
+  const answeredFu = followups.filter((f) => f.status === 'answered');
+  const pendingFu = followups.filter((f) => f.status === 'pending');
   const upcoming = ((timeoff || {}).requests || []).filter((r) => r.status === 'approved' && r.end_date >= new Date().toISOString().slice(0, 10));
   const totals = (timeoff || {}).totals || {};
 
@@ -353,9 +398,24 @@ function ClockAdmin({ locId }) {
       )}
 
       {/* Needs attention — holiday approvals + timesheet change requests, one card */}
-      {(pending.length > 0 || editReqs.length > 0) && (
+      {(pending.length > 0 || editReqs.length > 0 || answeredFu.length > 0) && (
         <div className="card" style={{ marginBottom: '16px', border: '1px solid var(--warning)' }}>
-          <div style={{ fontWeight: 600, marginBottom: '10px' }}>Needs attention <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>· {pending.length + editReqs.length} item{pending.length + editReqs.length === 1 ? '' : 's'}</span></div>
+          <div style={{ fontWeight: 600, marginBottom: '10px' }}>Needs attention <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>· {pending.length + editReqs.length + answeredFu.length} item{pending.length + editReqs.length + answeredFu.length === 1 ? '' : 's'}</span></div>
+          {/* Overtime / missed-break claims — tech answered on the kiosk, apply to pay */}
+          {answeredFu.map((f) => (
+            <div key={f.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px', marginBottom: '6px', border: '1px solid var(--accent)' }}>
+              <span style={{ fontWeight: 700 }}>{f.person_name}</span>
+              <span style={{ fontSize: '13px', color: 'var(--text2)' }}>
+                {f.kind === 'overtime'
+                  ? <>overtime {fmtD(f.work_date)} · <b>+{f.answer_hours} h</b></>
+                  : <>break {fmtD(f.work_date)} · <b>{f.took_break ? `${Math.round((f.answer_hours || 0) * 60)} min taken` : 'none taken'}</b></>}
+              </span>
+              <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+                <button className="primary" disabled={busy} onClick={() => decideFollowup(f, 'approve')} style={{ fontSize: '12px', padding: '5px 14px' }}>✓ Apply to pay</button>
+                <button disabled={busy} onClick={() => decideFollowup(f, 'dismiss')} style={{ fontSize: '12px', padding: '5px 14px', color: 'var(--danger)' }}>Dismiss</button>
+              </span>
+            </div>
+          ))}
           {pending.map((r) => {
             // Allowance check: what would approving this vacation leave them at?
             const person = people.find((p) => p.id === r.person_id);
@@ -443,14 +503,16 @@ function ClockAdmin({ locId }) {
             <span style={{ fontSize: '11px', color: 'var(--text3)', flexBasis: '100%' }}>Unticked = clock-only (probation): they punch in/out and request time off, but stay out of the profit-share until you include them.</span>
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '10px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '10px' }}>
           {people.map((p) => {
             const clocked = summary[p.id] != null ? Number(summary[p.id]) : 0;
             const stat = Number(data.stat_pay_hours || 0);
             const holiday = Number((data.paid_timeoff_hours || {})[p.id] || 0);
             const totalPay = Math.round((clocked + stat + holiday) * 100) / 100;
+            const cf = clockFlags[p.id] || {};
+            const brkOn = cf.track_break !== false;
             return (
-            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px' }}>
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '8px 10px', background: 'var(--bg3)', borderRadius: '10px' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 600 }}>{p.name}{p.in_bonus === false && <span style={{ fontSize: '10px', color: 'var(--text3)', fontWeight: 400 }}> · clock only</span>}
                   {(stat > 0 || holiday > 0 || clocked > 0) && <span style={{ float: 'right', fontVariantNumeric: 'tabular-nums' }}>{totalPay} h</span>}
@@ -467,6 +529,8 @@ function ClockAdmin({ locId }) {
               </div>
               <button onClick={() => setAllowance(p)} disabled={busy} title="Set annual holiday allowance (hours/year)" style={{ fontSize: '11px', padding: '4px 8px' }}><Icon name="sun" size={12} /></button>
               <button onClick={() => setPin(p)} disabled={busy} title="Set kiosk PIN" style={{ fontSize: '11px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Icon name="key" size={12} /> PIN</button>
+              <button onClick={() => setRfidTag(p)} disabled={busy} title={cf.has_tag ? 'RFID fob linked — tap to change or clear' : 'Link an RFID fob for quick clock-in'} style={{ fontSize: '11px', padding: '4px 8px', color: cf.has_tag ? 'var(--success)' : undefined }}>💳 Fob{cf.has_tag ? ' ✓' : ''}</button>
+              <button onClick={() => toggleBreak(p, !brkOn)} disabled={busy} title={brkOn ? 'Break tracking ON — tap to turn off (e.g. advisors)' : 'Break tracking OFF — no break button, no missed-break question'} style={{ fontSize: '11px', padding: '4px 8px', color: brkOn ? 'var(--text2)' : 'var(--warning)' }}>☕ {brkOn ? 'on' : 'off'}</button>
               <button onClick={() => uploadPhoto(p)} disabled={busy} title="Upload a profile photo" style={{ fontSize: '11px', padding: '4px 8px' }}><Icon name="camera" size={12} /></button>
               <button onClick={() => setPersonActive(p, false)} disabled={busy} title="Remove from the time clock" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)', borderColor: 'rgba(255,77,77,0.4)', marginLeft: '10px' }}><Icon name="x" size={12} /></button>
             </div>
@@ -481,6 +545,26 @@ function ClockAdmin({ locId }) {
             ))}
           </div>
         )}
+        <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '12px' }}>💳 Fob = RFID quick-clock · ☕ = break tracking (turn off for advisors who don't break)</div>
+      </div>
+      )}
+
+      {/* Shift rules — clamp early clock-ins, auto-out late, standard break (per location) */}
+      {tab === 'crew' && (
+      <div className="card" style={{ marginBottom: '16px' }}>
+        <div style={{ fontWeight: 600, marginBottom: '4px' }}>Shift rules <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>· this location, applied on its open days</span></div>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '12px' }}>
+          Clock-in before the start records the start; still clocked in past the end auto-clocks out at the end (with an overtime question next time). Leave the times blank for no clamping.
+        </div>
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>Shift start
+            <input type="time" value={shiftForm.shift_start} onChange={(e) => setShiftForm((s) => ({ ...s, shift_start: e.target.value }))} style={{ fontSize: '15px', width: '130px' }} /></label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>Shift end
+            <input type="time" value={shiftForm.shift_end} onChange={(e) => setShiftForm((s) => ({ ...s, shift_end: e.target.value }))} style={{ fontSize: '15px', width: '130px' }} /></label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>Standard break (min)
+            <input type="number" min="0" max="480" value={shiftForm.break_minutes} placeholder="30" onChange={(e) => setShiftForm((s) => ({ ...s, break_minutes: e.target.value }))} style={{ fontSize: '15px', width: '110px' }} /></label>
+          <button className="primary" disabled={busy} onClick={saveShift} style={{ fontSize: '13px', padding: '8px 18px' }}>Save shift rules</button>
+        </div>
       </div>
       )}
 

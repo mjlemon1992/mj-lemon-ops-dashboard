@@ -37,7 +37,7 @@ module.exports = (pool) => {
         const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
         return d.toISOString().slice(0, 7);
       })();
-      const [timeoff, edits, fuel, bonusRuns, bonusCrew, reorders] = await Promise.all([
+      const [timeoff, edits, fuel, bonusRuns, bonusCrew, reorders, clockq] = await Promise.all([
         pool.query(
           `SELECT r.id, r.location_id, r.person_id, r.type, r.paid, r.working_days,
                   r.start_date::text AS start_date, r.end_date::text AS end_date,
@@ -79,6 +79,11 @@ module.exports = (pool) => {
         pool.query(
           `SELECT id, location_id, item, qty, person_name, status FROM reorder_request
             WHERE location_id = ANY($1) AND status IN ('requested','ordered') ORDER BY created_at`, [ids]),
+        // Overtime / missed-break answers awaiting the owner's OK to hit pay.
+        pool.query(
+          `SELECT f.id, f.location_id, f.kind, f.work_date::text AS work_date, f.answer_hours, f.took_break, p.name AS person_name
+             FROM clock_followup f JOIN bonus_person p ON p.id = f.person_id
+            WHERE f.location_id = ANY($1) AND f.status = 'answered' ORDER BY f.work_date`, [ids]),
       ]);
 
       // Bonus prompt: previous month with no approved (unsuperseded) run.
@@ -108,6 +113,7 @@ module.exports = (pool) => {
       push(countByLoc(edits.rows), 'edit', 'punch change', '/time-clock');
       push(Object.fromEntries(fuel.rows.map((r) => [r.location_id, r.n])), 'fuel', 'unassigned fuel purchase', '/fuel-card');
       push(countByLoc(reorders.rows), 'reorder', 'stock re-order', '/time-clock');
+      push(countByLoc(clockq.rows), 'clockq', 'clock question', '/time-clock');
 
       // Time-off amounts to HOURS (QuickBooks unit): working_days × per-day hours.
       const { openDaySet } = require('../lib/workdays');
@@ -129,6 +135,7 @@ module.exports = (pool) => {
           edits: edits.rows.map(withName),
           fuel: fuel.rows.map(withName),
           reorders: reorders.rows.map(withName),
+          clockq: clockq.rows.map(withName),
           bonus,
         },
       });

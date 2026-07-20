@@ -47,6 +47,103 @@ module.exports = (pool) => {
 
   const statusOf = (row) => !row ? 'off' : (row.break_started_at ? 'break' : 'on');
 
+  // ══ SHIFT RULES ════════════════════════════════════════════════════════
+  // Per-location shift window: clock-in before the start records the start;
+  // still clocked in past the end auto-clocks out at the end (with an overtime
+  // question next time). Applied only on the location's open days.
+  const EDM = 'America/Edmonton';
+  const edmToday = () => new Date().toLocaleDateString('en-CA', { timeZone: EDM });
+  const edmDow = (iso) => new Date(iso + 'T12:00:00Z').getUTCDay();   // 0=Sun..6
+  const shiftCfg = async (locationId) => {
+    const { rows } = await pool.query('SELECT shift_start, shift_end, break_minutes, open_days FROM locations WHERE id=$1', [locationId]);
+    const r = rows[0] || {};
+    return { start: r.shift_start || null, end: r.shift_end || null, breakMin: r.break_minutes, openSet: openDaySet(r.open_days) };
+  };
+  const isOpenDay = (cfg, iso) => cfg.openSet.has(edmDow(iso));
+
+  // Insert a follow-up question once per (entry, kind).
+  const addFollowup = (locationId, personId, entryId, kind, workDate) => pool.query(
+    `INSERT INTO clock_followup (location_id, person_id, entry_id, kind, work_date)
+       SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS (SELECT 1 FROM clock_followup WHERE entry_id=$3 AND kind=$4)`,
+    [locationId, personId, entryId, kind, workDate]);
+
+  // Close any punch left open past its day's shift end — bounds forgotten
+  // clock-outs and raises the overtime (and missed-break) questions.
+  const autoCloseStale = async (locationId, cfg) => {
+    if (!cfg.end) return;
+    const { rows } = await pool.query(
+      `WITH s AS (
+         SELECT id, person_id,
+           (to_char(clock_in AT TIME ZONE '${EDM}','YYYY-MM-DD')||' '||$2::text)::timestamp AT TIME ZONE '${EDM}' AS end_ts,
+           clock_in
+         FROM time_clock_entry WHERE location_id=$1 AND clock_out IS NULL)
+       UPDATE time_clock_entry e
+          SET clock_out = GREATEST(s.end_ts, e.clock_in), raw_clock_out = now(),
+              auto_out = true, break_started_at = NULL
+         FROM s WHERE e.id = s.id AND now() > s.end_ts
+       RETURNING e.id, e.person_id, e.break_seconds, (e.clock_out AT TIME ZONE '${EDM}')::date::text AS work_date`,
+      [locationId, cfg.end]);
+    if (!rows.length) return;
+    const { rows: pp } = await pool.query('SELECT id, track_break FROM bonus_person WHERE id = ANY($1)', [rows.map((r) => r.person_id)]);
+    const tb = Object.fromEntries(pp.map((p) => [p.id, p.track_break !== false]));
+    for (const r of rows) {
+      await addFollowup(locationId, r.person_id, r.id, 'overtime', r.work_date);
+      if (tb[r.person_id] && Number(r.break_seconds) === 0) await addFollowup(locationId, r.person_id, r.id, 'break', r.work_date);
+    }
+  };
+
+  // Shared punch engine — used by both the PIN kiosk and the RFID fob path.
+  const doPunch = async (res, locationId, person, action, cfg) => {
+    await autoCloseStale(locationId, cfg);
+    const { rows: openRows } = await pool.query('SELECT * FROM time_clock_entry WHERE person_id=$1 AND clock_out IS NULL', [person.id]);
+    const open = openRows[0];
+    const today = edmToday();
+    const clamp = !!(cfg.start && cfg.end && isOpenDay(cfg, today));
+
+    if (action === 'in') {
+      if (open) return fail(res, `${person.name} is already clocked in`, 409);
+      if (clamp) {
+        await pool.query(
+          `INSERT INTO time_clock_entry (location_id, person_id, clock_in, raw_clock_in, source, created_by)
+             VALUES ($1,$2, GREATEST(now(), ($3::text||' '||$4::text)::timestamp AT TIME ZONE '${EDM}'), now(), 'kiosk', $5)`,
+          [locationId, person.id, today, cfg.start, person.name]);
+      } else {
+        await pool.query('INSERT INTO time_clock_entry (location_id, person_id, clock_in, raw_clock_in, source, created_by) VALUES ($1,$2,now(),now(),$3,$4)', [locationId, person.id, 'kiosk', person.name]);
+      }
+      return res.json({ status: 'on', name: person.name });
+    }
+    if (!open) return fail(res, `${person.name} is not clocked in`, 409);
+    const segs = Array.isArray(open.breaks) ? open.breaks : [];
+    if (action === 'break_start') {
+      if (person.track_break === false) return fail(res, 'Break tracking is off for this person', 400);
+      if (open.break_started_at) return fail(res, 'Already on break', 409);
+      await pool.query('UPDATE time_clock_entry SET break_started_at=now(), breaks=$2 WHERE id=$1', [open.id, JSON.stringify([...segs, { start: new Date().toISOString() }])]);
+      return res.json({ status: 'break', name: person.name });
+    }
+    const closeSegs = () => { if (!segs.length || segs[segs.length - 1].end) return segs; return [...segs.slice(0, -1), { ...segs[segs.length - 1], end: new Date().toISOString() }]; };
+    if (action === 'break_end') {
+      if (!open.break_started_at) return fail(res, 'Not on break', 409);
+      await pool.query("UPDATE time_clock_entry SET break_seconds = break_seconds + EXTRACT(EPOCH FROM (now() - break_started_at)), break_started_at = NULL, breaks=$2 WHERE id=$1", [open.id, JSON.stringify(closeSegs())]);
+      return res.json({ status: 'on', name: person.name, clock_in: open.clock_in });
+    }
+    // out — clamp to shift end on open days; flag OT if clamped, missed break if none logged.
+    const { rows: closed } = await pool.query(
+      `UPDATE time_clock_entry
+          SET break_seconds = break_seconds + COALESCE(EXTRACT(EPOCH FROM (now() - break_started_at)), 0),
+              break_started_at = NULL, breaks=$2, raw_clock_out = now(),
+              clock_out = CASE WHEN $3 THEN LEAST(now(), ($4::text||' '||$5::text)::timestamp AT TIME ZONE '${EDM}') ELSE now() END
+        WHERE id=$1
+        RETURNING id, break_seconds, (raw_clock_out > clock_out) AS was_ot,
+          (clock_out AT TIME ZONE '${EDM}')::date::text AS work_date,
+          ROUND((EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2) AS paid_hours`,
+      [open.id, JSON.stringify(open.break_started_at ? closeSegs() : segs), clamp, today, cfg.end || '23:59']);
+    const c = closed[0];
+    const missedBreak = person.track_break !== false && Number(c.break_seconds) === 0;
+    if (c.was_ot) await addFollowup(locationId, person.id, c.id, 'overtime', c.work_date);
+    if (missedBreak) await addFollowup(locationId, person.id, c.id, 'break', c.work_date);
+    return res.json({ status: 'off', name: person.name, paid_hours: Number(c.paid_hours), overtime_flagged: c.was_ot, break_flagged: missedBreak });
+  };
+
   // ══ KIOSK (public, PIN-gated) ══════════════════════════════════════════
   const checkLocPin = async (req, res) => {
     const rk = rlKey(req, req.params.locationId);
@@ -67,8 +164,9 @@ module.exports = (pool) => {
     try {
       await ensure();
       if (!(await checkLocPin(req, res))) return;
+      await autoCloseStale(req.params.locationId, await shiftCfg(req.params.locationId));
       const { rows: people } = await pool.query(
-        'SELECT id, name, role, color, photo, photo_mime, (clock_pin IS NOT NULL) AS has_pin FROM bonus_person WHERE location_id=$1 AND active=true ORDER BY role, name',
+        'SELECT id, name, role, color, photo, photo_mime, track_break, (clock_pin IS NOT NULL) AS has_pin, (rfid_tag IS NOT NULL) AS has_tag FROM bonus_person WHERE location_id=$1 AND active=true ORDER BY role, name',
         [req.params.locationId]);
       const { rows: open } = await pool.query(
         'SELECT person_id, clock_in, break_started_at FROM time_clock_entry WHERE location_id=$1 AND clock_out IS NULL',
@@ -76,7 +174,7 @@ module.exports = (pool) => {
       const byId = {}; for (const o of open) byId[o.person_id] = o;
       res.json({
         people: people.map((p) => ({
-          id: p.id, name: p.name, role: p.role, has_pin: p.has_pin,
+          id: p.id, name: p.name, role: p.role, has_pin: p.has_pin, has_tag: p.has_tag, track_break: p.track_break !== false,
           color: p.color || null, photo: photoUri(p),
           status: statusOf(byId[p.id]), since: byId[p.id] ? (byId[p.id].break_started_at || byId[p.id].clock_in) : null,
           clock_in: byId[p.id] ? byId[p.id].clock_in : null,   // original in-time, always
@@ -198,7 +296,7 @@ module.exports = (pool) => {
       if (!(await checkLocPin(req, res))) return;
       const { person_id, pin, action } = req.body || {};
       if (!person_id || !['in', 'break_start', 'break_end', 'out'].includes(action)) return fail(res, 'person_id + valid action required', 400);
-      const { rows: pr } = await pool.query('SELECT id, name, clock_pin FROM bonus_person WHERE id=$1 AND location_id=$2 AND active=true', [person_id, req.params.locationId]);
+      const { rows: pr } = await pool.query('SELECT id, name, clock_pin, track_break FROM bonus_person WHERE id=$1 AND location_id=$2 AND active=true', [person_id, req.params.locationId]);
       if (!pr.length) return fail(res, 'Person not found', 404);
       const person = pr[0];
       if (!person.clock_pin) return fail(res, 'No clock PIN set for this person — ask the owner to set one.', 400);
@@ -206,45 +304,7 @@ module.exports = (pool) => {
       if (isLocked(rk, req.params.locationId)) return fail(res, 'Too many incorrect PINs for this person. Try again later.', 429);
       if (!pinEqual(pin, person.clock_pin)) { recordFail(rk, req.params.locationId); return fail(res, 'Incorrect PIN', 401); }
       fails.delete(rk);
-
-      const { rows: openRows } = await pool.query('SELECT * FROM time_clock_entry WHERE person_id=$1 AND clock_out IS NULL', [person_id]);
-      const open = openRows[0];
-
-      if (action === 'in') {
-        if (open) return fail(res, `${person.name} is already clocked in`, 409);
-        await pool.query('INSERT INTO time_clock_entry (location_id, person_id, clock_in, source, created_by) VALUES ($1,$2,now(),$3,$4)', [req.params.locationId, person_id, 'kiosk', person.name]);
-        return res.json({ status: 'on', name: person.name });
-      }
-      if (!open) return fail(res, `${person.name} is not clocked in`, 409);
-      // Break SEGMENTS ([{start,end}]) are recorded alongside the break_seconds
-      // total, so timesheets can show when each break actually happened.
-      const segs = Array.isArray(open && open.breaks) ? open.breaks : [];
-      if (action === 'break_start') {
-        if (open.break_started_at) return fail(res, 'Already on break', 409);
-        await pool.query('UPDATE time_clock_entry SET break_started_at=now(), breaks=$2 WHERE id=$1',
-          [open.id, JSON.stringify([...segs, { start: new Date().toISOString() }])]);
-        return res.json({ status: 'break', name: person.name });
-      }
-      const closeSegs = () => {
-        if (!segs.length || segs[segs.length - 1].end) return segs;
-        return [...segs.slice(0, -1), { ...segs[segs.length - 1], end: new Date().toISOString() }];
-      };
-      if (action === 'break_end') {
-        if (!open.break_started_at) return fail(res, 'Not on break', 409);
-        await pool.query("UPDATE time_clock_entry SET break_seconds = break_seconds + EXTRACT(EPOCH FROM (now() - break_started_at)), break_started_at = NULL, breaks=$2 WHERE id=$1",
-          [open.id, JSON.stringify(closeSegs())]);
-        // clock_in returned so the kiosk can reassure: the original shift is intact.
-        return res.json({ status: 'on', name: person.name, clock_in: open.clock_in });
-      }
-      // out — auto-close an open break first; report the day's paid hours back.
-      const { rows: closed } = await pool.query(
-        `UPDATE time_clock_entry
-            SET break_seconds = break_seconds + COALESCE(EXTRACT(EPOCH FROM (now() - break_started_at)), 0),
-                break_started_at = NULL, breaks=$2, clock_out = now()
-          WHERE id=$1
-          RETURNING ROUND((EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2) AS paid_hours`,
-        [open.id, JSON.stringify(open.break_started_at ? closeSegs() : segs)]);
-      return res.json({ status: 'off', name: person.name, paid_hours: Number(closed[0].paid_hours) });
+      return doPunch(res, req.params.locationId, person, action, await shiftCfg(req.params.locationId));
     } catch (e) { fail(res, e); }
   });
 
@@ -980,6 +1040,151 @@ module.exports = (pool) => {
         'UPDATE reorder_request SET status=$2, decided_by=$3, decided_at=now() WHERE id=$1',
         [r.id, action, who(req)]);
       res.json({ ok: true, id: r.id, status: action });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ══ RFID QUICK-CLOCK ═══════════════════════════════════════════════════
+  // A Bluetooth HID reader "types" the fob's tag id + Enter on the kiosk.
+  // Possession of the fob authenticates (no PIN). No action → identify the
+  // person + return their state and any pending questions; with action →
+  // perform the punch through the same rules engine as the PIN path.
+  router.post('/:locationId/rfid', async (req, res) => {
+    try {
+      await ensure();
+      if (!(await checkLocPin(req, res))) return;
+      const tag = (req.body || {}).tag;
+      const action = (req.body || {}).action;
+      if (!tag || !String(tag).trim()) return fail(res, 'No fob read', 400);
+      const { rows: pr } = await pool.query(
+        'SELECT id, name, color, photo, photo_mime, track_break FROM bonus_person WHERE location_id=$1 AND rfid_tag=$2 AND active=true',
+        [req.params.locationId, String(tag).trim().slice(0, 64)]);
+      if (!pr.length) return fail(res, 'Unknown fob — ask the owner to register it.', 404);
+      const person = pr[0];
+      const cfg = await shiftCfg(req.params.locationId);
+      if (action) {
+        if (!['in', 'break_start', 'break_end', 'out'].includes(action)) return fail(res, 'bad action', 400);
+        return doPunch(res, req.params.locationId, person, action, cfg);
+      }
+      await autoCloseStale(req.params.locationId, cfg);
+      const { rows: openRows } = await pool.query('SELECT clock_in, break_started_at FROM time_clock_entry WHERE person_id=$1 AND clock_out IS NULL', [person.id]);
+      const open = openRows[0];
+      const { rows: fu } = await pool.query("SELECT id, kind, work_date::text AS work_date FROM clock_followup WHERE person_id=$1 AND status='pending' ORDER BY work_date", [person.id]);
+      res.json({
+        id: person.id, name: person.name, color: person.color || null, photo: photoUri(person),
+        track_break: person.track_break !== false, status: statusOf(open),
+        clock_in: open ? open.clock_in : null, since: open ? (open.break_started_at || open.clock_in) : null,
+        followups: fu, break_minutes: cfg.breakMin,
+      });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Tech answers a pending follow-up on the kiosk (loc-PIN gated). Overtime →
+  // hours; break → minutes (+ whether they took one). Goes to owner approval.
+  router.post('/:locationId/followup/:id/answer', async (req, res) => {
+    try {
+      await ensure();
+      if (!(await checkLocPin(req, res))) return;
+      const b = req.body || {};
+      const { rows: fr } = await pool.query("SELECT * FROM clock_followup WHERE id=$1 AND location_id=$2 AND status='pending'", [req.params.id, req.params.locationId]);
+      if (!fr.length) return fail(res, 'Question not found', 404);
+      const f = fr[0];
+      let hours = 0, took = null;
+      if (f.kind === 'overtime') {
+        hours = Number(b.hours);
+        if (!Number.isFinite(hours) || hours < 0 || hours > 12) return fail(res, 'Enter overtime hours (0–12)', 400);
+      } else {
+        took = !!b.took_break;
+        if (took) { const m = Number(b.minutes); if (!Number.isFinite(m) || m <= 0 || m > 480) return fail(res, 'Enter your break length in minutes', 400); hours = m / 60; }
+      }
+      await pool.query("UPDATE clock_followup SET status='answered', answer_hours=$2, took_break=$3, answered_at=now() WHERE id=$1", [f.id, hours, took]);
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ── Admin: RFID enroll + break toggle + shift settings + approvals ──────
+  router.put('/:locationId/person/:pid/rfid', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      let tag = (req.body || {}).tag;
+      tag = (tag == null || tag === '') ? null : String(tag).trim().slice(0, 64);
+      if (tag) {
+        const { rows: dup } = await pool.query('SELECT name FROM bonus_person WHERE location_id=$1 AND rfid_tag=$2 AND id<>$3', [req.params.locationId, tag, req.params.pid]);
+        if (dup.length) return fail(res, `That fob is already registered to ${dup[0].name}`, 409);
+      }
+      const { rows } = await pool.query('UPDATE bonus_person SET rfid_tag=$2 WHERE id=$1 AND location_id=$3 RETURNING id, name', [req.params.pid, tag, req.params.locationId]);
+      if (!rows.length) return fail(res, 'Person not found', 404);
+      res.json({ ok: true, name: rows[0].name, has_tag: !!tag });
+    } catch (e) { fail(res, e); }
+  });
+
+  router.put('/:locationId/person/:pid/track-break', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const on = !!(req.body || {}).track_break;
+      const { rows } = await pool.query('UPDATE bonus_person SET track_break=$2 WHERE id=$1 AND location_id=$3 RETURNING id, name', [req.params.pid, on, req.params.locationId]);
+      if (!rows.length) return fail(res, 'Person not found', 404);
+      res.json({ ok: true, name: rows[0].name, track_break: on });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Admin: current shift window + break, plus each person's fob/break state.
+  router.get('/:locationId/shift-settings', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { rows: lr } = await pool.query("SELECT to_char(shift_start,'HH24:MI') AS shift_start, to_char(shift_end,'HH24:MI') AS shift_end, break_minutes FROM locations WHERE id=$1", [req.params.locationId]);
+      const { rows: pr } = await pool.query('SELECT id, name, role, track_break, (rfid_tag IS NOT NULL) AS has_tag FROM bonus_person WHERE location_id=$1 AND active=true ORDER BY role, name', [req.params.locationId]);
+      res.json({ ...(lr[0] || { shift_start: null, shift_end: null, break_minutes: null }), people: pr.map((p) => ({ ...p, track_break: p.track_break !== false })) });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Owner sets the shift window + standard break (per location).
+  router.put('/:locationId/shift-settings', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      await ensure();
+      const b = req.body || {};
+      const t = (v) => (v == null || v === '') ? null : (/^\d{1,2}:\d{2}$/.test(String(v)) ? String(v) : undefined);
+      const start = t(b.shift_start), end = t(b.shift_end);
+      if (start === undefined || end === undefined) return fail(res, 'Times must be HH:MM (24-hour), or blank', 400);
+      let brk = b.break_minutes;
+      brk = (brk == null || brk === '') ? null : Math.round(Number(brk));
+      if (brk !== null && (!Number.isFinite(brk) || brk < 0 || brk > 480)) return fail(res, 'Break minutes must be 0–480', 400);
+      const { rows } = await pool.query('UPDATE locations SET shift_start=$2, shift_end=$3, break_minutes=$4 WHERE id=$1 RETURNING to_char(shift_start,\'HH24:MI\') AS shift_start, to_char(shift_end,\'HH24:MI\') AS shift_end, break_minutes', [req.params.locationId, start, end, brk]);
+      if (!rows.length) return fail(res, 'Location not found', 404);
+      res.json({ ok: true, ...rows[0] });
+    } catch (e) { fail(res, e); }
+  });
+
+  router.get('/:locationId/followups', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { rows } = await pool.query(
+        `SELECT f.id, f.kind, f.status, f.work_date::text AS work_date, f.answer_hours, f.took_break, p.name AS person_name
+           FROM clock_followup f JOIN bonus_person p ON p.id = f.person_id
+          WHERE f.location_id=$1 AND f.status IN ('pending','answered')
+          ORDER BY (f.status='answered') DESC, f.work_date DESC`, [req.params.locationId]);
+      res.json({ followups: rows });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Owner approves (applies to the entry's pay) or dismisses a tech's answer.
+  router.put('/followup/:id/decide', ...authed, async (req, res) => {
+    try {
+      await ensure();
+      const action = (req.body || {}).action;
+      if (!['approve', 'dismiss'].includes(action)) return fail(res, 'action must be approve|dismiss', 400);
+      const { rows: fr } = await pool.query('SELECT * FROM clock_followup WHERE id=$1', [req.params.id]);
+      if (!fr.length) return fail(res, 'Not found', 404);
+      const f = fr[0];
+      if (!canAccessLocation(req.user, f.location_id)) return fail(res, 'Access denied for this location', 403);
+      if (action === 'approve' && f.status === 'answered' && f.entry_id) {
+        if (f.kind === 'overtime' && Number(f.answer_hours) > 0) {
+          await pool.query("UPDATE time_clock_entry SET clock_out = clock_out + ($2::numeric || ' hours')::interval, corrected_by=$3, corrected_at=now() WHERE id=$1", [f.entry_id, Number(f.answer_hours), who(req)]);
+        } else if (f.kind === 'break') {
+          await pool.query('UPDATE time_clock_entry SET break_seconds = $2, corrected_by=$3, corrected_at=now() WHERE id=$1', [f.entry_id, Math.round(Number(f.answer_hours || 0) * 3600), who(req)]);
+        }
+      }
+      await pool.query("UPDATE clock_followup SET status=$2, decided_by=$3, decided_at=now() WHERE id=$1", [f.id, action === 'approve' ? 'approved' : 'dismissed', who(req)]);
+      res.json({ ok: true, status: action === 'approve' ? 'approved' : 'dismissed' });
     } catch (e) { fail(res, e); }
   });
 

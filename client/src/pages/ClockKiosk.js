@@ -9,6 +9,7 @@ import { useParams } from 'react-router-dom';
 const REFRESH_MS = 20 * 1000;
 const fmtTime = (t) => t ? new Date(t).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : '';
 const fmtDay = (t) => t ? new Date(t).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+const fmtDayShort = (d) => d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
 // Tapping anywhere in a date field pops the native calendar (tablet-friendly);
 // browsers without showPicker() just fall back to the field's own behaviour.
 const openPicker = (e) => { try { e.target.showPicker(); } catch { /* unsupported */ } };
@@ -89,7 +90,12 @@ export default function ClockKiosk() {
   const [holidays, setHolidays] = useState([]);     // province stat holidays in the window
   const [reqForm, setReqForm] = useState({ person: null, start: '', end: '', type: 'vacation', pin: '', paid: true });
   const [sheet, setSheet] = useState(null);         // my-timesheet payload (keeps person+pin for requests)
+  const [rfid, setRfid] = useState(null);           // { tag, person, queue } — active fob card
+  const [fuHours, setFuHours] = useState('');       // follow-up answer inputs
+  const [fuMins, setFuMins] = useState('');
+  const [fuTook, setFuTook] = useState(null);
   const timer = useRef(null);
+  const rfidBusy = useRef(false);
 
   const loadRoster = useCallback(async (lp) => {
     try {
@@ -274,6 +280,82 @@ export default function ClockKiosk() {
     setBusy(false);
   };
 
+  // ── RFID fob quick-clock (Bluetooth HID reader "types" the tag + Enter) ──
+  const rfidCall = useCallback(async (tag, action) => {
+    setError('');
+    try {
+      const res = await fetch(`/api/clock/${locationId}/rfid`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loc_pin: locPin, tag, action }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(body.error || 'Fob error'); return null; }
+      return body;
+    } catch { setError('Network error'); return null; }
+  }, [locationId, locPin]);
+
+  const finishAction = (name, action, body) => {
+    const verb = action === 'in' ? 'IN ✓'
+      : action === 'out' ? `OUT · ${body.paid_hours} h${body.overtime_flagged ? ' · overtime to confirm' : ''}${body.break_flagged ? ' · break to confirm' : ''}`
+      : action === 'break_start' ? 'on break'
+      : 'back from break';
+    setFlash(`${name} — ${verb}`);
+    setRfid(null); setView('home'); setBusy(false);
+    loadRoster(locPin);
+    setTimeout(() => setFlash(''), 3200);
+  };
+
+  const onScan = useCallback(async (tag) => {
+    if (rfidBusy.current) return;
+    rfidBusy.current = true; setBusy(true);
+    try {
+      const body = await rfidCall(tag, null);
+      if (!body) { setView('home'); setTimeout(() => setError(''), 2500); return; }
+      const queue = body.followups || [];
+      setFuHours(''); setFuMins(''); setFuTook(null);
+      if (queue.length) { setRfid({ tag, person: body, queue }); setView('rfid'); }
+      else if (body.status === 'off') { const done = await rfidCall(tag, 'in'); if (done) finishAction(body.name, 'in', done); else setView('home'); }
+      else { setRfid({ tag, person: body, queue: [] }); setView('rfid'); }
+    } finally { rfidBusy.current = false; setBusy(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rfidCall, locPin]);
+
+  const answerFollowup = async (payload) => {
+    const q = rfid.queue[0];
+    setBusy(true); setError('');
+    try {
+      const res = await fetch(`/api/clock/${locationId}/followup/${q.id}/answer`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loc_pin: locPin, ...payload }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
+      const rest = rfid.queue.slice(1);
+      setFuHours(''); setFuMins(''); setFuTook(null);
+      if (rest.length) { setRfid({ ...rfid, queue: rest }); setBusy(false); }
+      else if (rfid.person.status === 'off') { const done = await rfidCall(rfid.tag, 'in'); if (done) finishAction(rfid.person.name, 'in', done); else setBusy(false); }
+      else { setRfid({ ...rfid, queue: [] }); setBusy(false); }
+    } catch { setError('Network error'); setBusy(false); }
+  };
+
+  // Keyboard-wedge capture: a fast burst of chars ending in Enter = a fob scan.
+  // Slow (human) typing resets the buffer; keystrokes inside inputs are ignored.
+  useEffect(() => {
+    if (!entered) return undefined;
+    let buf = '', last = 0;
+    const onKey = (e) => {
+      const el = e.target;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      const now = Date.now();
+      if (now - last > 120) buf = '';
+      last = now;
+      if (e.key === 'Enter') { if (buf.length >= 4) { const t = buf; buf = ''; onScan(t); } return; }
+      if (e.key && e.key.length === 1 && /[A-Za-z0-9]/.test(e.key)) buf += e.key;
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [entered, onScan]);
+
   // ── Location PIN gate ──
   if (!entered) {
     return (
@@ -319,7 +401,7 @@ export default function ClockKiosk() {
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
           {s === 'off' && <button className="primary" disabled={busy || pin.length < 4} onClick={() => punch('in')} style={bigBtn}>Clock in</button>}
           {s === 'on' && <>
-            <button disabled={busy || pin.length < 4} onClick={() => punch('break_start')} style={{ ...bigBtn, background: 'var(--warning)', color: '#000', fontWeight: 700 }}>Start break</button>
+            {active.track_break !== false && <button disabled={busy || pin.length < 4} onClick={() => punch('break_start')} style={{ ...bigBtn, background: 'var(--warning)', color: '#000', fontWeight: 700 }}>Start break</button>}
             <button className="primary" disabled={busy || pin.length < 4} onClick={() => punch('out')} style={bigBtn}>Clock out</button>
           </>}
           {s === 'break' && <>
@@ -332,6 +414,70 @@ export default function ClockKiosk() {
           <button disabled={busy} onClick={() => (pin.length < 4 ? setError('Enter your PIN first, then tap again') : openProfile())} style={{ fontSize: '14px', padding: '9px 16px' }}>🎨 My profile</button>
         </div>
         {pin.length < 4 && <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '8px' }}>Punching, timesheet, and profile all unlock with your PIN.</div>}
+      </div>
+    );
+  }
+
+  // ── RFID fob card: identified by a fob, choose the action (or answer a question first) ──
+  if (view === 'rfid' && rfid) {
+    const p = rfid.person;
+    const q = rfid.queue[0];
+    const st = STATUS[p.status] || STATUS.off;
+    return (
+      <div style={wrap}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <Avatar p={p} size={52} />
+          <div style={{ fontSize: '24px', fontWeight: 700, color: p.color || 'var(--text1)' }}>{p.name}</div>
+        </div>
+
+        {q ? (
+          <div style={{ marginTop: '20px', width: '100%', maxWidth: '480px', background: 'var(--bg2)', borderRadius: '14px', padding: '20px', border: '1px solid var(--accent)' }}>
+            <div style={{ ...eyebrow, marginBottom: '10px' }}>Quick question before you clock in</div>
+            {q.kind === 'overtime' ? (
+              <>
+                <div style={{ fontSize: '18px', fontWeight: 700, marginBottom: '6px' }}>Did you work overtime on {fmtDayShort(q.work_date)}?</div>
+                <div style={{ color: 'var(--text3)', fontSize: '13px', marginBottom: '16px' }}>Extra hours past your normal finish. Enter 0 if none.</div>
+                <input autoFocus type="number" step="0.25" min="0" inputMode="decimal" value={fuHours} placeholder="0" onChange={(e) => setFuHours(e.target.value)} style={{ ...inp, fontSize: '24px', width: '130px', textAlign: 'center' }} />
+                <span style={{ marginLeft: '10px', color: 'var(--text3)' }}>hours</span>
+                <button className="primary" disabled={busy} onClick={() => answerFollowup({ hours: Number(fuHours) || 0 })} style={{ ...bigBtn, display: 'block', marginTop: '20px' }}>Submit</button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: '18px', fontWeight: 700, marginBottom: '6px' }}>Did you take a break on {fmtDayShort(q.work_date)}?</div>
+                <div style={{ color: 'var(--text3)', fontSize: '13px', marginBottom: '16px' }}>It wasn't logged. Breaks are unpaid — tell us so your pay is right.</div>
+                {fuTook !== true ? (
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <button className="primary" disabled={busy} onClick={() => setFuTook(true)} style={bigBtn}>Yes, I did</button>
+                    <button disabled={busy} onClick={() => answerFollowup({ took_break: false })} style={bigBtn}>No, I didn't</button>
+                  </div>
+                ) : (
+                  <div>
+                    <input autoFocus type="number" min="1" inputMode="numeric" value={fuMins} placeholder={String(p.break_minutes || 30)} onChange={(e) => setFuMins(e.target.value)} style={{ ...inp, fontSize: '24px', width: '130px', textAlign: 'center' }} />
+                    <span style={{ marginLeft: '10px', color: 'var(--text3)' }}>minutes</span>
+                    <button className="primary" disabled={busy || !(Number(fuMins) > 0)} onClick={() => answerFollowup({ took_break: true, minutes: Number(fuMins) })} style={{ ...bigBtn, display: 'block', marginTop: '20px' }}>Submit</button>
+                  </div>
+                )}
+              </>
+            )}
+            {error && <div style={{ color: 'var(--danger)', marginTop: '14px' }}>{error}</div>}
+          </div>
+        ) : (
+          <>
+            <div style={{ ...pill, background: st.bg, color: st.color, marginTop: '10px' }}>
+              {p.status === 'break' ? `On break since ${fmtTime(p.since)}` : p.status === 'on' ? `Clocked in ${fmtTime(p.clock_in)}` : 'Clocked out'}
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '24px' }}>
+              {p.status === 'on' && <>
+                {p.track_break && <button disabled={busy} onClick={() => rfidCall(rfid.tag, 'break_start').then((b) => b && finishAction(p.name, 'break_start', b))} style={{ ...bigBtn, background: 'var(--warning)', color: '#000', fontWeight: 700 }}>Start break</button>}
+                <button className="primary" disabled={busy} onClick={() => rfidCall(rfid.tag, 'out').then((b) => b && finishAction(p.name, 'out', b))} style={bigBtn}>Clock out</button>
+              </>}
+              {p.status === 'break' && <button disabled={busy} onClick={() => rfidCall(rfid.tag, 'break_end').then((b) => b && finishAction(p.name, 'break_end', b))} style={{ ...bigBtn, background: 'var(--success)', color: '#000', fontWeight: 700 }}>Back from break</button>}
+              {p.status === 'off' && <button className="primary" disabled={busy} onClick={() => rfidCall(rfid.tag, 'in').then((b) => b && finishAction(p.name, 'in', b))} style={bigBtn}>Clock in</button>}
+            </div>
+            {error && <div style={{ color: 'var(--danger)', marginTop: '12px' }}>{error}</div>}
+          </>
+        )}
+        <button onClick={() => { setRfid(null); setView('home'); setError(''); }} style={{ marginTop: '22px', fontSize: '15px', padding: '10px 18px' }}>Cancel</button>
       </div>
     );
   }

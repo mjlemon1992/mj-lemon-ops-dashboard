@@ -83,9 +83,10 @@ export default function Layout() {
     edits: _raw.edits || [],
     fuel: (_raw.fuel || []).filter(r => !dismissed.has(`fuel-${r.location_id}-${r.n}-${r.total}`)),
     reorders: _raw.reorders || [],
+    clockq: _raw.clockq || [],
     bonus: (_raw.bonus || []).filter(b => !dismissed.has(`bonus-${b.location_id}-${b.month}`)),
   };
-  const railCount = d.timeoff.length + d.edits.length + d.fuel.length + d.reorders.length + d.bonus.length;
+  const railCount = d.timeoff.length + d.edits.length + d.fuel.length + d.reorders.length + d.clockq.length + d.bonus.length;
   const showRail = !isMobile && railOpen && railCount > 0;
   const toggleRail = () => {
     if (isMobile) { setAttnOpen(o => !o); return; }
@@ -253,6 +254,7 @@ export default function Layout() {
                         ...d.edits.map(r => ({ key: `ed-${r.id}`, icon: '✎', text: `${r.person_name} — punch change`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
                         ...d.fuel.map(r => ({ key: `fu-${r.location_id}`, icon: '⛽', text: `${r.n} unassigned fuel purchase${r.n === 1 ? '' : 's'}`, loc: r.location_id, locName: r.location_name, path: '/fuel-card' })),
                         ...d.reorders.map(r => ({ key: `ro-${r.id}`, icon: '📦', text: `Re-order: ${r.item}`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
+                        ...d.clockq.map(r => ({ key: `cq-${r.id}`, icon: '⏱', text: `${r.person_name} — ${r.kind === 'overtime' ? 'overtime' : 'missed break'}`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
                         ...d.bonus.map(b => ({ key: `bo-${b.location_id}`, icon: '◆', text: `Bonus — ${b.status === 'draft' ? 'draft awaiting lock' : 'month open'}`, loc: b.location_id, locName: b.location_name, path: '/bonus' })),
                       ].map((it) => (
                         <div key={it.key}

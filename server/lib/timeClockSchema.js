@@ -125,6 +125,48 @@ function ensureTimeClockTables(pool) {
       decided_at TIMESTAMPTZ
     )`);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_reorder_loc_status ON reorder_request (location_id, status, created_at DESC)');
+    // ── RFID quick-clock + shift rules ──────────────────────────────────
+    // A fob (13.56MHz/125kHz) read by a Bluetooth HID reader = the tech's ID;
+    // possession of the fob authenticates the punch (no PIN). One tag per person
+    // per location.
+    await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS rfid_tag VARCHAR(64)');
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_person_rfid ON bonus_person (location_id, rfid_tag) WHERE rfid_tag IS NOT NULL");
+    // Break tracking can be turned OFF per person (e.g. the service advisor who
+    // rarely breaks) — no break button, no missed-break question, no deduction.
+    await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS track_break BOOLEAN DEFAULT true');
+    // Per-location shift window + standard unpaid break. Clock-in before the
+    // start records the start; still clocked in past the end auto-clocks out at
+    // the end. Applied only on the location's open_days. NULLs = no clamping.
+    await pool.query("ALTER TABLE locations ADD COLUMN IF NOT EXISTS shift_start TIME");
+    await pool.query("ALTER TABLE locations ADD COLUMN IF NOT EXISTS shift_end TIME");
+    await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS break_minutes INTEGER');
+    // Actual tap times before clamping (audit); auto_out = closed by the system
+    // at shift_end because the tech never clocked out.
+    await pool.query('ALTER TABLE time_clock_entry ADD COLUMN IF NOT EXISTS raw_clock_in TIMESTAMPTZ');
+    await pool.query('ALTER TABLE time_clock_entry ADD COLUMN IF NOT EXISTS raw_clock_out TIMESTAMPTZ');
+    await pool.query('ALTER TABLE time_clock_entry ADD COLUMN IF NOT EXISTS auto_out BOOLEAN DEFAULT false');
+    // Follow-up questions the tech must answer on their NEXT clock-in: overtime
+    // (worked past the clamped shift end) and missed break (no break logged).
+    // Tech answers on the kiosk → owner approves → the entry's pay is adjusted.
+    await pool.query(`CREATE TABLE IF NOT EXISTS clock_followup (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      location_id UUID NOT NULL,
+      person_id UUID NOT NULL,
+      entry_id UUID,                          -- the shift it concerns
+      kind VARCHAR(10) NOT NULL,              -- overtime | break
+      work_date DATE NOT NULL,
+      status VARCHAR(10) NOT NULL DEFAULT 'pending',  -- pending | answered | approved | dismissed
+      answer_hours NUMERIC,                   -- OT hours, or break length, tech-entered
+      took_break BOOLEAN,                     -- break kind: did they take one at all
+      created_at TIMESTAMPTZ DEFAULT now(),
+      answered_at TIMESTAMPTZ,
+      decided_by VARCHAR(200),
+      decided_at TIMESTAMPTZ
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_followup_person_status ON clock_followup (person_id, status)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_followup_loc_status ON clock_followup (location_id, status)');
+    // One open follow-up of a kind per shift — guards the sweep re-inserting.
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_followup_once ON clock_followup (entry_id, kind) WHERE entry_id IS NOT NULL");
   })();
   return _init;
 }
