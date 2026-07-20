@@ -110,6 +110,24 @@ async function openaiImage(prompt) {
   return `data:image/png;base64,${b64}`;
 }
 
+// Generate a poster background, trying providers in order and falling back on
+// failure. Default order: Gemini (current working default) then OpenAI. Set
+// IMAGE_PROVIDER=openai to make OpenAI primary. Returns { image, provider, model }.
+async function generateImage(prompt, force) {
+  const gem = GEMINI_KEY ? { name: 'gemini', run: () => geminiImage(prompt), model: () => _gemModel } : null;
+  const oai = OPENAI_KEY ? { name: 'openai', run: () => openaiImage(prompt), model: () => IMAGE_MODEL } : null;
+  const pref = (force || process.env.IMAGE_PROVIDER || '').toLowerCase();
+  const order = pref === 'openai' ? [oai, gem] : pref === 'gemini' ? [gem, oai] : [gem, oai];
+  const providers = order.filter(Boolean);
+  if (!providers.length) throw Object.assign(new Error('No image generation key configured'), { status: 503 });
+  let lastErr;
+  for (const p of providers) {
+    try { return { image: await p.run(), provider: p.name, model: p.model() }; }
+    catch (e) { lastErr = e; console.error(`poster image via ${p.name} failed:`, e.message); }
+  }
+  throw lastErr;
+}
+
 const CAPTION_SYSTEM = `You write social media captions for an automotive TRANSMISSION repair shop
 (Mister Transmission — Parkland Transmission, Red Deer & Kelowna). You are given a photo from the
 shop floor and an optional short note. Write platform-specific captions for the photo.
@@ -297,8 +315,8 @@ module.exports = (pool) => {
       if (!HAS_IMAGE_GEN) return res.status(503).json({ error: 'No image API key set (GEMINI_API_KEY or OPENAI_API_KEY)' });
       const { type = 'seasonal', topic = '' } = req.body || {};
       const prompt = imagePromptFor(type, topic);
-      const image = GEMINI_KEY ? await geminiImage(prompt) : await openaiImage(prompt);
-      res.json({ image, provider: GEMINI_KEY ? 'gemini' : 'openai', model: GEMINI_KEY ? _gemModel : IMAGE_MODEL });
+      const out = await generateImage(prompt, req.query.provider);   // ?provider=openai forces it (testing)
+      res.json(out);
     } catch (e) { fail(res, e); }
   });
 
