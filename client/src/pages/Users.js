@@ -68,9 +68,10 @@ export default function Users() {
                 <option value="owner">Owner — full admin (locations, users, everything)</option>
                 <option value="partner">Partner — all locations, no admin settings</option>
                 <option value="manager">Shop operator — their location only: reports, finance, marketing, notices, targets</option>
+                <option value="advisor">Service advisor — their location's re-order board only, no money pages</option>
               </select>
             </div>
-            {form.role === 'manager' && (
+            {['manager', 'advisor'].includes(form.role) && (
               <div className="form-group">
                 <label className="form-label">Location</label>
                 <select value={form.location_id} onChange={e => setForm(f=>({...f,location_id:e.target.value}))}>

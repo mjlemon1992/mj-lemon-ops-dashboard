@@ -1015,8 +1015,13 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
-  // Admin: the active board (requested + ordered) — same rows the kiosk shows.
-  router.get('/:locationId/reorders', ...authed, scoped, async (req, res) => {
+  // The re-order board is also the SERVICE ADVISOR's surface — the person who
+  // actually places the orders. Advisors get the board + ordered/received, and
+  // nothing else on the dashboard (no money pages, no payroll actions).
+  const orderers = [authenticateToken, requireRole('owner', 'partner', 'manager', 'advisor')];
+
+  // Admin/advisor: the active board (requested + ordered) — same rows the kiosk shows.
+  router.get('/:locationId/reorders', ...orderers, scoped, async (req, res) => {
     try {
       await ensure();
       const { rows } = await pool.query(
@@ -1029,11 +1034,14 @@ module.exports = (pool) => {
   // Advance a request: requested → ordered → received (or dismissed). Anyone
   // with board access for the location can do it — the status is shared, so it
   // updates identically on the kiosk, the Time Clock tab and the rail.
-  router.put('/reorder/:id', ...authed, async (req, res) => {
+  // Advisors can order/receive but NOT dismiss (or resurrect) a tech's request —
+  // quietly killing one is an owner/manager call.
+  router.put('/reorder/:id', ...orderers, async (req, res) => {
     try {
       await ensure();
       const action = (req.body || {}).action;
       if (!['ordered', 'received', 'dismissed', 'requested'].includes(action)) return fail(res, 'action must be ordered|received|dismissed|requested', 400);
+      if (req.user.role === 'advisor' && !['ordered', 'received'].includes(action)) return fail(res, 'Advisors can mark ordered or received only', 403);
       const { rows: rr } = await pool.query('SELECT * FROM reorder_request WHERE id=$1', [req.params.id]);
       if (!rr.length) return fail(res, 'Request not found', 404);
       const r = rr[0];
