@@ -204,7 +204,8 @@ export default function ClockKiosk() {
 
   const submitTimeOff = async () => {
     const f = reqForm;
-    if (!f.person || !f.start || !f.end || f.pin.length < 4) { setError('Fill the dates and your PIN'); return; }
+    if (!f.start || !f.end) { setError('Pick your first and last day off'); return; }
+    if (f.pin.length < 4) { setError(`Enter your own 4–6 digit clock PIN, ${String(f.person.name || '').split(' ')[0]} — the one you punch in with`); return; }
     setBusy(true); setError('');
     try {
       const res = await fetch(`/api/clock/${locationId}/timeoff`, {
