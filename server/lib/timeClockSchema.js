@@ -106,6 +106,25 @@ function ensureTimeClockTables(pool) {
     // Which weekdays the shop is open ('mon,tue,...'). Drives how holiday days
     // are counted (days used) and the bonus schedule denominator.
     await pool.query("ALTER TABLE locations ADD COLUMN IF NOT EXISTS open_days VARCHAR(40) DEFAULT 'mon,tue,wed,thu,fri'");
+    // Re-order board: a tech flags low misc stock from the kiosk (tagged to
+    // their name). Owner/manager marks it ordered/received; best-effort push
+    // to the Shopmonkey inventory note. Low friction — no personal PIN, the
+    // tablet is already behind the shop PIN.
+    await pool.query(`CREATE TABLE IF NOT EXISTS reorder_request (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      location_id UUID NOT NULL,
+      person_id UUID,
+      person_name VARCHAR(200),               -- snapshot: who flagged it
+      item VARCHAR(200) NOT NULL,
+      qty VARCHAR(60),                         -- free text: "2 cases", "1L", etc.
+      note TEXT,
+      status VARCHAR(12) NOT NULL DEFAULT 'requested',  -- requested | ordered | received | dismissed
+      sm_note TEXT,                            -- Shopmonkey push result, if attempted
+      created_at TIMESTAMPTZ DEFAULT now(),
+      decided_by VARCHAR(200),
+      decided_at TIMESTAMPTZ
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_reorder_loc_status ON reorder_request (location_id, status, created_at DESC)');
   })();
   return _init;
 }

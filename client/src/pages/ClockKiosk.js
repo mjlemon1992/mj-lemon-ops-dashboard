@@ -82,7 +82,9 @@ export default function ClockKiosk() {
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState('');
-  const [view, setView] = useState('roster');       // roster | timeoff | request | timesheet | profile
+  const [view, setView] = useState('home');         // home | roster | timeoff | request | timesheet | profile | reorder
+  const [reorderBoard, setReorderBoard] = useState([]);
+  const [reorderForm, setReorderForm] = useState({ person: null, item: '', qty: '', note: '' });
   const [board, setBoard] = useState([]);           // time-off requests for the calendar
   const [holidays, setHolidays] = useState([]);     // province stat holidays in the window
   const [reqForm, setReqForm] = useState({ person: null, start: '', end: '', type: 'vacation', pin: '', paid: true });
@@ -115,6 +117,34 @@ export default function ClockKiosk() {
     } catch { /* board is best-effort */ }
   }, [locationId, locPin]);
   useEffect(() => { if (entered && view === 'timeoff') loadBoard(); }, [entered, view, loadBoard]);
+
+  const loadReorder = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/clock/${locationId}/reorder-board?pin=${encodeURIComponent(locPin)}`);
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) setReorderBoard(body.requests || []);
+    } catch { /* best-effort */ }
+  }, [locationId, locPin]);
+  useEffect(() => { if (entered && view === 'reorder') loadReorder(); }, [entered, view, loadReorder]);
+
+  const submitReorder = async () => {
+    const f = reorderForm;
+    if (!f.item.trim()) { setError('What are we low on? Enter an item.'); return; }
+    setBusy(true); setError('');
+    try {
+      const res = await fetch(`/api/clock/${locationId}/reorder`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loc_pin: locPin, person_id: f.person ? f.person.id : null, item: f.item, qty: f.qty, note: f.note }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(body.error || 'Failed'); setBusy(false); return; }
+      setFlash(`Re-order sent: ${body.item}`);
+      setReorderForm({ person: null, item: '', qty: '', note: '' });
+      loadReorder();
+      setTimeout(() => setFlash(''), 3000);
+    } catch { setError('Network error'); }
+    setBusy(false);
+  };
 
   // ── Tech self-service (uses the PIN already typed on the person screen) ──
   const openTimesheet = async () => {
@@ -429,7 +459,7 @@ export default function ClockKiosk() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', width: '100%', maxWidth: '820px' }}>
           <div style={{ ...kh, fontSize: '24px' }}>Who's off</div>
           <button onClick={() => { setView('request'); setError(''); }} className="primary" style={{ marginLeft: 'auto', fontSize: '15px', padding: '10px 18px' }}>Request time off</button>
-          <button onClick={() => { setView('roster'); setError(''); }} style={{ fontSize: '15px', padding: '10px 18px' }}>← Clock</button>
+          <button onClick={() => { setView('home'); setError(''); }} style={{ fontSize: '15px', padding: '10px 18px' }}>← Home</button>
         </div>
         {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', margin: '10px 0 0' }}>✓ {flash}</div>}
         <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '18px' }}>
@@ -503,12 +533,90 @@ export default function ClockKiosk() {
     );
   }
 
+  // ── Home: three big tiles ──
+  if (view === 'home') {
+    const openReorders = reorderBoard.filter((r) => r.status === 'requested').length;
+    const onNow = people.filter((p) => p.status !== 'off').length;
+    const Tile = ({ icon, title, sub, onClick, accent }) => (
+      <button onClick={onClick} style={{ ...card, borderColor: accent ? 'var(--accent)' : 'var(--border)', borderWidth: '2px', padding: '30px 22px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', minHeight: '190px', justifyContent: 'center' }}>
+        <div style={{ fontSize: '46px', lineHeight: 1 }}>{icon}</div>
+        <div style={{ ...kh, fontSize: '22px' }}>{title}</div>
+        <div style={{ fontSize: '13px', color: 'var(--text3)' }}>{sub}</div>
+      </button>
+    );
+    return (
+      <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '40px' }}>
+        <div style={{ ...eyebrow, marginBottom: '6px' }}>OPS · Shop floor</div>
+        <div style={{ ...kh, fontSize: '30px', marginBottom: '24px' }}>Shop hub</div>
+        {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', marginBottom: '16px' }}>✓ {flash}</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '18px', width: '100%', maxWidth: '820px' }}>
+          <Tile icon="🕐" title="Clock" sub={onNow ? `${onNow} on the clock now` : 'Clock in / out & breaks'} onClick={() => { setView('roster'); loadRoster(locPin); setError(''); }} accent />
+          <Tile icon="📅" title="Time off" sub="Request & who's away" onClick={() => { setView('timeoff'); loadBoard(); setError(''); }} />
+          <Tile icon="📦" title="Re-order" sub={openReorders ? `${openReorders} awaiting order` : 'Flag low stock'} onClick={() => { setView('reorder'); loadReorder(); setError(''); }} />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Re-order board: flag low misc stock, tagged to a name ──
+  if (view === 'reorder') {
+    const STATUS_CHIP = { requested: { t: 'Requested', c: 'var(--warning)' }, ordered: { t: 'Ordered ✓', c: 'var(--accent)' }, received: { t: 'Received ✓', c: 'var(--success)' }, dismissed: { t: 'Dismissed', c: 'var(--text3)' } };
+    return (
+      <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '26px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', width: '100%', maxWidth: '760px' }}>
+          <div style={{ ...kh, fontSize: '24px' }}>Re-order board</div>
+          <button onClick={() => { setView('home'); setError(''); }} style={{ marginLeft: 'auto', fontSize: '15px', padding: '10px 18px' }}>← Home</button>
+        </div>
+        {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', margin: '10px 0 0' }}>✓ {flash}</div>}
+
+        {/* Request form */}
+        <div style={{ width: '100%', maxWidth: '760px', marginTop: '16px', background: 'var(--bg2)', borderRadius: '14px', padding: '16px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, marginBottom: '10px' }}>We're running low on…</div>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <label style={{ ...lbl, flex: '2 1 220px' }}>Item
+              <input value={reorderForm.item} placeholder="e.g. ATF Dexron VI, brake clean, shop rags" onChange={(e) => setReorderForm((s) => ({ ...s, item: e.target.value }))} style={inp} /></label>
+            <label style={{ ...lbl, flex: '1 1 120px' }}>How much? (optional)
+              <input value={reorderForm.qty} placeholder="2 cases, 1L…" onChange={(e) => setReorderForm((s) => ({ ...s, qty: e.target.value }))} style={inp} /></label>
+          </div>
+          <div style={{ fontSize: '13px', color: 'var(--text3)', margin: '12px 0 6px' }}>Who's flagging it?</div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {people.map((p) => (
+              <button key={p.id} onClick={() => setReorderForm((s) => ({ ...s, person: s.person && s.person.id === p.id ? null : p }))}
+                style={{ fontSize: '14px', padding: '8px 14px', border: reorderForm.person && reorderForm.person.id === p.id ? '2px solid var(--accent)' : '1px solid var(--border)', background: reorderForm.person && reorderForm.person.id === p.id ? 'rgba(240,84,35,0.12)' : 'var(--bg3)' }}>
+                {p.name.split(' ')[0]}
+              </button>
+            ))}
+          </div>
+          <button className="primary" disabled={busy || !reorderForm.item.trim()} onClick={submitReorder} style={{ ...bigBtn, marginTop: '14px' }}>Send re-order</button>
+          {error && <div style={{ color: 'var(--danger)', marginTop: '10px' }}>{error}</div>}
+        </div>
+
+        {/* Board — so techs see it's handled */}
+        <div style={{ width: '100%', maxWidth: '760px', marginTop: '18px' }}>
+          <div style={{ ...eyebrow, marginBottom: '8px' }}>On the board</div>
+          {reorderBoard.length === 0 && <div style={{ color: 'var(--text3)' }}>Nothing flagged right now.</div>}
+          {reorderBoard.map((r) => {
+            const chip = STATUS_CHIP[r.status] || STATUS_CHIP.requested;
+            return (
+              <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '10px 12px', background: 'var(--bg2)', borderRadius: '10px', marginBottom: '6px' }}>
+                <span style={{ fontWeight: 700 }}>{r.item}</span>
+                {r.qty && <span style={{ color: 'var(--text3)', fontSize: '13px' }}>· {r.qty}</span>}
+                {r.person_name && <span style={{ color: 'var(--text3)', fontSize: '12px' }}>· {r.person_name.split(' ')[0]}</span>}
+                <span style={{ ...pill, marginLeft: 'auto', fontSize: '11px', color: chip.c, background: 'var(--bg3)' }}>{chip.t}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   // ── Roster grid ──
   return (
     <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '30px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '14px', width: '100%', maxWidth: '760px', justifyContent: 'center' }}>
+        <button onClick={() => { setView('home'); setError(''); }} style={{ fontSize: '14px', padding: '8px 14px' }}>← Home</button>
         <div style={{ ...kh, fontSize: '24px', marginBottom: '4px' }}>Who's clocking?</div>
-        <button onClick={() => { setView('timeoff'); setError(''); }} style={{ fontSize: '14px', padding: '8px 14px' }}>📅 Time off</button>
       </div>
       {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', margin: '6px 0 14px' }}>✓ {flash}</div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '14px', width: '100%', maxWidth: '760px', marginTop: '10px' }}>

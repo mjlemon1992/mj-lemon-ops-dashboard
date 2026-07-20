@@ -44,6 +44,7 @@ function ClockAdmin({ locId }) {
   const [allPeople, setAllPeople] = useState([]);   // incl. removed — for re-add
   const [editReqs, setEditReqs] = useState([]);     // pending timesheet-alteration requests
   const [live, setLive] = useState([]);             // who's on the clock right now (summary strip)
+  const [reorders, setReorders] = useState([]);     // re-order board requests
   const load = useCallback(() => {
     if (!sel) return;
     Promise.all([
@@ -52,7 +53,8 @@ function ClockAdmin({ locId }) {
       api(`/clock/${locId}/timeoff`).catch(() => null),
       api(`/clock/${locId}/edit-requests`).catch(() => ({ requests: [] })),
       api(`/clock/${locId}/status`).catch(() => ({ people: [] })),
-    ]).then(([e, ov, toff, er, st]) => { setData(e); setAllPeople(ov.people || []); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setEditReqs(er.requests || []); setLive(st.people || []); setErr(null); })
+      api(`/clock/${locId}/reorders`).catch(() => ({ requests: [] })),
+    ]).then(([e, ov, toff, er, st, ro]) => { setData(e); setAllPeople(ov.people || []); setPeople((ov.people || []).filter((p) => p.active)); setTimeoff(toff); setEditReqs(er.requests || []); setLive(st.people || []); setReorders(ro.requests || []); setErr(null); })
       .catch((ex) => setErr(ex.message));
   }, [api, locId, sel]);
   useEffect(() => { load(); }, [load]);
@@ -84,6 +86,18 @@ function ClockAdmin({ locId }) {
     setBusy(true); setErr(null);
     try { await api(`/bonus/people/${p.id}`, { method: 'PUT', body: JSON.stringify({ vacation_hours_per_year: v.trim() === '' ? null : Number(v) }) }); load(); showToast(`Allowance saved for ${p.name}`); }
     catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  // Re-order board: advance a request (ordered → best-effort Shopmonkey note).
+  const reorderAction = async (r, action) => {
+    setBusy(true); setErr(null);
+    try {
+      const out = await api(`/clock/reorder/${r.id}`, { method: 'PUT', body: JSON.stringify({ action }) });
+      if (action === 'ordered' && out.shopmonkey) showToast(/failed|not configured/i.test(out.shopmonkey) ? `Marked ordered (${out.shopmonkey})` : 'Ordered — on the Shopmonkey calendar');
+      else showToast(action === 'received' ? 'Marked received' : action === 'dismissed' ? 'Dismissed' : 'Updated');
+      load();
+    } catch (e) { setErr(e.message); }
     setBusy(false);
   };
 
@@ -308,7 +322,7 @@ function ClockAdmin({ locId }) {
 
       {/* Workspace tabs — the page was one long scroll; related blocks now live together */}
       <div className="tc-tabs">
-        {[['punches', 'Punches'], ['crew', 'Crew'], ['timeoff', 'Time off']].map(([k, l]) => (
+        {[['punches', 'Punches'], ['crew', 'Crew'], ['timeoff', 'Time off'], ['reorder', reorders.some((r) => r.status === 'requested') ? `Re-orders (${reorders.filter((r) => r.status === 'requested').length})` : 'Re-orders']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'tc-tab active' : 'tc-tab'} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -547,6 +561,30 @@ function ClockAdmin({ locId }) {
       )}
 
       {/* Upcoming approved time off */}
+      {tab === 'reorder' && (
+        <div className="card">
+          <div style={{ fontWeight: 600, marginBottom: '10px' }}>Re-order board <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>· techs flag low stock from the kiosk</span></div>
+          {reorders.length === 0 && <div style={{ color: 'var(--text3)', fontSize: '13px' }}>Nothing flagged yet.</div>}
+          {reorders.map((r) => {
+            const chip = { requested: ['Requested', 'var(--warning)'], ordered: ['Ordered', 'var(--accent)'], received: ['Received', 'var(--success)'], dismissed: ['Dismissed', 'var(--text3)'] }[r.status] || ['Requested', 'var(--warning)'];
+            return (
+              <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '9px 11px', background: 'var(--bg3)', borderRadius: '10px', marginBottom: '6px' }}>
+                <span style={{ fontWeight: 700 }}>{r.item}</span>
+                {r.qty && <span style={{ color: 'var(--text2)', fontSize: '13px' }}>· {r.qty}</span>}
+                {r.person_name && <span style={{ color: 'var(--text3)', fontSize: '12px' }}>· {r.person_name}</span>}
+                {r.note && <span style={{ color: 'var(--text3)', fontSize: '12px', fontStyle: 'italic' }}>"{r.note}"</span>}
+                <span style={{ fontSize: '11px', fontWeight: 700, color: chip[1] }}>{chip[0]}{r.sm_note && r.status === 'ordered' ? ` · ${r.sm_note}` : ''}</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+                  {r.status === 'requested' && <button className="primary" disabled={busy} onClick={() => reorderAction(r, 'ordered')} style={{ fontSize: '12px', padding: '5px 12px' }}>Mark ordered</button>}
+                  {r.status === 'ordered' && <button disabled={busy} onClick={() => reorderAction(r, 'received')} style={{ fontSize: '12px', padding: '5px 12px', color: 'var(--success)' }}>Received</button>}
+                  {r.status !== 'dismissed' && r.status !== 'received' && <button disabled={busy} onClick={() => reorderAction(r, 'dismissed')} title="Dismiss" style={{ fontSize: '12px', padding: '5px 10px', color: 'var(--text3)' }}>✕</button>}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {tab === 'timeoff' && upcoming.length === 0 && !closure && (
         <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '28px' }}>
           No upcoming time off. Techs request holidays from the kiosk; approvals appear here and in "Needs attention".

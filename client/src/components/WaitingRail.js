@@ -18,8 +18,8 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
   const ownerish = ['owner', 'partner'].includes(user?.role);
   const [busy, setBusy] = useState(false);
   const dismiss = (key) => onDismiss && onDismiss(key);
-  const { timeoff = [], edits = [], fuel = [], bonus = [] } = detail || {};
-  const total = timeoff.length + edits.length + fuel.length + bonus.length;
+  const { timeoff = [], edits = [], fuel = [], reorders = [], bonus = [] } = detail || {};
+  const total = timeoff.length + edits.length + fuel.length + reorders.length + bonus.length;
   // Deep-links must land on the card's own shop, not whatever is globally selected.
   const goTo = (locationId, path) => { select(locationId); navigate(path); };
 
@@ -37,6 +37,10 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
   const decideEdit = (r, action) => act(
     () => api(`/clock/edit-requests/${r.id}`, { method: 'PUT', body: JSON.stringify({ action }) }),
     action === 'apply' ? `Punch corrected — ${r.person_name}` : 'Dismissed'
+  );
+  const decideReorder = (r, action) => act(
+    () => api(`/clock/reorder/${r.id}`, { method: 'PUT', body: JSON.stringify({ action }) }),
+    action === 'ordered' ? `Ordered — ${r.item}` : 'Dismissed'
   );
 
   return (
@@ -98,6 +102,17 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
             <button className="wr-x" title="Dismiss — reappears if new purchases land" onClick={() => dismiss(`fuel-${r.location_id}-${r.n}-${r.total}`)}>✕</button></div>
           <div className="wr-card-body">{money(r.total)} on the card, nobody assigned{multiLoc && <span className="wr-loc"> · {r.location_name}</span>}</div>
           <div className="wr-actions"><button onClick={() => goTo(r.location_id, '/fuel-card')}>Assign →</button></div>
+        </div>
+      ))}
+
+      {reorders.map((r) => (
+        <div key={`reorder-${r.id}`} className="wr-card hot">
+          <div className="wr-card-title">Re-order: {r.item}{r.qty ? ` (${r.qty})` : ''}</div>
+          <div className="wr-card-body">{r.person_name ? `flagged by ${r.person_name.split(' ')[0]}` : 'low stock flagged'}{multiLoc && <span className="wr-loc"> · {r.location_name}</span>}</div>
+          <div className="wr-actions">
+            <button className="primary" disabled={busy} onClick={() => decideReorder(r, 'ordered')}>Mark ordered</button>
+            <button disabled={busy} onClick={() => decideReorder(r, 'dismissed')}>Dismiss</button>
+          </div>
         </div>
       ))}
 
