@@ -18,7 +18,7 @@ module.exports = (pool) => {
     return ensured;
   };
 
-  router.get('/', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+  router.get('/', authenticateToken, requireRole('owner', 'partner', 'manager', 'advisor'), async (req, res) => {
     try {
       await ensureOnce();
       let locs;
@@ -31,6 +31,22 @@ module.exports = (pool) => {
       if (!locs.length) return res.json({ items: [], total: 0 });
       const ids = locs.map((l) => l.id);
       const nameOf = Object.fromEntries(locs.map((l) => [l.id, l.name]));
+
+      // The advisor's queue is the re-order board and nothing else — no
+      // payroll approvals, no fuel, no bonus prompts.
+      if (req.user.role === 'advisor') {
+        const { rows } = await pool.query(
+          `SELECT id, location_id, item, qty, person_name, status FROM reorder_request
+            WHERE location_id = ANY($1) AND status IN ('requested','ordered') ORDER BY created_at`, [ids]);
+        const withName = (r) => ({ ...r, location_name: nameOf[r.location_id] });
+        const byLoc = {};
+        for (const r of rows) byLoc[r.location_id] = (byLoc[r.location_id] || 0) + 1;
+        const items = Object.entries(byLoc).map(([lid, n]) => ({ kind: 'reorder', location_id: lid, location_name: nameOf[lid], count: n, label: n === 1 ? 'stock re-order' : 'stock re-orders', path: '/reorders' }));
+        return res.json({
+          items, total: rows.length,
+          detail: { timeoff: [], edits: [], fuel: [], reorders: rows.map(withName), clockq: [], bonus: [] },
+        });
+      }
 
       const prevMonth = (() => {
         const now = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' }) + 'T12:00:00Z');

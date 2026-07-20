@@ -55,7 +55,8 @@ export default function Layout() {
 
   // "Waiting on you" — human queues (holiday requests, punch changes,
   // unassigned fuel, bonus prompt). One aggregate call, refreshed every minute.
-  const canQueue = user && ['owner', 'partner', 'manager'].includes(user.role);
+  // Advisors poll too — the server hands them a re-orders-only queue.
+  const canQueue = user && ['owner', 'partner', 'manager', 'advisor'].includes(user.role);
   const loadAttention = React.useCallback(() => {
     if (!canQueue) return;
     api('/attention')
@@ -259,7 +260,7 @@ export default function Layout() {
                         ...d.timeoff.map(r => ({ key: `to-${r.id}`, icon: '🏖', text: `${r.person_name} — holiday request`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
                         ...d.edits.map(r => ({ key: `ed-${r.id}`, icon: '✎', text: `${r.person_name} — punch change`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
                         ...d.fuel.map(r => ({ key: `fu-${r.location_id}`, icon: '⛽', text: `${r.n} unassigned fuel purchase${r.n === 1 ? '' : 's'}`, loc: r.location_id, locName: r.location_name, path: '/fuel-card' })),
-                        ...d.reorders.map(r => ({ key: `ro-${r.id}`, icon: '📦', text: `Re-order: ${r.item}`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
+                        ...d.reorders.map(r => ({ key: `ro-${r.id}`, icon: '📦', text: `Re-order: ${r.item}`, loc: r.location_id, locName: r.location_name, path: user?.role === 'advisor' ? '/reorders' : '/time-clock' })),
                         ...d.clockq.map(r => ({ key: `cq-${r.id}`, icon: '⏱', text: `${r.person_name} — ${r.kind === 'overtime' ? 'overtime' : 'missed break'}`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
                         ...d.bonus.map(b => ({ key: `bo-${b.location_id}`, icon: '◆', text: `Bonus — ${b.status === 'draft' ? 'draft awaiting lock' : 'month open'}`, loc: b.location_id, locName: b.location_name, path: '/bonus' })),
                       ].map((it) => (
