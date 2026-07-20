@@ -37,7 +37,7 @@ module.exports = (pool) => {
         const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
         return d.toISOString().slice(0, 7);
       })();
-      const [timeoff, edits, fuel, bonusRuns, bonusCrew] = await Promise.all([
+      const [timeoff, edits, fuel, bonusRuns, bonusCrew, reorders] = await Promise.all([
         pool.query(
           `SELECT r.id, r.location_id, r.person_id, r.type, r.paid, r.working_days,
                   r.start_date::text AS start_date, r.end_date::text AS end_date,
@@ -74,6 +74,10 @@ module.exports = (pool) => {
           `SELECT location_id FROM bonus_person
             WHERE location_id = ANY($1) AND active = true AND in_bonus IS NOT FALSE
             GROUP BY location_id`, [ids]),
+        // Re-order requests still awaiting an order decision.
+        pool.query(
+          `SELECT id, location_id, item, qty, person_name FROM reorder_request
+            WHERE location_id = ANY($1) AND status = 'requested' ORDER BY created_at`, [ids]),
       ]);
 
       // Bonus prompt: previous month with no approved (unsuperseded) run.
@@ -102,6 +106,7 @@ module.exports = (pool) => {
       push(countByLoc(timeoff.rows), 'timeoff', 'holiday request', '/time-clock');
       push(countByLoc(edits.rows), 'edit', 'punch change', '/time-clock');
       push(Object.fromEntries(fuel.rows.map((r) => [r.location_id, r.n])), 'fuel', 'unassigned fuel purchase', '/fuel-card');
+      push(countByLoc(reorders.rows), 'reorder', 'stock re-order', '/time-clock');
 
       // Time-off amounts to HOURS (QuickBooks unit): working_days × per-day hours.
       const { openDaySet } = require('../lib/workdays');
@@ -122,6 +127,7 @@ module.exports = (pool) => {
           timeoff: timeoff.rows.map(toHours),
           edits: edits.rows.map(withName),
           fuel: fuel.rows.map(withName),
+          reorders: reorders.rows.map(withName),
           bonus,
         },
       });

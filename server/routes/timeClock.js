@@ -910,5 +910,101 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
+  // ══ RE-ORDER BOARD ════════════════════════════════════════════════════
+  // A tech flags low misc stock from the kiosk (shop-PIN gated, tagged to the
+  // name they tap — no personal PIN, keep it frictionless). Owner/manager
+  // marks it ordered/received; marking "ordered" best-efforts a Shopmonkey
+  // calendar note as a reminder (the appointment API we already use).
+
+  // Kiosk: create a request.
+  router.post('/:locationId/reorder', async (req, res) => {
+    try {
+      await ensure();
+      if (!(await checkLocPin(req, res))) return;
+      const { person_id, item, qty, note } = req.body || {};
+      if (!item || !String(item).trim()) return fail(res, 'What are we low on? Enter an item.', 400);
+      let personName = null;
+      if (person_id) {
+        const { rows: pr } = await pool.query('SELECT name FROM bonus_person WHERE id=$1 AND location_id=$2', [person_id, req.params.locationId]);
+        personName = pr[0] ? pr[0].name : null;
+      }
+      const { rows } = await pool.query(
+        `INSERT INTO reorder_request (location_id, person_id, person_name, item, qty, note)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, item`,
+        [req.params.locationId, person_id || null, personName, String(item).slice(0, 200), (qty ? String(qty).slice(0, 60) : null), String(note || '').slice(0, 500)]);
+      res.json({ ok: true, id: rows[0].id, item: rows[0].item });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Kiosk: see the board (open + recently actioned) so a tech knows it's handled.
+  router.get('/:locationId/reorder-board', async (req, res) => {
+    try {
+      await ensure();
+      if (!(await checkLocPin(req, res))) return;
+      const { rows } = await pool.query(
+        `SELECT id, person_name, item, qty, note, status, created_at
+           FROM reorder_request
+          WHERE location_id=$1 AND (status IN ('requested','ordered') OR created_at > now() - interval '7 days')
+          ORDER BY (status='requested') DESC, created_at DESC LIMIT 40`, [req.params.locationId]);
+      res.json({ requests: rows });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Admin: list (all statuses, recent).
+  router.get('/:locationId/reorders', ...authed, scoped, async (req, res) => {
+    try {
+      await ensure();
+      const { rows } = await pool.query(
+        `SELECT * FROM reorder_request WHERE location_id=$1
+          ORDER BY (status='requested') DESC, created_at DESC LIMIT 100`, [req.params.locationId]);
+      res.json({ requests: rows });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Admin: advance a request. ordered → best-effort Shopmonkey calendar note.
+  router.put('/reorder/:id', ...authed, async (req, res) => {
+    try {
+      await ensure();
+      const action = (req.body || {}).action;
+      if (!['ordered', 'received', 'dismissed', 'requested'].includes(action)) return fail(res, 'action must be ordered|received|dismissed|requested', 400);
+      const { rows: rr } = await pool.query('SELECT * FROM reorder_request WHERE id=$1', [req.params.id]);
+      if (!rr.length) return fail(res, 'Request not found', 404);
+      const r = rr[0];
+      if (!canAccessLocation(req.user, r.location_id)) return fail(res, 'Access denied for this location', 403);
+      let smNote = r.sm_note;
+      if (action === 'ordered' && !r.sm_note) {
+        const apiKey = process.env.SHOPMONKEY_API_KEY;
+        const { rows: lr } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [r.location_id]);
+        const smLoc = lr[0] && lr[0].shopmonkey_location_id;
+        if (apiKey && smLoc) {
+          const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
+          try {
+            const resp = await fetch('https://api.shopmonkey.cloud/v3/appointment', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                locationId: smLoc,
+                name: `📦 Re-order: ${r.item}${r.qty ? ` (${r.qty})` : ''}`,
+                note: `Ordered${r.person_name ? ` — flagged by ${r.person_name}` : ''}${r.note ? `. ${r.note}` : ''}. Via the ops dashboard re-order board.`,
+                allDay: true,
+                startDate: `${today}T15:00:00.000Z`,
+                endDate: `${today}T23:00:00.000Z`,
+                color: 'green', sendConfirmation: false, sendReminder: false,
+              }),
+            });
+            const body = await resp.json().catch(() => ({}));
+            smNote = resp.ok ? 'On Shopmonkey calendar ✓' : `Shopmonkey push failed: ${body.message || resp.status}`;
+          } catch (e) { smNote = `Shopmonkey push failed: ${e.message}`; }
+        } else {
+          smNote = 'Shopmonkey not configured for this location';
+        }
+      }
+      await pool.query(
+        'UPDATE reorder_request SET status=$2, sm_note=$3, decided_by=$4, decided_at=now() WHERE id=$1',
+        [r.id, action, smNote, who(req)]);
+      res.json({ ok: true, id: r.id, status: action, shopmonkey: smNote });
+    } catch (e) { fail(res, e); }
+  });
+
   return router;
 };
