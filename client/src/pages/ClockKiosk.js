@@ -700,6 +700,35 @@ export default function ClockKiosk() {
           <Tile icon="📅" title="Time off" sub="Request & who's away" onClick={() => { setView('timeoff'); loadBoard(); setError(''); }} />
           <Tile icon="📦" title="Re-order" sub={openReorders ? `${openReorders} awaiting order` : 'Flag low stock'} onClick={() => { setView('reorder'); loadReorder(); setError(''); }} />
         </div>
+
+        {/* Crew now — live status under the tiles so a fob tap's result is
+            visible at a glance (updates every 20s with the roster). */}
+        {people.length > 0 && (
+          <div style={{ width: '100%', maxWidth: '820px', marginTop: '26px' }}>
+            <div style={{ ...eyebrow, marginBottom: '10px' }}>Crew now</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '10px' }}>
+              {people.map((p) => {
+                const st = STATUS[p.status] || STATUS.off;
+                const on = p.status !== 'off';
+                return (
+                  <button key={p.id} onClick={() => { setActive(p); setPin(''); setError(''); }}
+                    title={`${p.name} — tap to punch`}
+                    style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '12px', textAlign: 'left',
+                      background: 'var(--bg2)', border: `1px solid ${p.status === 'on' ? 'rgba(52,199,89,0.45)' : p.status === 'break' ? 'rgba(255,184,0,0.5)' : 'var(--border)'}`,
+                      opacity: on ? 1 : 0.62, cursor: 'pointer' }}>
+                    <Avatar p={p} size={34} />
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: 'block', fontWeight: 700, fontSize: '14px', color: p.color || 'var(--text1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name.split(' ')[0]}</span>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: st.color }}>
+                        {p.status === 'on' ? `IN · ${fmtTime(p.clock_in)}` : p.status === 'break' ? `BREAK · ${fmtTime(p.since)}` : 'OUT'}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
