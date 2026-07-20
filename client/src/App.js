@@ -25,6 +25,7 @@ import Users from './pages/Users';
 import Wip from './pages/Wip';
 import Bonus from './pages/Bonus';
 import FuelCard from './pages/FuelCard';
+import PartsRecon from './pages/PartsRecon';
 import ClockKiosk from './pages/ClockKiosk';
 import TimeClock from './pages/TimeClock';
 import Reorders from './pages/Reorders';
@@ -69,6 +70,7 @@ export default function App() {
             <Route path="comebacks" element={<Comebacks />} />
             <Route path="bonus" element={<Bonus />} />
             <Route path="fuel-card" element={<FuelCard />} />
+            <Route path="parts" element={<ProtectedRoute ownerOrPartner><PartsRecon /></ProtectedRoute>} />
             <Route path="time-clock" element={<TimeClock />} />
   <Route path="wip" element={<Wip />} />
             <Route path="locations" element={<ProtectedRoute ownerOnly><Locations /></ProtectedRoute>} />
