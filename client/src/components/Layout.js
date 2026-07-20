@@ -27,6 +27,7 @@ const NAV = [
   // The service advisor's whole dashboard: the re-order board, nothing money.
   { path: '/reorders', label: 'Re-orders', icon: 'clipboard', section: 'Shop', roles: ['advisor'] },
   { path: '/finance', label: 'Finance', icon: 'dollar', section: 'Money', roles: ['owner', 'partner', 'manager'] },
+  { path: '/parts', label: 'Parts', icon: 'wrench', section: 'Money', roles: ['owner', 'partner'] },
   { path: '/reports', label: 'Reports', icon: 'file', section: 'Money', roles: ['owner', 'partner', 'manager'] },
   { path: '/marketing', label: 'Marketing', icon: 'spark', section: 'Marketing', roles: ['owner', 'partner', 'manager'] },
   { path: '/locations', label: 'Locations', icon: 'pin', section: 'Settings', roles: ['owner'] },
