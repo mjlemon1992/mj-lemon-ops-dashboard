@@ -14,6 +14,30 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+// ── Web Push: show the notification, focus/open the app on tap ──────────
+self.addEventListener('push', (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch { data = { title: 'OPS', body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(data.title || 'OPS', {
+    body: data.body || '',
+    icon: '/ops-icon-192.png',
+    badge: '/ops-icon-192.png',
+    tag: data.tag || 'ops',
+    data: { path: data.path || '/' },
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const path = (e.notification.data && e.notification.data.path) || '/';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+    for (const w of wins) {
+      if ('focus' in w) { w.navigate(path); return w.focus(); }
+    }
+    return self.clients.openWindow(path);
+  }));
+});
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/report/')) return;

@@ -33,6 +33,7 @@ const ADVISOR_ALLOW = [
   /^\/api\/clock\/[^/]+\/pay-periods$/,    // period dates for crew-paid hours
   /^\/api\/clock\/[^/]+\/entries$/,        // punch hours (no wages exist in the system)
   /^\/api\/attention$/,                    // ⏳ pill — route returns re-orders ONLY for advisors
+  /^\/api\/push\//,                        // notification subscriptions (per-device)
 ];
 
 function authenticateToken(req, res, next) {

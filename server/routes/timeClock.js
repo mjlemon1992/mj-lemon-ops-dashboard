@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
 const { ensureTimeClockTables, paidHoursByMonth, paidHoursByRange, approvedOffDaysByRange, toIsodow } = require('../lib/timeClockSchema');
 const { workingDaysBetween, holidaysBetween, openDaySet } = require('../lib/workdays');
+const { notifyRoles } = require('../lib/notify');
 
 // Shop-floor Time Clock. Two surfaces:
 //   • KIOSK (public, PIN-gated like the display boards) — a shared tablet in the
@@ -287,6 +288,11 @@ module.exports = (pool) => {
         [req.params.locationId, person.id, entry_id || null, String(note).slice(0, 400),
          proposed_clock_in || null, proposed_clock_out || null,
          proposed_break_minutes != null ? Math.max(0, Math.round(Number(proposed_break_minutes))) : null]);
+      notifyRoles(pool, {
+        roles: ['owner', 'partner', 'manager'], locationId: req.params.locationId,
+        title: '✎ Punch change request', body: `${person.name.split(' ')[0]} — ${String(note).slice(0, 80)}`,
+        path: '/time-clock', tag: `edit-${person.id}`,
+      });
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
@@ -369,6 +375,11 @@ module.exports = (pool) => {
         [req.params.locationId, person_id, start_date, end_date, type || 'vacation', String(note || '').slice(0, 300), days,
          typeof paid === 'boolean' ? paid : null]);
       const perDayR = Math.round(((Number((locRows[0] || {}).weekly_hours) || 40) / openDaySet((locRows[0] || {}).open_days).size) * 100) / 100;
+      notifyRoles(pool, {
+        roles: ['owner', 'partner', 'manager'], locationId: req.params.locationId,
+        title: '🏖 Time-off request', body: `${pr[0].name.split(' ')[0]} — ${start_date} to ${end_date} (${Math.round(days * perDayR * 100) / 100} h)`,
+        path: '/time-clock', tag: `timeoff-${rows[0].id}`,
+      });
       res.json({ ok: true, id: rows[0].id, working_days: days, hours: Math.round(days * perDayR * 100) / 100, name: pr[0].name });
     } catch (e) { fail(res, e); }
   });
@@ -1001,6 +1012,12 @@ module.exports = (pool) => {
         `INSERT INTO reorder_request (location_id, person_id, person_name, item, qty, note)
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, item`,
         [req.params.locationId, person_id || null, personName, String(item).slice(0, 200), (qty ? String(qty).slice(0, 60) : null), String(note || '').slice(0, 500)]);
+      // Ping whoever places orders — fire-and-forget, delivery never blocks the kiosk.
+      notifyRoles(pool, {
+        roles: ['owner', 'partner', 'manager', 'advisor'], locationId: req.params.locationId,
+        title: '📦 Re-order request', body: `${rows[0].item}${qty ? ` (${qty})` : ''}${personName ? ` — ${personName.split(' ')[0]}` : ''}`,
+        path: '/reorders', tag: `reorder-${rows[0].id}`,
+      });
       res.json({ ok: true, id: rows[0].id, item: rows[0].item });
     } catch (e) { fail(res, e); }
   });
@@ -1112,6 +1129,12 @@ module.exports = (pool) => {
         if (took) { const m = Number(b.minutes); if (!Number.isFinite(m) || m <= 0 || m > 480) return fail(res, 'Enter your break length in minutes', 400); hours = m / 60; }
       }
       await pool.query("UPDATE clock_followup SET status='answered', answer_hours=$2, took_break=$3, answered_at=now() WHERE id=$1", [f.id, hours, took]);
+      pool.query('SELECT name FROM bonus_person WHERE id=$1', [f.person_id]).then(({ rows: pn }) => notifyRoles(pool, {
+        roles: ['owner', 'partner', 'manager'], locationId: req.params.locationId,
+        title: f.kind === 'overtime' ? '⏱ Overtime claim' : '⏱ Break answer',
+        body: `${((pn[0] || {}).name || 'Tech').split(' ')[0]} — ${f.kind === 'overtime' ? `${hours} h overtime` : (took ? `${Math.round(hours * 60)} min break` : 'no break taken')} · needs your OK`,
+        path: '/time-clock', tag: `followup-${f.id}`,
+      })).catch(() => {});
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });

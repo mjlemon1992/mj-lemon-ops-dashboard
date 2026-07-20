@@ -4,8 +4,9 @@ import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
 import { parseAlerts, alertId } from '../utils/alerts';
 import Icon from './Icon';
-import { FeedbackHost } from './Feedback';
+import { FeedbackHost, showToast } from './Feedback';
 import WaitingRail from './WaitingRail';
+import { pushSupported, pushState, enablePush, disablePush, playChime } from '../utils/push';
 
 // Grouped nav (2026-07-17 refresh): same items, same roles — organized into five
 // sections so the sidebar reads in blocks instead of a flat list. Every item
@@ -57,12 +58,33 @@ export default function Layout() {
   // unassigned fuel, bonus prompt). One aggregate call, refreshed every minute.
   // Advisors poll too — the server hands them a re-orders-only queue.
   const canQueue = user && ['owner', 'partner', 'manager', 'advisor'].includes(user.role);
+  // Chime + toast when something NEW lands in the queue (count rose since the
+  // last poll) — the audible half of notifications; Web Push covers app-closed.
+  const prevTotal = React.useRef(null);
   const loadAttention = React.useCallback(() => {
     if (!canQueue) return;
     api('/attention')
-      .then(d => { if (d && Array.isArray(d.items)) setAttention(d); })
+      .then(d => {
+        if (!d || !Array.isArray(d.items)) return;
+        if (prevTotal.current != null && d.total > prevTotal.current) {
+          playChime();
+          showToast(`⏳ ${d.total - prevTotal.current} new item${d.total - prevTotal.current === 1 ? '' : 's'} waiting on you`);
+        }
+        prevTotal.current = d.total;
+        setAttention(d);
+      })
       .catch(() => {});
   }, [api, canQueue]);
+
+  // 🔔 per-device push enrolment state.
+  const [pushOn, setPushOn] = useState('off');   // on | off | denied | unsupported
+  useEffect(() => { pushState().then(setPushOn).catch(() => setPushOn('unsupported')); }, []);
+  const togglePush = async () => {
+    try {
+      if (pushOn === 'on') { await disablePush(api); setPushOn('off'); showToast('Notifications off on this device'); }
+      else { await enablePush(api); setPushOn('on'); showToast('Notifications on — this device gets pinged even with the app closed'); }
+    } catch (e) { showToast(String(e.message || e), 'error'); pushState().then(setPushOn).catch(() => {}); }
+  };
   useEffect(() => {
     if (!canQueue) return undefined;
     loadAttention();
@@ -283,6 +305,16 @@ export default function Layout() {
               <div className="badge danger" style={{ cursor: 'pointer' }} onClick={() => navigate('/alerts')}>
                 ⚠ {alertCount}{isMobile ? '' : ' active alerts'}
               </div>
+            )}
+            {canQueue && pushSupported() && (
+              <button onClick={togglePush}
+                title={pushOn === 'on' ? 'Notifications ON for this device — tap to turn off'
+                  : pushOn === 'denied' ? 'Notifications are blocked in the browser settings for this site'
+                  : 'Get pinged on this device when something lands in your queue — even with the app closed'}
+                aria-label="Toggle notifications"
+                style={{ background: 'var(--bg3)', border: `1px solid ${pushOn === 'on' ? 'var(--accent)' : 'var(--border)'}`, borderRadius: '8px', padding: '4px 10px', fontSize: '14px', cursor: 'pointer', lineHeight: 1.3, opacity: pushOn === 'denied' ? 0.5 : 1 }}>
+                {pushOn === 'on' ? '🔔' : '🔕'}
+              </button>
             )}
             <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
