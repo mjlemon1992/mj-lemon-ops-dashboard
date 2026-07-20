@@ -317,7 +317,6 @@ export default function ClockKiosk() {
       else if (body.status === 'off') { const done = await rfidCall(tag, 'in'); if (done) finishAction(body.name, 'in', done); else setView('home'); }
       else { setRfid({ tag, person: body, queue: [] }); setView('rfid'); }
     } finally { rfidBusy.current = false; setBusy(false); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rfidCall, locPin]);
 
   const answerFollowup = async (payload) => {
