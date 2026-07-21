@@ -34,6 +34,9 @@ function ensurePartsReconTables(pool) {
     await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS job_paid_cents INTEGER');   // Σ all invoices matched to this RO
     await pool.query("ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS line_findings JSONB DEFAULT '[]'");
     await pool.query('CREATE INDEX IF NOT EXISTS idx_vinv_order ON vendor_invoice (location_id, matched_order_id)');
+    // Core charges are a deposit, not a part on the job — held separately so the
+    // job roll-up can exclude them (they're tracked as their own claim).
+    await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS core_cents INTEGER DEFAULT 0');
     // Keep the original scan/PDF so the owner can eyeball it when confirming a match.
     await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS file_data BYTEA');
     await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS file_mime TEXT');

@@ -22,6 +22,8 @@ module.exports = (pool) => {
   const REASONS = ['warranty', 'rebilled', 'vendor_query', 'ignore'];
   const ORDER_URL = process.env.SHOPMONKEY_ORDER_URL_TEMPLATE || 'https://app.shopmonkey.cloud/#/orders/{id}';
   const MIN_CORE_CENTS = 500;   // ignore trivial "core" lines, same $5 floor as everything else
+  // A reman part's refundable deposit, printed as its own line ("CORE CHARGE | R8311477BB").
+  const CORE_RE = /\bcores?\b|core charge/i;
 
   let _ensured;
   const ensure = () => {
@@ -172,7 +174,7 @@ module.exports = (pool) => {
   // re-reconciles the whole job. Returns the verdict.
   const rollUpJob = async (locId, orderId, woCostCents, orderInvoiced) => {
     const { rows } = await pool.query(
-      `SELECT COALESCE(SUM(COALESCE(subtotal_cents, total_cents)), 0)::int AS paid
+      `SELECT COALESCE(SUM(COALESCE(subtotal_cents, total_cents) - COALESCE(core_cents, 0)), 0)::int AS paid
          FROM vendor_invoice WHERE location_id=$1 AND matched_order_id=$2`, [locId, orderId]);
     const jobPaid = rows[0].paid;
     const rec = reconcileJob(jobPaid, woCostCents, orderInvoiced);
@@ -199,17 +201,27 @@ module.exports = (pool) => {
     const roCost = wo ? wo.costCents : null;
     // Bonus precision: only where a real part number matches on both sides.
     const findings = wo ? lineCheck(ex.line_items, wo.parts, orderInvoiced === true) : [];
+    // A core charge is a refundable deposit, not a part on the job — it's tracked
+    // as its own claim, so it must not count as money paid toward the WO's parts
+    // or every reman purchase reads as a false "possible unbilled".
+    const coreCents = (ex.line_items || []).reduce((a, li) => {
+      if (!(CORE_RE.test(String(li.part_number || '')) || CORE_RE.test(String(li.description || '')))) return a;
+      const q = Number(li.qty);
+      const v = li.amount != null ? Math.round(Number(li.amount) * 100)
+        : (li.unit_cost != null ? Math.round(Number(li.unit_cost) * 100 * (Number.isFinite(q) && q !== 0 ? Math.abs(q) : 1)) * (Number.isFinite(q) && q < 0 ? -1 : 1) : 0);
+      return a + (Number.isFinite(v) ? v : 0);
+    }, 0);
     const { rows } = await pool.query(
-      `INSERT INTO vendor_invoice (location_id, vendor, invoice_number, invoice_date, total_cents, subtotal_cents, ro_ref, matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents, recon_status, recon_note, line_items, source, raw_extract, line_findings, file_data, file_mime)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+      `INSERT INTO vendor_invoice (location_id, vendor, invoice_number, invoice_date, total_cents, subtotal_cents, ro_ref, matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents, recon_status, recon_note, line_items, source, raw_extract, line_findings, file_data, file_mime, core_cents)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        ON CONFLICT (location_id, COALESCE(vendor,''), COALESCE(invoice_number,''), COALESCE(total_cents,0))
        DO UPDATE SET invoice_date=EXCLUDED.invoice_date, subtotal_cents=EXCLUDED.subtotal_cents, ro_ref=EXCLUDED.ro_ref,
          matched_order_id=EXCLUDED.matched_order_id, matched_order_number=EXCLUDED.matched_order_number, match_status=EXCLUDED.match_status,
          match_candidates=EXCLUDED.match_candidates, ro_parts_cost_cents=EXCLUDED.ro_parts_cost_cents, recon_status=EXCLUDED.recon_status,
          recon_note=EXCLUDED.recon_note, line_items=EXCLUDED.line_items, line_findings=EXCLUDED.line_findings,
-         file_data=COALESCE(EXCLUDED.file_data, vendor_invoice.file_data), file_mime=COALESCE(EXCLUDED.file_mime, vendor_invoice.file_mime)
+         file_data=COALESCE(EXCLUDED.file_data, vendor_invoice.file_data), file_mime=COALESCE(EXCLUDED.file_mime, vendor_invoice.file_mime), core_cents=EXCLUDED.core_cents
        RETURNING id`,
-      [locId, ex.vendor, ex.invoice_number, ex.invoice_date, ex.total_cents, ex.subtotal_cents, ex.ro_ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, 'pending', 'Reconciling…', JSON.stringify(ex.line_items || []), source, JSON.stringify(ex.raw || ex), JSON.stringify(findings), fileBuf, fileMime]);
+      [locId, ex.vendor, ex.invoice_number, ex.invoice_date, ex.total_cents, ex.subtotal_cents, ex.ro_ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, 'pending', 'Reconciling…', JSON.stringify(ex.line_items || []), source, JSON.stringify(ex.raw || ex), JSON.stringify(findings), fileBuf, fileMime, coreCents]);
     const id = rows[0].id;
     let rec = { status: 'pending', note: 'Not matched to a work order yet.' }, jobPaid = null;
     if (orderId) ({ rec, jobPaid } = await rollUpJob(locId, orderId, roCost, orderInvoiced));
@@ -501,7 +513,6 @@ module.exports = (pool) => {
   // unit goes back. They're printed as their own line ("CORE CHARGE | R8311477BB")
   // so, unlike warranty, they need no stamp: a POSITIVE core line opens a claim,
   // and a NEGATIVE one (on a later credit invoice) settles it.
-  const CORE_RE = /\bcores?\b|core charge/i;
   const handleCoreLines = async (locId, invoiceId, ex) => {
     const lines = (ex.line_items || []).filter((li) => CORE_RE.test(String(li.part_number || '')) || CORE_RE.test(String(li.description || '')));
     for (const li of lines) {
