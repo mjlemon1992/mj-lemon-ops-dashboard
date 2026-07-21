@@ -21,6 +21,7 @@ module.exports = (pool) => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const REASONS = ['warranty', 'rebilled', 'vendor_query', 'ignore'];
   const ORDER_URL = process.env.SHOPMONKEY_ORDER_URL_TEMPLATE || 'https://app.shopmonkey.cloud/#/orders/{id}';
+  const MIN_CORE_CENTS = 500;   // ignore trivial "core" lines, same $5 floor as everything else
 
   let _ensured;
   const ensure = () => {
@@ -361,7 +362,7 @@ module.exports = (pool) => {
       if (!canAccessLocation(req.user, inv.location_id)) return fail(res, 'Access denied for this location', 403);
       const b = req.body || {};
       if (b.remove) {
-        await pool.query("DELETE FROM warranty_claim WHERE invoice_id=$1 AND status='awaiting'", [inv.id]);
+        await pool.query("DELETE FROM warranty_claim WHERE invoice_id=$1 AND kind='warranty' AND status='awaiting'", [inv.id]);
         return res.json({ ok: true, removed: true });
       }
       const lines = Array.isArray(b.lines) ? b.lines : [];
@@ -369,11 +370,14 @@ module.exports = (pool) => {
         : (lines.length ? lines.reduce((a, l) => a + (Math.round(Number(l.amount || 0) * 100)), 0)
           : (inv.subtotal_cents != null ? inv.subtotal_cents : inv.total_cents));
       await pool.query(
-        `INSERT INTO warranty_claim (location_id, invoice_id, vendor, invoice_number, invoice_date, expected_cents, lines, source, note, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'manual',$8,$9)
-         ON CONFLICT (invoice_id) WHERE invoice_id IS NOT NULL
-         DO UPDATE SET expected_cents=EXCLUDED.expected_cents, lines=EXCLUDED.lines, note=EXCLUDED.note`,
+        `INSERT INTO warranty_claim (location_id, invoice_id, vendor, invoice_number, invoice_date, expected_cents, lines, kind, source, note, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'warranty','manual',$8,$9)
+         ON CONFLICT (invoice_id, kind, COALESCE(part_number,''), COALESCE(expected_cents,0))
+         WHERE invoice_id IS NOT NULL
+         DO UPDATE SET lines=EXCLUDED.lines, note=EXCLUDED.note`,
         [inv.location_id, inv.id, inv.vendor, inv.invoice_number, inv.invoice_date, expected, JSON.stringify(lines), b.note || null, who(req)]);
+      // Amount is part of the dedupe key, so changing it means replacing the row.
+      await pool.query("DELETE FROM warranty_claim WHERE invoice_id=$1 AND kind='warranty' AND status='awaiting' AND expected_cents IS DISTINCT FROM $2", [inv.id, expected]);
       res.json({ ok: true, expected: expected / 100 });
     } catch (e) { fail(res, e); }
   });
@@ -483,13 +487,45 @@ module.exports = (pool) => {
   // or WARRANTY in a forwarded subject). Idempotent per invoice, so re-ingesting
   // the same stamped scan never duplicates it, and never clobbers a claim the
   // owner has already adjusted.
-  const openWarrantyClaim = async (locId, invoiceId, ex, source, by) => {
-    const expected = ex.subtotal_cents != null ? ex.subtotal_cents : ex.total_cents;
+  const openClaim = async (locId, invoiceId, ex, { kind = 'warranty', expectedCents, partNumber = null, source = 'manual', by = null, note = null }) => {
+    if (expectedCents == null) return;
     await pool.query(
-      `INSERT INTO warranty_claim (location_id, invoice_id, vendor, invoice_number, invoice_date, expected_cents, source, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       ON CONFLICT (invoice_id) WHERE invoice_id IS NOT NULL DO NOTHING`,
-      [locId, invoiceId, ex.vendor, ex.invoice_number, ex.invoice_date, expected, source, by || null]);
+      `INSERT INTO warranty_claim (location_id, invoice_id, vendor, invoice_number, invoice_date, expected_cents, kind, part_number, source, note, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       ON CONFLICT (invoice_id, kind, COALESCE(part_number,''), COALESCE(expected_cents,0))
+       WHERE invoice_id IS NOT NULL DO NOTHING`,
+      [locId, invoiceId, ex.vendor, ex.invoice_number, ex.invoice_date, expectedCents, kind, partNumber, source, note, by]);
+  };
+
+  // CORE CHARGES — a reman part carries a deposit that's refunded when the old
+  // unit goes back. They're printed as their own line ("CORE CHARGE | R8311477BB")
+  // so, unlike warranty, they need no stamp: a POSITIVE core line opens a claim,
+  // and a NEGATIVE one (on a later credit invoice) settles it.
+  const CORE_RE = /\bcores?\b|core charge/i;
+  const handleCoreLines = async (locId, invoiceId, ex) => {
+    const lines = (ex.line_items || []).filter((li) => CORE_RE.test(String(li.part_number || '')) || CORE_RE.test(String(li.description || '')));
+    for (const li of lines) {
+      const qty = Number(li.qty);
+      const amt = li.amount != null ? Math.round(Number(li.amount) * 100)
+        : (li.unit_cost != null ? Math.round(Number(li.unit_cost) * 100 * (Number.isFinite(qty) && qty !== 0 ? Math.abs(qty) : 1)) * (Number.isFinite(qty) && qty < 0 ? -1 : 1) : null);
+      if (amt == null || Math.abs(amt) < MIN_CORE_CENTS) continue;
+      const part = (li.description || '').split('|').pop().trim() || li.part_number || null;
+      if (amt > 0) {
+        await openClaim(locId, invoiceId, ex, { kind: 'core', expectedCents: amt, partNumber: part, source: 'auto', note: li.description || 'Core charge' });
+      } else {
+        // A core coming back — close the matching open claim for this supplier.
+        const { rows } = await pool.query(
+          `SELECT id FROM warranty_claim
+            WHERE location_id=$1 AND kind='core' AND status='awaiting' AND expected_cents IS NOT NULL
+              AND abs(expected_cents - $2) <= GREATEST(200, (expected_cents * 5) / 100)
+            ORDER BY created_at LIMIT 1`, [locId, Math.abs(amt)]);
+        if (rows.length) {
+          await pool.query(
+            `UPDATE warranty_claim SET status='credited', credited_cents=$2, credited_number=$3, credited_at=now() WHERE id=$1`,
+            [rows[0].id, Math.abs(amt), ex.invoice_number || null]);
+        }
+      }
+    }
   };
 
   // Ingest one attachment/file, auto-routing invoice vs statement. The invoice
@@ -509,7 +545,11 @@ module.exports = (pool) => {
     const out = await processInvoice(locationId, smLoc, apiKey, ex, source, fileBase64, mediaType);
     // WARRANTY stamp on the page, or WARRANTY in the forwarded subject line.
     const warranty = ex.warranty_marked || warrantyHint;
-    if (warranty && out.id) await openWarrantyClaim(locationId, out.id, ex, ex.warranty_marked ? 'stamp' : 'subject', null);
+    if (out.id) {
+      const expected = ex.subtotal_cents != null ? ex.subtotal_cents : ex.total_cents;
+      if (warranty) await openClaim(locationId, out.id, ex, { kind: 'warranty', expectedCents: expected, source: ex.warranty_marked ? 'stamp' : 'subject' });
+      try { await handleCoreLines(locationId, out.id, ex); } catch (e) { /* core watch is best-effort */ }
+    }
     return { type: 'invoice', warranty, extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out };
   };
 

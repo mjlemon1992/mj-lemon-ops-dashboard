@@ -137,17 +137,18 @@ module.exports = (pool) => {
         // Warranty credits that never turned up. Default 60 days before nagging.
         const warrDays = Number(process.env.PARTS_WARRANTY_CHASE_DAYS || 60);
         const { rows: overdue } = await pool.query(
-          `SELECT id, location_id, vendor, invoice_number, expected_cents,
+          `SELECT id, location_id, vendor, invoice_number, expected_cents, kind, part_number,
                   EXTRACT(DAY FROM now() - created_at)::int AS age_days
              FROM warranty_claim
             WHERE location_id = ANY($1) AND status='awaiting'
               AND created_at < now() - ($2 || ' days')::interval
-            ORDER BY created_at LIMIT 25`, [ids, String(warrDays)]);
+            ORDER BY expected_cents DESC NULLS LAST LIMIT 25`, [ids, String(warrDays)]);
         for (const w of overdue) {
           const amt = w.expected_cents != null ? `$${(w.expected_cents / 100).toFixed(2)} ` : '';
+          const what = w.kind === 'core' ? `core charge${w.part_number ? ` (${w.part_number})` : ''}` : 'warranty credit';
           parts.push({
             id: w.id, location_id: w.location_id, location_name: nameOf[w.location_id], kind: 'warranty',
-            text: `${w.vendor || 'Supplier'} — ${amt}warranty credit not received (${w.age_days} days)`,
+            text: `${w.vendor || 'Supplier'} — ${amt}${what} not credited (${w.age_days} days)`,
           });
         }
         for (const s of stmts.rows) {

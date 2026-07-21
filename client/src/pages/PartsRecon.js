@@ -26,7 +26,7 @@ function PartsTabs({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        {[['margin', 'Margin / exposure'], ['invoices', 'Vendor invoices'], ['statements', 'Statements'], ['warranty', 'Warranty']].map(([k, l]) => (
+        {[['margin', 'Margin / exposure'], ['invoices', 'Vendor invoices'], ['statements', 'Statements'], ['warranty', 'Credits due']].map(([k, l]) => (
           <button key={k} onClick={() => setView(k)} className={view === k ? 'primary' : ''} style={{ fontSize: '13px', padding: '7px 16px' }}>{l}</button>
         ))}
       </div>
@@ -414,7 +414,7 @@ function WarrantyView({ locId }) {
     <div>
       <div style={{ display: 'flex', gap: '10px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ fontSize: '12px', color: 'var(--text3)', flex: '1 1 260px' }}>
-          Warranty parts you’ve paid for that the supplier still owes back. Opened by a <b>WARRANTY stamp</b> on the scan, <b>“WARRANTY”</b> in a forwarded email subject, or the <b>🛡</b> button on an invoice. They clear themselves when a matching credit appears on a statement.
+          Money suppliers owe you back. <b>Core charges</b> are picked up automatically from the invoice line and clear when the old unit goes back. <b>Warranty</b> claims come from a <b>CREDIT stamp</b> on the scan, <b>“WARRANTY”</b> in a forwarded email subject, or the <b>🛡</b> button. Both clear themselves when a matching credit lands on a statement or a later invoice.
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className="spec-label">Awaiting credit</div>
@@ -423,7 +423,7 @@ function WarrantyView({ locId }) {
       </div>
 
       {!claims.length && (
-        <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '28px' }}>No warranty claims yet. Stamp WARRANTY on a scan, or tap 🛡 on an invoice.</div>
+        <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '28px' }}>Nothing outstanding. Core charges appear here automatically; stamp CREDIT on a warranty invoice or tap 🛡 to add one.</div>
       )}
 
       {claims.map((c) => {
@@ -431,11 +431,13 @@ function WarrantyView({ locId }) {
         return (
           <div key={c.id} className="card" style={{ padding: '12px 14px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-              <div style={{ fontWeight: 600 }}>{c.vendor || 'Supplier'} {c.invoice_number ? `#${c.invoice_number}` : ''}
+              <div style={{ fontWeight: 600 }}>
+                <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 4, marginRight: 6, background: c.kind === 'core' ? 'rgba(90,160,255,0.15)' : 'rgba(255,184,0,0.15)', color: c.kind === 'core' ? 'var(--info)' : 'var(--warning)' }}>{c.kind === 'core' ? 'CORE' : 'WARRANTY'}</span>
+                {c.vendor || 'Supplier'} {c.invoice_number ? `#${c.invoice_number}` : ''}
                 {c.source !== 'manual' && <span style={{ marginLeft: 6, fontSize: '10px', color: 'var(--text3)' }}>via {c.source === 'stamp' ? 'stamp' : 'email subject'}</span>}
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
-                {c.invoice_date || '—'}{c.matched_order_number ? ` · RO ${c.matched_order_number}` : ''} · opened {c.age_days}d ago
+                {c.part_number ? `${c.part_number} · ` : ''}{c.invoice_date || '—'}{c.matched_order_number ? ` · RO ${c.matched_order_number}` : ''} · opened {c.age_days}d ago
                 {c.note ? ` · ${c.note}` : ''}
               </div>
             </div>

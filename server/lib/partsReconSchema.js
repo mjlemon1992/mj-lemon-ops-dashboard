@@ -89,8 +89,15 @@ function ensurePartsReconTables(pool) {
       created_at TIMESTAMPTZ DEFAULT now()
     )`);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_wclaim_loc ON warranty_claim (location_id, status, created_at DESC)');
-    // One open claim per invoice — re-ingesting a stamped scan must not duplicate it.
-    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_wclaim_invoice ON warranty_claim (invoice_id) WHERE invoice_id IS NOT NULL");
+    // Core charges ride the same lifecycle as warranty (paid now, credited back
+    // when the old unit goes in) so they share this table, split by kind.
+    await pool.query("ALTER TABLE warranty_claim ADD COLUMN IF NOT EXISTS kind VARCHAR(10) NOT NULL DEFAULT 'warranty'");
+    await pool.query('ALTER TABLE warranty_claim ADD COLUMN IF NOT EXISTS part_number TEXT');
+    // One invoice can carry BOTH a warranty claim and several distinct core
+    // charges, so uniqueness is per invoice+kind+part+amount, not per invoice.
+    await pool.query('DROP INDEX IF EXISTS idx_wclaim_invoice');
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_wclaim_dedupe ON warranty_claim
+      (invoice_id, kind, COALESCE(part_number,''), COALESCE(expected_cents,0)) WHERE invoice_id IS NOT NULL`);
     // Re-uploading the same statement refreshes it rather than duplicating.
     await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_vstmt_dedupe ON vendor_statement (location_id, COALESCE(vendor,''), COALESCE(statement_date, '1900-01-01'), COALESCE(total_cents,0))");
   })();
