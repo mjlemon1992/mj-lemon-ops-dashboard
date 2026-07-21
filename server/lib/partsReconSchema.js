@@ -64,6 +64,33 @@ function ensurePartsReconTables(pool) {
     // Σ of the extracted lines — compared to the statement's printed total to
     // prove the read is trustworthy before anyone chases a "missing" list.
     await pool.query('ALTER TABLE vendor_statement ADD COLUMN IF NOT EXISTS lines_sum_cents INTEGER');
+
+    // v1e — WARRANTY CREDIT WATCH. A warranty part is paid for now and should be
+    // credited back on a later statement. Flagged by a WARRANTY stamp on the
+    // scan, by "WARRANTY" in a forwarded email's subject, or marked by hand.
+    // Stays open until a credit on a statement clears it.
+    await pool.query(`CREATE TABLE IF NOT EXISTS warranty_claim (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      location_id UUID NOT NULL,
+      invoice_id UUID,                    -- vendor_invoice it came from (null if hand-entered)
+      vendor TEXT,
+      invoice_number TEXT,
+      invoice_date DATE,
+      expected_cents INTEGER,             -- what we expect credited back
+      lines JSONB DEFAULT '[]',           -- the specific invoice lines claimed (empty = whole invoice)
+      status VARCHAR(12) NOT NULL DEFAULT 'awaiting',   -- awaiting|credited|closed
+      source VARCHAR(12) DEFAULT 'manual',              -- stamp|subject|manual
+      note TEXT,
+      credited_cents INTEGER,
+      credited_number TEXT,               -- the credit note number that cleared it
+      credited_statement_id UUID,
+      credited_at TIMESTAMPTZ,
+      created_by VARCHAR(200),
+      created_at TIMESTAMPTZ DEFAULT now()
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_wclaim_loc ON warranty_claim (location_id, status, created_at DESC)');
+    // One open claim per invoice — re-ingesting a stamped scan must not duplicate it.
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_wclaim_invoice ON warranty_claim (invoice_id) WHERE invoice_id IS NOT NULL");
     // Re-uploading the same statement refreshes it rather than duplicating.
     await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_vstmt_dedupe ON vendor_statement (location_id, COALESCE(vendor,''), COALESCE(statement_date, '1900-01-01'), COALESCE(total_cents,0))");
   })();

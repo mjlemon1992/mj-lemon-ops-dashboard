@@ -157,7 +157,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
       {parts.map((p) => (
         <div key={`parts-${p.id}`} className="wr-card">
           <div className="wr-card-title">
-            {p.kind === 'statement' ? 'Supplier statement' : 'Parts invoice'}{multiLoc ? ` — ${p.location_name}` : ''}
+            {p.kind === 'statement' ? 'Supplier statement' : p.kind === 'warranty' ? 'Warranty credit' : 'Parts invoice'}{multiLoc ? ` — ${p.location_name}` : ''}
           </div>
           <div className="wr-card-body">{p.text}</div>
           <div className="wr-actions"><button onClick={() => goTo(p.location_id, '/parts')}>Review →</button></div>

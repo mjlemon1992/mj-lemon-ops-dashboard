@@ -26,11 +26,14 @@ function PartsTabs({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        {[['margin', 'Margin / exposure'], ['invoices', 'Vendor invoices'], ['statements', 'Statements']].map(([k, l]) => (
+        {[['margin', 'Margin / exposure'], ['invoices', 'Vendor invoices'], ['statements', 'Statements'], ['warranty', 'Warranty']].map(([k, l]) => (
           <button key={k} onClick={() => setView(k)} className={view === k ? 'primary' : ''} style={{ fontSize: '13px', padding: '7px 16px' }}>{l}</button>
         ))}
       </div>
-      {view === 'margin' ? <MarginView locId={locId} /> : view === 'invoices' ? <InvoicesView locId={locId} /> : <StatementsView locId={locId} />}
+      {view === 'margin' ? <MarginView locId={locId} />
+        : view === 'invoices' ? <InvoicesView locId={locId} />
+          : view === 'statements' ? <StatementsView locId={locId} />
+            : <WarrantyView locId={locId} />}
     </div>
   );
 }
@@ -215,6 +218,29 @@ function InvoicesView({ locId }) {
     if (!await askConfirm({ title: 'Remove invoice', body: `Remove ${inv.vendor || 'invoice'} ${inv.invoice_number || ''}?`, danger: true, confirmLabel: 'Remove' })) return;
     try { await api(`/parts/invoice/${inv.id}`, { method: 'DELETE' }); load(); } catch (e) { showToast(e.message, 'error'); }
   };
+  // Mark an invoice as warranty (digital invoices, or correcting a stamped one).
+  // The expected credit defaults to the invoice's parts subtotal; you can type a
+  // different figure when only part of the invoice is under warranty.
+  const markWarranty = async (inv) => {
+    const base = inv.subtotal != null ? inv.subtotal : inv.total;
+    const val = await askInput({
+      title: `Warranty — ${inv.vendor || 'invoice'} ${inv.invoice_number || ''}`,
+      body: inv.warranty
+        ? 'Already watching for a credit on this invoice. Enter a new expected amount, or 0 to stop watching it.'
+        : 'We\'ll watch the next statements for the supplier credit. Enter the amount you expect back (0 to cancel).',
+      label: 'Expected credit $',
+      initial: base != null ? String(base) : '',
+      type: 'number',
+    });
+    if (val == null || val === '') return;
+    const amount = Number(val);
+    if (!Number.isFinite(amount)) { showToast('Enter a number', 'error'); return; }
+    try {
+      if (amount <= 0) { await api(`/parts/invoice/${inv.id}/warranty`, { method: 'PUT', body: JSON.stringify({ remove: true }) }); showToast('No longer watching for a credit'); }
+      else { await api(`/parts/invoice/${inv.id}/warranty`, { method: 'PUT', body: JSON.stringify({ expected: amount }) }); showToast(`Watching for a ${money(amount)} credit — see the Warranty tab`); }
+      load();
+    } catch (e) { showToast(e.message, 'error'); }
+  };
   // Quick view of the original scan so you can eyeball it while matching.
   // Fetched with the auth header, so it can't be a plain <img src>.
   const viewFile = async (inv) => {
@@ -278,6 +304,8 @@ function InvoicesView({ locId }) {
             <div style={{ fontSize: '11px', fontWeight: 700, color: rs.c, minWidth: '130px', textAlign: 'right' }}>{rs.t}</div>
             <div style={{ display: 'flex', gap: '6px' }}>
               {inv.has_file && <button onClick={() => viewFile(inv)} title="Look at the original scan" style={{ fontSize: '11px', padding: '4px 10px' }}>🔍 View</button>}
+              <button onClick={() => markWarranty(inv)} title={inv.warranty ? 'Already a warranty claim — tap to change the expected credit' : 'Mark as warranty — watch for the supplier credit'}
+                style={{ fontSize: '11px', padding: '4px 10px', color: inv.warranty ? 'var(--info)' : undefined }}>🛡 {inv.warranty ? 'Warranty' : 'Warranty'}</button>
               <button onClick={() => pickMatch(inv)} style={{ fontSize: '11px', padding: '4px 10px' }}>{inv.matched_order_number ? 'Re-match' : 'Match RO'}</button>
               <button onClick={() => del(inv)} title="Remove" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>✕</button>
             </div>
@@ -317,6 +345,95 @@ function InvoicesView({ locId }) {
         )}
         Nothing is flagged until the work order is <b>complete/invoiced</b>. Then each invoice is checked line by line — every part on it must be attached to the WO at the right cost (matched by part number, or by cost where the WO line is generic like <i>npn</i>/<i>MISC</i>). <b>Possible unbilled</b> = the job's invoices total more than the parts cost on the WO. <b>Invoice may be missing</b> = the WO shows more parts cost than the invoices in hand — the <b>Statements</b> tab confirms which invoice is missing. <b>Job open</b> = still collecting invoices. Anything under <b>$5</b> is ignored (shipping &amp; handling, eco/handling fees). The scan is kept only while an invoice needs attention — once it matches and reconciles clean, the image is dropped (Hubdoc/QBO keeps the document), so <b>🔍 View</b> only appears on the ones worth looking at.
       </div>
+    </div>
+  );
+}
+
+// ── Warranty credit watch (v1e) ──────────────────────────────────────────
+// A warranty part is paid for now and should be credited back later. Claims are
+// opened by a WARRANTY stamp on the scan, "WARRANTY" in a forwarded subject, or
+// the 🛡 button — and close when a credit turns up on a statement.
+function WarrantyView({ locId }) {
+  const { api } = useAuth();
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const load = useCallback(() => {
+    api(`/parts/${locId}/warranty`).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
+  }, [api, locId]);
+  useEffect(() => { load(); }, [load]);
+
+  const settle = async (c) => {
+    const val = await askInput({ title: `Credit received — ${c.vendor || 'supplier'}`, body: `Expected ${money(c.expected)}. Enter the amount credited and the credit note number if you have it.`, label: 'Credited $', initial: c.expected != null ? String(c.expected) : '', type: 'number' });
+    if (val == null || val === '') return;
+    const num = await askInput({ title: 'Credit note number', body: 'Optional — leave blank if you don\'t have it.', label: 'Credit note #' });
+    try { await api(`/parts/warranty/${c.id}`, { method: 'PUT', body: JSON.stringify({ status: 'credited', credited: Number(val), credited_number: num || null }) }); showToast('Cleared'); load(); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
+  const writeOff = async (c) => {
+    if (!await askConfirm({ title: 'Stop watching', body: `Give up on the ${money(c.expected)} credit from ${c.vendor || 'this supplier'}?`, confirmLabel: 'Stop watching', danger: true })) return;
+    try { await api(`/parts/warranty/${c.id}`, { method: 'PUT', body: JSON.stringify({ status: 'closed' }) }); load(); } catch (e) { showToast(e.message, 'error'); }
+  };
+  const reopen = async (c) => {
+    try { await api(`/parts/warranty/${c.id}`, { method: 'PUT', body: JSON.stringify({ status: 'awaiting' }) }); load(); } catch (e) { showToast(e.message, 'error'); }
+  };
+
+  if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
+  if (!data) return <Skeleton rows={5} height={18} />;
+  const claims = data.claims || [];
+  const open = claims.filter((c) => c.status === 'awaiting');
+  const owed = open.reduce((a, c) => a + (c.expected || 0), 0);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text3)', flex: '1 1 260px' }}>
+          Warranty parts you’ve paid for that the supplier still owes back. Opened by a <b>WARRANTY stamp</b> on the scan, <b>“WARRANTY”</b> in a forwarded email subject, or the <b>🛡</b> button on an invoice. They clear themselves when a matching credit appears on a statement.
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div className="spec-label">Awaiting credit</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: owed > 0 ? 'var(--warning)' : 'var(--text)' }}>{money(owed)}</div>
+        </div>
+      </div>
+
+      {!claims.length && (
+        <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '28px' }}>No warranty claims yet. Stamp WARRANTY on a scan, or tap 🛡 on an invoice.</div>
+      )}
+
+      {claims.map((c) => {
+        const late = c.status === 'awaiting' && c.age_days >= 60;
+        return (
+          <div key={c.id} className="card" style={{ padding: '12px 14px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+              <div style={{ fontWeight: 600 }}>{c.vendor || 'Supplier'} {c.invoice_number ? `#${c.invoice_number}` : ''}
+                {c.source !== 'manual' && <span style={{ marginLeft: 6, fontSize: '10px', color: 'var(--text3)' }}>via {c.source === 'stamp' ? 'stamp' : 'email subject'}</span>}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
+                {c.invoice_date || '—'}{c.matched_order_number ? ` · RO ${c.matched_order_number}` : ''} · opened {c.age_days}d ago
+                {c.note ? ` · ${c.note}` : ''}
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', minWidth: 90 }}>
+              <div className="spec-label">Expected</div>
+              <div style={{ fontWeight: 700 }}>{money(c.expected)}</div>
+            </div>
+            <div style={{ minWidth: 150, textAlign: 'right' }}>
+              {c.status === 'awaiting'
+                ? <span style={{ fontSize: '11px', fontWeight: 700, color: late ? 'var(--danger)' : 'var(--warning)' }}>{late ? `OVERDUE — ${c.age_days} DAYS` : 'AWAITING CREDIT'}</span>
+                : c.status === 'credited'
+                  ? <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--success)' }}>CREDITED {money(c.credited)}{c.credited_number ? ` · ${c.credited_number}` : ''}</span>
+                  : <span style={{ fontSize: '11px', color: 'var(--text3)' }}>CLOSED</span>}
+            </div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {c.status === 'awaiting'
+                ? <>
+                  <button onClick={() => settle(c)} style={{ fontSize: '11px', padding: '4px 10px' }}>Credit received</button>
+                  <button onClick={() => writeOff(c)} title="Stop watching" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>✕</button>
+                </>
+                : <button onClick={() => reopen(c)} style={{ fontSize: '11px', padding: '4px 10px' }}>Re-open</button>}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

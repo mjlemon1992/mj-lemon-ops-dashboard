@@ -20,6 +20,7 @@ async function extractInvoice(fileBase64, mediaType) {
       type: 'object',
       properties: {
         is_statement: { type: 'boolean', description: 'TRUE only if this document is actually a monthly ACCOUNT STATEMENT that lists many invoices / an aging summary — not a single invoice. If unsure, false.' },
+        warranty_marked: { type: 'boolean', description: 'TRUE only if a WARRANTY stamp, sticker, or handwritten "WARRANTY" annotation has been physically ADDED to the page by the shop. Ignore the word "warranty" wherever it appears in the printed invoice text, part descriptions, or terms and conditions — that is NOT a mark. If unsure, false.' },
         vendor: { type: 'string', description: 'Supplier/vendor business name' },
         invoice_number: { type: 'string', description: "The vendor's invoice number" },
         invoice_date: { type: 'string', description: 'Invoice date as YYYY-MM-DD' },
@@ -52,6 +53,7 @@ async function extractInvoice(fileBase64, mediaType) {
   const x = use.input || {};
   return {
     is_statement: !!x.is_statement,
+    warranty_marked: !!x.warranty_marked,
     vendor: x.vendor || null, invoice_number: x.invoice_number || null,
     invoice_date: /^\d{4}-\d{2}-\d{2}$/.test(x.invoice_date || '') ? x.invoice_date : null,
     subtotal_cents: dollarsToCents(x.subtotal), total_cents: dollarsToCents(x.total),

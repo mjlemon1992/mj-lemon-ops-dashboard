@@ -301,7 +301,9 @@ module.exports = (pool) => {
       let ok = false;
       for (const att of msg.attachments) {
         try {
-          const out = await ingestFile(locationId, smLoc, apiKey, att.base64, att.mediaType, 'email');
+          // "WARRANTY" in the forwarded subject = the digital twin of the stamp.
+          const warrantySubject = /\bwarranty\b/i.test(msg.subject || '');
+          const out = await ingestFile(locationId, smLoc, apiKey, att.base64, att.mediaType, 'email', warrantySubject);
           if (out.type === 'statement') results.push({ from: msg.from, file: att.filename, type: 'statement', vendor: out.vendor, line_count: out.line_count, missing: out.missing });
           else results.push({ from: msg.from, file: att.filename, type: 'invoice', vendor: out.vendor, ro_ref: out.ro_ref, match_status: out.match_status, recon_status: out.recon_status });
           ok = true;
@@ -320,6 +322,74 @@ module.exports = (pool) => {
       const out = await scanInboxInto(req.params.locationId);
       if (!out.ok) return fail(res, out.error, 400);
       res.json(out);
+    } catch (e) { fail(res, e); }
+  });
+
+  // ══ v1e — WARRANTY CREDIT WATCH ════════════════════════════════════════════
+  // Outstanding + settled warranty claims for a location.
+  router.get('/:locationId/warranty', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
+    try {
+      await ensurePartsReconTables(pool);
+      const { rows } = await pool.query(
+        `SELECT w.*, w.invoice_date::text AS invoice_date, v.matched_order_number, (v.file_data IS NOT NULL) AS has_file
+           FROM warranty_claim w LEFT JOIN vendor_invoice v ON v.id = w.invoice_id
+          WHERE w.location_id=$1 ORDER BY (w.status='awaiting') DESC, w.created_at DESC LIMIT 200`, [req.params.locationId]);
+      const now = Date.now();
+      res.json({
+        claims: rows.map((r) => ({
+          ...r,
+          expected: r.expected_cents != null ? r.expected_cents / 100 : null,
+          credited: r.credited_cents != null ? r.credited_cents / 100 : null,
+          age_days: Math.floor((now - new Date(r.created_at).getTime()) / 86400000),
+        })),
+      });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Mark an invoice as warranty by hand (digital invoices, or part-warranty ones
+  // where only some lines are claimed). Also used to adjust the expected amount.
+  router.put('/invoice/:id/warranty', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      await ensurePartsReconTables(pool);
+      const { rows: ir } = await pool.query('SELECT * FROM vendor_invoice WHERE id=$1', [req.params.id]);
+      if (!ir.length) return fail(res, 'Invoice not found', 404);
+      const inv = ir[0];
+      if (!canAccessLocation(req.user, inv.location_id)) return fail(res, 'Access denied for this location', 403);
+      const b = req.body || {};
+      if (b.remove) {
+        await pool.query("DELETE FROM warranty_claim WHERE invoice_id=$1 AND status='awaiting'", [inv.id]);
+        return res.json({ ok: true, removed: true });
+      }
+      const lines = Array.isArray(b.lines) ? b.lines : [];
+      const expected = b.expected != null ? Math.round(Number(b.expected) * 100)
+        : (lines.length ? lines.reduce((a, l) => a + (Math.round(Number(l.amount || 0) * 100)), 0)
+          : (inv.subtotal_cents != null ? inv.subtotal_cents : inv.total_cents));
+      await pool.query(
+        `INSERT INTO warranty_claim (location_id, invoice_id, vendor, invoice_number, invoice_date, expected_cents, lines, source, note, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'manual',$8,$9)
+         ON CONFLICT (invoice_id) DO UPDATE SET expected_cents=EXCLUDED.expected_cents, lines=EXCLUDED.lines, note=EXCLUDED.note`,
+        [inv.location_id, inv.id, inv.vendor, inv.invoice_number, inv.invoice_date, expected, JSON.stringify(lines), b.note || null, who(req)]);
+      res.json({ ok: true, expected: expected / 100 });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Settle a claim by hand (credit arrived, or writing it off).
+  router.put('/warranty/:id', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      const { rows } = await pool.query('SELECT location_id FROM warranty_claim WHERE id=$1', [req.params.id]);
+      if (!rows.length) return fail(res, 'Claim not found', 404);
+      if (!canAccessLocation(req.user, rows[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      const b = req.body || {};
+      if (b.status === 'awaiting') {
+        await pool.query("UPDATE warranty_claim SET status='awaiting', credited_cents=NULL, credited_number=NULL, credited_at=NULL WHERE id=$1", [req.params.id]);
+        return res.json({ ok: true });
+      }
+      const st = b.status === 'closed' ? 'closed' : 'credited';
+      await pool.query(
+        `UPDATE warranty_claim SET status=$2, credited_cents=$3, credited_number=$4, credited_at=now(), note=COALESCE($5, note) WHERE id=$1`,
+        [req.params.id, st, b.credited != null ? Math.round(Number(b.credited) * 100) : null, b.credited_number || null, b.note || null]);
+      res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
 
@@ -373,6 +443,28 @@ module.exports = (pool) => {
        RETURNING id`,
       [locationId, sx.vendor, sx.statement_date, sx.period, sx.total_cents, sx.invoices.length,
         rec.found_count, rec.missing_count, rec.mismatch_count, JSON.stringify(rec.lines), JSON.stringify(sx.raw || sx), source, linesSum]);
+    // A credit on the statement is what closes a warranty claim — match each
+    // credit line to an outstanding claim for the same vendor by amount.
+    try {
+      const credits = (sx.invoices || []).filter((i) => i.type === 'credit' && i.amount_cents != null);
+      if (credits.length) {
+        const { rows: open } = await pool.query(
+          "SELECT id, vendor, expected_cents FROM warranty_claim WHERE location_id=$1 AND status='awaiting' AND expected_cents IS NOT NULL", [locationId]);
+        const taken = new Set();
+        const sameVendor = (a, b) => normNum(a).slice(0, 6) === normNum(b).slice(0, 6);
+        for (const c of credits) {
+          const amt = Math.abs(c.amount_cents);
+          const hit = open.find((w) => !taken.has(w.id) && sameVendor(w.vendor || '', sx.vendor || '')
+            && Math.abs(w.expected_cents - amt) <= Math.max(200, Math.round(amt * 0.05)));
+          if (!hit) continue;
+          taken.add(hit.id);
+          await pool.query(
+            `UPDATE warranty_claim SET status='credited', credited_cents=$2, credited_number=$3, credited_statement_id=$4, credited_at=now() WHERE id=$1`,
+            [hit.id, amt, c.invoice_number || null, rows[0].id]);
+        }
+      }
+    } catch (e) { /* settling is best-effort — never fail the statement upload */ }
+
     // Tie-out: the lines we read must add up to the statement's printed total. If
     // they don't, the read is unreliable (credits counted as charges, rows missed)
     // and the "missing" list must NOT be presented as fact.
@@ -383,10 +475,23 @@ module.exports = (pool) => {
       missing_list: rec.missing, mismatch_list: rec.mismatch };
   };
 
+  // Open a warranty claim for an invoice that came in marked (stamp on the scan,
+  // or WARRANTY in a forwarded subject). Idempotent per invoice, so re-ingesting
+  // the same stamped scan never duplicates it, and never clobbers a claim the
+  // owner has already adjusted.
+  const openWarrantyClaim = async (locId, invoiceId, ex, source, by) => {
+    const expected = ex.subtotal_cents != null ? ex.subtotal_cents : ex.total_cents;
+    await pool.query(
+      `INSERT INTO warranty_claim (location_id, invoice_id, vendor, invoice_number, invoice_date, expected_cents, source, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (invoice_id) DO NOTHING`,
+      [locId, invoiceId, ex.vendor, ex.invoice_number, ex.invoice_date, expected, source, by || null]);
+  };
+
   // Ingest one attachment/file, auto-routing invoice vs statement. The invoice
   // extractor flags is_statement (content-based, no reliance on subject/filename)
   // so you can email either kind to the same mailbox and it files correctly.
-  const ingestFile = async (locationId, smLoc, apiKey, fileBase64, mediaType, source) => {
+  const ingestFile = async (locationId, smLoc, apiKey, fileBase64, mediaType, source, warrantyHint = false) => {
     const ex = await extractInvoice(fileBase64, mediaType);
     if (ex.is_statement) {
       const sx = await extractStatement(fileBase64, mediaType);
@@ -398,7 +503,10 @@ module.exports = (pool) => {
       // Looked like a statement but nothing parsed — fall back to invoice.
     }
     const out = await processInvoice(locationId, smLoc, apiKey, ex, source, fileBase64, mediaType);
-    return { type: 'invoice', extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out };
+    // WARRANTY stamp on the page, or WARRANTY in the forwarded subject line.
+    const warranty = ex.warranty_marked || warrantyHint;
+    if (warranty && out.id) await openWarrantyClaim(locationId, out.id, ex, ex.warranty_marked ? 'stamp' : 'subject', null);
+    return { type: 'invoice', warranty, extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out };
   };
 
   // Upload/receive a statement (base64 file or pre-extracted). syncAuth so the
@@ -465,7 +573,8 @@ module.exports = (pool) => {
         `SELECT id, vendor, invoice_number, invoice_date::text AS invoice_date, total_cents, subtotal_cents, ro_ref,
                 matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents,
                 recon_status, recon_note, source, created_at, job_paid_cents, line_findings,
-                (file_data IS NOT NULL) AS has_file, file_mime
+                (file_data IS NOT NULL) AS has_file, file_mime,
+                EXISTS (SELECT 1 FROM warranty_claim w WHERE w.invoice_id = vendor_invoice.id) AS warranty
            FROM vendor_invoice WHERE location_id=$1 ORDER BY created_at DESC LIMIT 200`, [req.params.locationId]);
       const base = ORDER_URL;
       res.json({
