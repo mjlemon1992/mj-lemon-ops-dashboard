@@ -152,6 +152,9 @@ async function woParts(apiKey, orderId) {
 // Placeholder part numbers the shop types when there isn't a real one — never
 // force a match on these, or every generic line false-flags.
 const GENERIC_PART = new Set(['NPN', 'MISC', 'NA', 'N', 'NONE', 'TBD', 'VARIOUS', 'SHOP', 'FREIGHT', '']);
+// Below this a line isn't worth raising — $0.00 shipping & handling and other
+// no-charge lines cost nothing, so they can't be unbilled money.
+const MIN_FLAG_CENTS = 5;
 const normPart = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 // PER-LINE CHECK — only runs once the work order is COMPLETE/CLOSED (invoiced).
@@ -178,6 +181,10 @@ function lineCheck(lineItems, parts, orderClosed) {
   for (const li of (lineItems || [])) {
     const inv = li.unit_cost != null ? Math.round(Number(li.unit_cost) * 100)
       : (li.amount != null ? Math.round(Number(li.amount) * 100) : null);
+    // A no-charge line — $0.00 shipping & handling, freebies, no-charge items —
+    // can't be a leak: nothing was paid, so there's nothing to chase. Only a real
+    // charge (above MIN_FLAG_CENTS) is ever worth raising.
+    if (inv != null && inv <= MIN_FLAG_CENTS) continue;
     const n = normPart(li.part_number);
     // 1) real part number on both sides → the cost has to be right
     if (n && !GENERIC_PART.has(n) && byNum.has(n)) {
