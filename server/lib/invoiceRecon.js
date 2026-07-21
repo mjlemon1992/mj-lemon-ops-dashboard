@@ -252,11 +252,12 @@ function reconcileJob(paidCents, woCostCents, orderInvoiced) {
   const gap = paidCents - woCostCents;
   const tol = Math.max(5000, Math.round(woCostCents * 0.10));   // $50 or 10%
   if (gap > tol) return { status: 'underlogged', note: `Paid ${d(paidCents)} in supplier invoices but only ${d(woCostCents)} of parts cost is on this WO — ${d(gap)} may not be billed out.` };
-  // Not an alarm: until every invoice is flowing in, most jobs legitimately look
-  // short, and some WO cost never has a supplier invoice at all (shelf stock,
-  // shop supplies, freight booked on the RO). The statement is what actually
-  // proves an invoice is missing — this is just coverage.
-  if (gap < -tol) return { status: 'variance', note: `${d(paidCents)} of invoices captured against ${d(woCostCents)} of parts on the WO — the rest aren't in yet. The statement check is what confirms a genuinely missing invoice.` };
+  // The WO carrying MORE parts than the invoices in hand says nothing bad about
+  // THIS invoice — the rest simply aren't captured yet, and some WO cost never
+  // has a supplier invoice at all (shelf stock, shop supplies, freight on the
+  // RO). Judging an invoice by the job's coverage would condemn a perfectly good
+  // invoice, so it reads OK; the statement is what proves one is truly missing.
+  if (gap < -tol) return { status: 'ok', note: `This invoice reconciles. ${d(paidCents)} of the job's ${d(woCostCents)} of parts is covered by invoices so far — the rest aren't captured yet (shelf stock never will be). The statement check finds genuinely missing invoices.` };
   return { status: 'ok', note: `Supplier invoices ${d(paidCents)} ≈ ${d(woCostCents)} of parts cost on the WO.` };
 }
 
