@@ -731,11 +731,23 @@ module.exports = (pool) => {
     } catch (e) { fail(res, e); }
   });
 
+  // Remove a claim outright (test data, or one raised in error).
+  router.delete('/warranty/:id', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      const { rows } = await pool.query('SELECT location_id FROM warranty_claim WHERE id=$1', [req.params.id]);
+      if (!rows.length) return fail(res, 'Claim not found', 404);
+      if (!canAccessLocation(req.user, rows[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      await pool.query('DELETE FROM warranty_claim WHERE id=$1', [req.params.id]);
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+
   router.delete('/invoice/:id', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
     try {
       const { rows: ir } = await pool.query('SELECT location_id FROM vendor_invoice WHERE id=$1', [req.params.id]);
       if (!ir.length) return res.json({ ok: true });
       if (!canAccessLocation(req.user, ir[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      await pool.query("DELETE FROM warranty_claim WHERE invoice_id=$1 AND status='awaiting'", [req.params.id]);
       await pool.query('DELETE FROM vendor_invoice WHERE id=$1', [req.params.id]);
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
