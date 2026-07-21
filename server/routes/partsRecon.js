@@ -2,7 +2,7 @@ const express = require('express');
 const { authenticateToken, requireRole, canAccessLocation, syncAuth } = require('../middleware/auth');
 const { monthStartFor, fetchInvoicedOrdersForLocation, fetchOrderService } = require('../lib/shopmonkey');
 const { ensurePartsReconTables } = require('../lib/partsReconSchema');
-const { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCostCheck, reconcileJob, matchInvoiceToRo, digits } = require('../lib/invoiceRecon');
+const { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCheck, reconcileJob, matchInvoiceToRo, digits } = require('../lib/invoiceRecon');
 const { fetchOrderByNumber } = require('../lib/shopmonkey');
 const { fetchInvoiceEmails, markSeen } = require('../lib/invoiceInbox');
 
@@ -180,7 +180,7 @@ module.exports = (pool) => {
     }
     const roCost = wo ? wo.costCents : null;
     // Bonus precision: only where a real part number matches on both sides.
-    const findings = wo ? lineCostCheck(ex.line_items, wo.parts) : [];
+    const findings = wo ? lineCheck(ex.line_items, wo.parts, orderInvoiced === true) : [];
     const { rows } = await pool.query(
       `INSERT INTO vendor_invoice (location_id, vendor, invoice_number, invoice_date, total_cents, subtotal_cents, ro_ref, matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents, recon_status, recon_note, line_items, source, raw_extract, line_findings)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
@@ -458,7 +458,7 @@ module.exports = (pool) => {
         try { wo = await woParts(apiKey, orderId); } catch { /* null */ }
       }
       const roCost = wo ? wo.costCents : null;
-      const findings = wo ? lineCostCheck(inv.line_items, wo.parts) : [];
+      const findings = wo ? lineCheck(inv.line_items, wo.parts, orderInvoiced === true) : [];
       await pool.query('UPDATE vendor_invoice SET ro_ref=$2, matched_order_id=$3, matched_order_number=$4, match_status=$5, match_candidates=$6, ro_parts_cost_cents=$7, line_findings=$8 WHERE id=$1',
         [inv.id, ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, JSON.stringify(findings)]);
       let rec = { status: 'pending', note: 'Not matched to a work order yet.' };
@@ -485,12 +485,13 @@ module.exports = (pool) => {
       const apiKey = process.env.SHOPMONKEY_API_KEY;
       const { rows: lr2 } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [inv.location_id]);
       const smLoc2 = lr2[0] && lr2[0].shopmonkey_location_id;
-      let wo = null; try { wo = await woParts(apiKey, b.order_id); } catch { /* null */ }
-      const roCost = wo ? wo.costCents : null;
-      const findings = wo ? lineCostCheck(inv.line_items, wo.parts) : [];
-      // Need the RO's invoiced state so an open job isn't given a final verdict.
+      // Need the RO's invoiced state first — an open job gets no verdict and no
+      // per-line flags.
       let orderInvoiced = null;
       try { const o = await fetchOrderByNumber(apiKey, smLoc2, String(b.order_number)); if (o.length) orderInvoiced = !!o[0].invoiced; } catch { /* unknown */ }
+      let wo = null; try { wo = await woParts(apiKey, b.order_id); } catch { /* null */ }
+      const roCost = wo ? wo.costCents : null;
+      const findings = wo ? lineCheck(inv.line_items, wo.parts, orderInvoiced === true) : [];
       await pool.query("UPDATE vendor_invoice SET matched_order_id=$2, matched_order_number=$3, match_status='confirmed', ro_parts_cost_cents=$4, line_findings=$5, decided_by=$6, decided_at=now() WHERE id=$1",
         [inv.id, b.order_id, String(b.order_number), roCost, JSON.stringify(findings), who(req)]);
       const { rec } = await rollUpJob(inv.location_id, b.order_id, roCost, orderInvoiced);

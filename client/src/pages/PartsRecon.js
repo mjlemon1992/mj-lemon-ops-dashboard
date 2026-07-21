@@ -276,7 +276,9 @@ function InvoicesView({ locId }) {
               <div style={{ flexBasis: '100%', fontSize: '11px', color: 'var(--warning)' }}>
                 {(inv.line_findings || []).map((f, i) => (
                   <div key={i}>
-                    Part {f.part_number}: invoice {money(f.invoice_cost_cents / 100)} vs {money(f.wo_cost_cents / 100)} on the WO ({f.diff_cents > 0 ? '+' : ''}{money(f.diff_cents / 100)})
+                    {f.status === 'cost_off'
+                      ? <>Part {f.part_number}: cost on the WO is {money(f.wo_cost_cents / 100)} but you paid {money(f.invoice_cost_cents / 100)} ({f.diff_cents > 0 ? '+' : ''}{money(f.diff_cents / 100)})</>
+                      : <>{f.part_number || f.description || 'Line'} — {money(f.invoice_cost_cents / 100)} on this invoice isn’t on the work order</>}
                   </div>
                 ))}
               </div>
@@ -286,7 +288,7 @@ function InvoicesView({ locId }) {
       })}
 
       <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
-        Verdict is per <b>job</b>: every supplier invoice matched to a work order vs the parts cost on it. <b>Possible unbilled</b> = you paid more than what's on the WO. <b>Invoice may be missing</b> = the WO shows more parts cost than the invoices in hand (the statement check confirms). <b>Job open</b> = still collecting invoices; it settles once the RO is invoiced. Per-part cost differences show only where a real part number matches on both sides.
+        Nothing is flagged until the work order is <b>complete/invoiced</b>. Then each invoice is checked line by line — every part on it must be attached to the WO at the right cost (matched by part number, or by cost where the WO line is generic like <i>npn</i>/<i>MISC</i>). <b>Possible unbilled</b> = the job's invoices total more than the parts cost on the WO. <b>Invoice may be missing</b> = the WO shows more parts cost than the invoices in hand — the <b>Statements</b> tab confirms which invoice is missing. <b>Job open</b> = still collecting invoices.
       </div>
     </div>
   );

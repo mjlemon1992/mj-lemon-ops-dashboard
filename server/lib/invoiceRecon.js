@@ -154,31 +154,49 @@ async function woParts(apiKey, orderId) {
 const GENERIC_PART = new Set(['NPN', 'MISC', 'NA', 'N', 'NONE', 'TBD', 'VARIOUS', 'SHOP', 'FREIGHT', '']);
 const normPart = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-// BEST-EFFORT per-line COST check. Only fires when the same real part number
-// appears on BOTH the invoice and the WO — then a cost difference is provable.
-//
-// Deliberately does NOT flag "invoice part isn't on the WO": the shop enters
-// most WO parts generically (npn / MISC / blank), so an unmatched part number
-// usually means "listed under a generic name", not "missing". Verified against
-// real data — invoice S277201BK $189 is on the WO as "bearing kit / npn / $189".
-// That gap is the job-total roll-up's job, not a per-line guess.
-function lineCostCheck(lineItems, parts) {
+// PER-LINE CHECK — only runs once the work order is COMPLETE/CLOSED (invoiced).
+// For each part on the invoice, prove it's attached to the WO at the right cost:
+//   1. Part number matches a real part number on the WO → the cost must agree,
+//      else flag `cost_off` (cost entered wrong).
+//   2. No part-number match → fingerprint by COST. The shop enters most WO parts
+//      generically (npn / MISC / blank), but the cost still lines up — verified
+//      live: invoice S277201BK $189 is on the WO as "bearing kit / npn / $189".
+//      A cost hit means it IS attached and costed right, so stay quiet.
+//   3. Neither → flag `not_accounted`: we paid for it and can't find it on the
+//      WO at that cost (missing line, or the cost is wrong).
+// Each WO part can only be claimed once, so two invoice lines can't both match it.
+function lineCheck(lineItems, parts, orderClosed) {
+  if (!orderClosed) return [];
+  const list = parts || [];
   const byNum = new Map();
-  for (const p of parts || []) {
+  list.forEach((p, i) => {
     const n = normPart(p.partNumber);
-    if (n && !GENERIC_PART.has(n) && !byNum.has(n)) byNum.set(n, p);
-  }
+    if (n && !GENERIC_PART.has(n) && !byNum.has(n)) byNum.set(n, i);
+  });
+  const claimed = new Set();
   const out = [];
   for (const li of (lineItems || [])) {
+    const inv = li.unit_cost != null ? Math.round(Number(li.unit_cost) * 100)
+      : (li.amount != null ? Math.round(Number(li.amount) * 100) : null);
     const n = normPart(li.part_number);
-    if (!n || GENERIC_PART.has(n)) continue;              // generic → skip, never guess
-    const p = byNum.get(n);
-    if (!p) continue;                                     // not on the WO by number → unprovable, stay quiet
-    const inv = li.unit_cost != null ? Math.round(Number(li.unit_cost) * 100) : null;
-    if (inv == null || !p.wholesaleCostCents) continue;   // can't compare → stay quiet
-    const diff = inv - p.wholesaleCostCents;
-    const tol = Math.max(200, Math.round(p.wholesaleCostCents * 0.05));
-    if (Math.abs(diff) > tol) out.push({ part_number: li.part_number, status: 'cost_off', invoice_cost_cents: inv, wo_cost_cents: p.wholesaleCostCents, diff_cents: diff });
+    // 1) real part number on both sides → the cost has to be right
+    if (n && !GENERIC_PART.has(n) && byNum.has(n)) {
+      const idx = byNum.get(n); const p = list[idx];
+      claimed.add(idx);
+      if (inv != null && p.wholesaleCostCents) {
+        const diff = inv - p.wholesaleCostCents;
+        const tol = Math.max(200, Math.round(p.wholesaleCostCents * 0.05));
+        if (Math.abs(diff) > tol) out.push({ part_number: li.part_number, status: 'cost_off', invoice_cost_cents: inv, wo_cost_cents: p.wholesaleCostCents, diff_cents: diff });
+      }
+      continue;
+    }
+    if (inv == null) continue;                    // no cost to fingerprint with → can't judge
+    // 2) generic on the WO → match by cost
+    const hit = list.findIndex((p, i) => !claimed.has(i) && p.wholesaleCostCents
+      && Math.abs(p.wholesaleCostCents - inv) <= Math.max(100, Math.round(inv * 0.01)));
+    if (hit >= 0) { claimed.add(hit); continue; }
+    // 3) not attached at that cost
+    out.push({ part_number: li.part_number || null, description: li.description || null, status: 'not_accounted', invoice_cost_cents: inv });
   }
   return out;
 }
@@ -261,4 +279,4 @@ function reconcile(invoicePaidCents, roCostCents) {
   return { status: 'ok', note: `Invoice ${d(invoicePaidCents)} ≈ ${d(roCostCents)} captured on the RO.` };
 }
 
-module.exports = { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCostCheck, reconcileJob, matchInvoiceToRo, reconcile, digits };
+module.exports = { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCheck, reconcileJob, matchInvoiceToRo, reconcile, digits };
