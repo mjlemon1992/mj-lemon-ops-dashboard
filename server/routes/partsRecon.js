@@ -368,7 +368,8 @@ module.exports = (pool) => {
       await pool.query(
         `INSERT INTO warranty_claim (location_id, invoice_id, vendor, invoice_number, invoice_date, expected_cents, lines, source, note, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'manual',$8,$9)
-         ON CONFLICT (invoice_id) DO UPDATE SET expected_cents=EXCLUDED.expected_cents, lines=EXCLUDED.lines, note=EXCLUDED.note`,
+         ON CONFLICT (invoice_id) WHERE invoice_id IS NOT NULL
+         DO UPDATE SET expected_cents=EXCLUDED.expected_cents, lines=EXCLUDED.lines, note=EXCLUDED.note`,
         [inv.location_id, inv.id, inv.vendor, inv.invoice_number, inv.invoice_date, expected, JSON.stringify(lines), b.note || null, who(req)]);
       res.json({ ok: true, expected: expected / 100 });
     } catch (e) { fail(res, e); }
@@ -484,7 +485,7 @@ module.exports = (pool) => {
     await pool.query(
       `INSERT INTO warranty_claim (location_id, invoice_id, vendor, invoice_number, invoice_date, expected_cents, source, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       ON CONFLICT (invoice_id) DO NOTHING`,
+       ON CONFLICT (invoice_id) WHERE invoice_id IS NOT NULL DO NOTHING`,
       [locId, invoiceId, ex.vendor, ex.invoice_number, ex.invoice_date, expected, source, by || null]);
   };
 
