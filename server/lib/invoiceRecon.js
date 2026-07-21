@@ -135,6 +135,64 @@ async function roPartsCostCents(apiKey, orderId) {
   return Math.round(c);
 }
 
+// The parts on a work order + their total cost, in one fetch.
+async function woParts(apiKey, orderId) {
+  const lines = await fetchOrderService(apiKey, orderId);
+  const parts = [];
+  let cost = 0;
+  for (const ln of lines) for (const p of (ln.parts || [])) {
+    const qty = Number(p.quantity) || 1;
+    const wc = Number(p.wholesaleCostCents || p.originalWholesaleCostCents || 0);
+    parts.push({ partNumber: p.partNumber || null, name: p.name || null, quantity: qty, wholesaleCostCents: wc });
+    cost += wc * qty;
+  }
+  return { parts, costCents: Math.round(cost) };
+}
+
+// Placeholder part numbers the shop types when there isn't a real one — never
+// force a match on these, or every generic line false-flags.
+const GENERIC_PART = new Set(['NPN', 'MISC', 'NA', 'N', 'NONE', 'TBD', 'VARIOUS', 'SHOP', 'FREIGHT', '']);
+const normPart = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+// BEST-EFFORT per-line cost check: only for invoice lines whose part number
+// cleanly matches a real (non-generic) part number on the WO. Reports problems
+// only — silence means nothing suspicious was provable.
+function lineCostCheck(lineItems, parts) {
+  const byNum = new Map();
+  for (const p of parts || []) {
+    const n = normPart(p.partNumber);
+    if (n && !GENERIC_PART.has(n) && !byNum.has(n)) byNum.set(n, p);
+  }
+  const out = [];
+  for (const li of (lineItems || [])) {
+    const n = normPart(li.part_number);
+    if (!n || GENERIC_PART.has(n)) continue;              // generic → skip, never guess
+    const p = byNum.get(n);
+    if (!p) { out.push({ part_number: li.part_number, status: 'not_on_wo', invoice_cost_cents: li.unit_cost != null ? Math.round(Number(li.unit_cost) * 100) : null }); continue; }
+    const inv = li.unit_cost != null ? Math.round(Number(li.unit_cost) * 100) : null;
+    if (inv == null || !p.wholesaleCostCents) continue;   // can't compare → stay quiet
+    const diff = inv - p.wholesaleCostCents;
+    const tol = Math.max(200, Math.round(p.wholesaleCostCents * 0.05));
+    if (Math.abs(diff) > tol) out.push({ part_number: li.part_number, status: 'cost_off', invoice_cost_cents: inv, wo_cost_cents: p.wholesaleCostCents, diff_cents: diff });
+  }
+  return out;
+}
+
+// JOB-TOTAL ROLL-UP — the primary flag. Compare every supplier invoice matched
+// to a work order against the total parts cost on that WO. Needs no part-number
+// matching, so it survives generic/blank part entry. Only a final verdict once
+// the job is invoiced; while it's open we're still collecting invoices.
+function reconcileJob(paidCents, woCostCents, orderInvoiced) {
+  const d = (c) => '$' + (c / 100).toFixed(2);
+  if (woCostCents == null || paidCents == null) return { status: 'pending', note: 'Not matched to a work order yet.' };
+  if (orderInvoiced === false) return { status: 'pending', note: `Job still open — invoices so far ${d(paidCents)} vs ${d(woCostCents)} of parts on the WO. Settles when it's invoiced.` };
+  const gap = paidCents - woCostCents;
+  const tol = Math.max(5000, Math.round(woCostCents * 0.10));   // $50 or 10%
+  if (gap > tol) return { status: 'underlogged', note: `Paid ${d(paidCents)} in supplier invoices but only ${d(woCostCents)} of parts cost is on this WO — ${d(gap)} may not be billed out.` };
+  if (gap < -tol) return { status: 'variance', note: `WO shows ${d(woCostCents)} of parts but only ${d(paidCents)} of invoices are in — an invoice may still be missing (the statement check will confirm).` };
+  return { status: 'ok', note: `Supplier invoices ${d(paidCents)} ≈ ${d(woCostCents)} of parts cost on the WO.` };
+}
+
 // Match an invoice to its RO by the ref stamped on it: full RO number = exact,
 // else last-4 disambiguated by invoice-date proximity. Scoped to the shop.
 async function matchInvoiceToRo(apiKey, smLocationId, { ro_ref, invoice_date }) {
@@ -198,4 +256,4 @@ function reconcile(invoicePaidCents, roCostCents) {
   return { status: 'ok', note: `Invoice ${d(invoicePaidCents)} ≈ ${d(roCostCents)} captured on the RO.` };
 }
 
-module.exports = { extractInvoice, extractStatement, roPartsCostCents, matchInvoiceToRo, reconcile, digits };
+module.exports = { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCostCheck, reconcileJob, matchInvoiceToRo, reconcile, digits };

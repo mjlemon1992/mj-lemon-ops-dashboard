@@ -2,7 +2,8 @@ const express = require('express');
 const { authenticateToken, requireRole, canAccessLocation, syncAuth } = require('../middleware/auth');
 const { monthStartFor, fetchInvoicedOrdersForLocation, fetchOrderService } = require('../lib/shopmonkey');
 const { ensurePartsReconTables } = require('../lib/partsReconSchema');
-const { extractInvoice, extractStatement, roPartsCostCents, matchInvoiceToRo, reconcile, digits } = require('../lib/invoiceRecon');
+const { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCostCheck, reconcileJob, matchInvoiceToRo, digits } = require('../lib/invoiceRecon');
+const { fetchOrderByNumber } = require('../lib/shopmonkey');
 const { fetchInvoiceEmails, markSeen } = require('../lib/invoiceInbox');
 
 // Parts reconciliation — v1a: ShopMonkey-only parts margin / exposure per RO.
@@ -152,28 +153,49 @@ module.exports = (pool) => {
   const who = (req) => req.user.email || req.user.name || req.user.role;
   const paidCentsOf = (inv) => (inv.subtotal_cents != null ? inv.subtotal_cents : inv.total_cents);
 
-  // Match + reconcile an extracted invoice, then upsert it.
+  // JOB-TOTAL ROLL-UP: every supplier invoice matched to this RO vs the total
+  // parts cost on the WO. Re-stamps ALL the job's invoices so adding one
+  // re-reconciles the whole job. Returns the verdict.
+  const rollUpJob = async (locId, orderId, woCostCents, orderInvoiced) => {
+    const { rows } = await pool.query(
+      `SELECT COALESCE(SUM(COALESCE(subtotal_cents, total_cents)), 0)::int AS paid
+         FROM vendor_invoice WHERE location_id=$1 AND matched_order_id=$2`, [locId, orderId]);
+    const jobPaid = rows[0].paid;
+    const rec = reconcileJob(jobPaid, woCostCents, orderInvoiced);
+    await pool.query(
+      `UPDATE vendor_invoice SET recon_status=$3, recon_note=$4, job_paid_cents=$5,
+              ro_parts_cost_cents=COALESCE($6, ro_parts_cost_cents)
+         WHERE location_id=$1 AND matched_order_id=$2`,
+      [locId, orderId, rec.status, rec.note, jobPaid, woCostCents]);
+    return { rec, jobPaid };
+  };
+
+  // Match an extracted invoice, upsert it, then reconcile the whole job.
   const processInvoice = async (locId, smLoc, apiKey, ex, source) => {
     const m = await matchInvoiceToRo(apiKey, smLoc, { ro_ref: ex.ro_ref, invoice_date: ex.invoice_date });
-    let roCost = null, orderId = null, orderNum = null, orderOpen = false;
-    if (m.status === 'matched' && m.order) { orderId = m.order.order_id; orderNum = m.order.order_number; orderOpen = m.order.invoiced === false; try { roCost = await roPartsCostCents(apiKey, orderId); } catch { /* leave null */ } }
-    const paid = ex.subtotal_cents != null ? ex.subtotal_cents : ex.total_cents;
-    // An open estimate isn't billed out yet — matching it is right, but flagging
-    // "unbilled" would be a false alarm until the RO is invoiced.
-    const rec = orderOpen
-      ? { status: 'pending', note: `Matched RO ${orderNum} — still an open estimate; parts aren't billed out yet. Rechecks when it's invoiced.` }
-      : reconcile(orderId ? paid : null, roCost);
+    let orderId = null, orderNum = null, orderInvoiced = null, wo = null;
+    if (m.status === 'matched' && m.order) {
+      orderId = m.order.order_id; orderNum = m.order.order_number; orderInvoiced = m.order.invoiced;
+      try { wo = await woParts(apiKey, orderId); } catch { /* leave null */ }
+    }
+    const roCost = wo ? wo.costCents : null;
+    // Bonus precision: only where a real part number matches on both sides.
+    const findings = wo ? lineCostCheck(ex.line_items, wo.parts) : [];
     const { rows } = await pool.query(
-      `INSERT INTO vendor_invoice (location_id, vendor, invoice_number, invoice_date, total_cents, subtotal_cents, ro_ref, matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents, recon_status, recon_note, line_items, source, raw_extract)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+      `INSERT INTO vendor_invoice (location_id, vendor, invoice_number, invoice_date, total_cents, subtotal_cents, ro_ref, matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents, recon_status, recon_note, line_items, source, raw_extract, line_findings)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        ON CONFLICT (location_id, COALESCE(vendor,''), COALESCE(invoice_number,''), COALESCE(total_cents,0))
        DO UPDATE SET invoice_date=EXCLUDED.invoice_date, subtotal_cents=EXCLUDED.subtotal_cents, ro_ref=EXCLUDED.ro_ref,
          matched_order_id=EXCLUDED.matched_order_id, matched_order_number=EXCLUDED.matched_order_number, match_status=EXCLUDED.match_status,
          match_candidates=EXCLUDED.match_candidates, ro_parts_cost_cents=EXCLUDED.ro_parts_cost_cents, recon_status=EXCLUDED.recon_status,
-         recon_note=EXCLUDED.recon_note, line_items=EXCLUDED.line_items
+         recon_note=EXCLUDED.recon_note, line_items=EXCLUDED.line_items, line_findings=EXCLUDED.line_findings
        RETURNING id`,
-      [locId, ex.vendor, ex.invoice_number, ex.invoice_date, ex.total_cents, ex.subtotal_cents, ex.ro_ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, rec.status, rec.note, JSON.stringify(ex.line_items || []), source, JSON.stringify(ex.raw || ex)]);
-    return { id: rows[0].id, vendor: ex.vendor, ro_ref: ex.ro_ref, match_status: m.status, matched_order_number: orderNum, recon_status: rec.status, recon_note: rec.note, candidates: m.candidates };
+      [locId, ex.vendor, ex.invoice_number, ex.invoice_date, ex.total_cents, ex.subtotal_cents, ex.ro_ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, 'pending', 'Reconciling…', JSON.stringify(ex.line_items || []), source, JSON.stringify(ex.raw || ex), JSON.stringify(findings)]);
+    const id = rows[0].id;
+    let rec = { status: 'pending', note: 'Not matched to a work order yet.' }, jobPaid = null;
+    if (orderId) ({ rec, jobPaid } = await rollUpJob(locId, orderId, roCost, orderInvoiced));
+    else await pool.query('UPDATE vendor_invoice SET recon_status=$2, recon_note=$3 WHERE id=$1', [id, rec.status, rec.note]);
+    return { id, vendor: ex.vendor, ro_ref: ex.ro_ref, match_status: m.status, matched_order_number: orderNum, recon_status: rec.status, recon_note: rec.note, candidates: m.candidates, job_paid_cents: jobPaid, wo_cost_cents: roCost, line_findings: findings };
   };
 
   // Intake — fed by the scan pipeline (email/Make) or a direct upload. Accepts a
@@ -400,7 +422,7 @@ module.exports = (pool) => {
       const { rows } = await pool.query(
         `SELECT id, vendor, invoice_number, invoice_date::text AS invoice_date, total_cents, subtotal_cents, ro_ref,
                 matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents,
-                recon_status, recon_note, source, created_at
+                recon_status, recon_note, source, created_at, job_paid_cents, line_findings
            FROM vendor_invoice WHERE location_id=$1 ORDER BY created_at DESC LIMIT 200`, [req.params.locationId]);
       const base = ORDER_URL;
       res.json({
@@ -409,6 +431,7 @@ module.exports = (pool) => {
           total: r.total_cents != null ? r.total_cents / 100 : null,
           subtotal: r.subtotal_cents != null ? r.subtotal_cents / 100 : null,
           ro_parts_cost: r.ro_parts_cost_cents != null ? r.ro_parts_cost_cents / 100 : null,
+          job_paid: r.job_paid_cents != null ? r.job_paid_cents / 100 : null,
           sm_url: r.matched_order_id ? base.replace('{id}', r.matched_order_id) : null,
         })),
       });
@@ -429,14 +452,19 @@ module.exports = (pool) => {
       const apiKey = process.env.SHOPMONKEY_API_KEY;
       const ref = (req.body || {}).ro_ref != null ? String(req.body.ro_ref).trim() : inv.ro_ref;
       const m = await matchInvoiceToRo(apiKey, smLoc, { ro_ref: ref, invoice_date: inv.invoice_date });
-      let roCost = null, orderId = null, orderNum = null, orderOpen = false;
-      if (m.status === 'matched' && m.order) { orderId = m.order.order_id; orderNum = m.order.order_number; orderOpen = m.order.invoiced === false; try { roCost = await roPartsCostCents(apiKey, orderId); } catch { /* null */ } }
-      const rec = orderOpen
-        ? { status: 'pending', note: `Matched RO ${orderNum} — still an open estimate; parts aren't billed out yet. Rechecks when it's invoiced.` }
-        : reconcile(orderId ? paidCentsOf(inv) : null, roCost);
-      await pool.query('UPDATE vendor_invoice SET ro_ref=$2, matched_order_id=$3, matched_order_number=$4, match_status=$5, match_candidates=$6, ro_parts_cost_cents=$7, recon_status=$8, recon_note=$9 WHERE id=$1',
-        [inv.id, ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, rec.status, rec.note]);
-      res.json({ ok: true, match_status: m.status, matched_order_number: orderNum, candidates: m.candidates, recon_status: rec.status });
+      let orderId = null, orderNum = null, orderInvoiced = null, wo = null;
+      if (m.status === 'matched' && m.order) {
+        orderId = m.order.order_id; orderNum = m.order.order_number; orderInvoiced = m.order.invoiced;
+        try { wo = await woParts(apiKey, orderId); } catch { /* null */ }
+      }
+      const roCost = wo ? wo.costCents : null;
+      const findings = wo ? lineCostCheck(inv.line_items, wo.parts) : [];
+      await pool.query('UPDATE vendor_invoice SET ro_ref=$2, matched_order_id=$3, matched_order_number=$4, match_status=$5, match_candidates=$6, ro_parts_cost_cents=$7, line_findings=$8 WHERE id=$1',
+        [inv.id, ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, JSON.stringify(findings)]);
+      let rec = { status: 'pending', note: 'Not matched to a work order yet.' };
+      if (orderId) ({ rec } = await rollUpJob(inv.location_id, orderId, roCost, orderInvoiced));
+      else await pool.query('UPDATE vendor_invoice SET recon_status=$2, recon_note=$3 WHERE id=$1', [inv.id, rec.status, rec.note]);
+      res.json({ ok: true, match_status: m.status, matched_order_number: orderNum, candidates: m.candidates, recon_status: rec.status, recon_note: rec.note, line_findings: findings });
     } catch (e) { fail(res, e); }
   });
 
@@ -455,11 +483,18 @@ module.exports = (pool) => {
       }
       if (!b.order_id || !b.order_number) return fail(res, 'order_id + order_number required', 400);
       const apiKey = process.env.SHOPMONKEY_API_KEY;
-      let roCost = null; try { roCost = await roPartsCostCents(apiKey, b.order_id); } catch { /* null */ }
-      const rec = reconcile(paidCentsOf(inv), roCost);
-      await pool.query("UPDATE vendor_invoice SET matched_order_id=$2, matched_order_number=$3, match_status='confirmed', ro_parts_cost_cents=$4, recon_status=$5, recon_note=$6, decided_by=$7, decided_at=now() WHERE id=$1",
-        [inv.id, b.order_id, String(b.order_number), roCost, rec.status, rec.note, who(req)]);
-      res.json({ ok: true, recon_status: rec.status, recon_note: rec.note });
+      const { rows: lr2 } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [inv.location_id]);
+      const smLoc2 = lr2[0] && lr2[0].shopmonkey_location_id;
+      let wo = null; try { wo = await woParts(apiKey, b.order_id); } catch { /* null */ }
+      const roCost = wo ? wo.costCents : null;
+      const findings = wo ? lineCostCheck(inv.line_items, wo.parts) : [];
+      // Need the RO's invoiced state so an open job isn't given a final verdict.
+      let orderInvoiced = null;
+      try { const o = await fetchOrderByNumber(apiKey, smLoc2, String(b.order_number)); if (o.length) orderInvoiced = !!o[0].invoiced; } catch { /* unknown */ }
+      await pool.query("UPDATE vendor_invoice SET matched_order_id=$2, matched_order_number=$3, match_status='confirmed', ro_parts_cost_cents=$4, line_findings=$5, decided_by=$6, decided_at=now() WHERE id=$1",
+        [inv.id, b.order_id, String(b.order_number), roCost, JSON.stringify(findings), who(req)]);
+      const { rec } = await rollUpJob(inv.location_id, b.order_id, roCost, orderInvoiced);
+      res.json({ ok: true, recon_status: rec.status, recon_note: rec.note, line_findings: findings });
     } catch (e) { fail(res, e); }
   });
 

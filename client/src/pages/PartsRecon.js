@@ -161,11 +161,12 @@ function MarginView({ locId }) {
 }
 
 // ── Vendor invoices (v1b) ────────────────────────────────────────────────
+// Job-level verdict: all supplier invoices on a work order vs the parts cost on it.
 const RECON = {
   underlogged: { t: 'POSSIBLE UNBILLED', c: 'var(--danger)' },
-  variance: { t: 'VARIANCE', c: 'var(--warning)' },
+  variance: { t: 'INVOICE MAY BE MISSING', c: 'var(--warning)' },
   ok: { t: 'OK', c: 'var(--success)' },
-  pending: { t: 'PENDING', c: 'var(--text3)' },
+  pending: { t: 'JOB OPEN', c: 'var(--text3)' },
 };
 const MATCH_COLOR = { matched: 'var(--success)', confirmed: 'var(--success)', ambiguous: 'var(--warning)', unmatched: 'var(--danger)', pending: 'var(--text3)' };
 
@@ -266,12 +267,28 @@ function InvoicesView({ locId }) {
               <button onClick={() => del(inv)} title="Remove" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>✕</button>
             </div>
             {inv.recon_note && <div style={{ flexBasis: '100%', fontSize: '11px', color: 'var(--text3)' }}>{inv.recon_note}</div>}
+            {inv.matched_order_number && inv.job_paid != null && (
+              <div style={{ flexBasis: '100%', fontSize: '11px', color: 'var(--text3)' }}>
+                Job total: <b>{money(inv.job_paid)}</b> of supplier invoices vs <b>{money(inv.ro_parts_cost)}</b> of parts cost on RO {inv.matched_order_number}
+              </div>
+            )}
+            {(inv.line_findings || []).length > 0 && (
+              <div style={{ flexBasis: '100%', fontSize: '11px', color: 'var(--warning)' }}>
+                {(inv.line_findings || []).map((f, i) => (
+                  <div key={i}>
+                    {f.status === 'cost_off'
+                      ? <>Part {f.part_number}: invoice {money(f.invoice_cost_cents / 100)} vs {money(f.wo_cost_cents / 100)} on the WO ({f.diff_cents > 0 ? '+' : ''}{money(f.diff_cents / 100)})</>
+                      : <>Part {f.part_number}: on this invoice but not on the WO</>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         );
       })}
 
       <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
-        <b>Possible unbilled</b> = you paid the vendor more than the parts cost captured on the matched RO — worth a look. <b>Variance</b> = RO cost exceeds this invoice (multiple invoices / matrix). Ambiguous matches: tap <b>Match RO</b> to confirm.
+        Verdict is per <b>job</b>: every supplier invoice matched to a work order vs the parts cost on it. <b>Possible unbilled</b> = you paid more than what's on the WO. <b>Invoice may be missing</b> = the WO shows more parts cost than the invoices in hand (the statement check confirms). <b>Job open</b> = still collecting invoices; it settles once the RO is invoiced. Per-part cost differences show only where a real part number matches on both sides.
       </div>
     </div>
   );

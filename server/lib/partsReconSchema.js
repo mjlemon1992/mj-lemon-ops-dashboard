@@ -30,6 +30,10 @@ function ensurePartsReconTables(pool) {
       decided_at TIMESTAMPTZ
     )`);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_vinv_loc_status ON vendor_invoice (location_id, match_status, created_at DESC)');
+    // v1d — job-total roll-up + best-effort per-line cost findings.
+    await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS job_paid_cents INTEGER');   // Σ all invoices matched to this RO
+    await pool.query("ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS line_findings JSONB DEFAULT '[]'");
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_vinv_order ON vendor_invoice (location_id, matched_order_id)');
     // De-dupe re-sent scans: same vendor+number+total for a location = one row.
     await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_vinv_dedupe ON vendor_invoice (location_id, COALESCE(vendor,''), COALESCE(invoice_number,''), COALESCE(total_cents,0))");
 
