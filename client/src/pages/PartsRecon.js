@@ -179,23 +179,49 @@ function InvoicesView({ locId }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(null); // { done, total, name } while a batch reads
 
   const load = useCallback(() => {
     api(`/parts/${locId}/invoices`).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
   }, [api, locId]);
   useEffect(() => { load(); }, [load]);
 
-  const upload = async (file) => {
-    if (!file) return;
+  // Multi-file: each file is an AI read AND several of them can land on the same
+  // work order, whose roll-up re-stamps every invoice on that job — so they go
+  // through one at a time rather than racing each other.
+  const upload = async (files) => {
+    const list = Array.from(files || []).filter(Boolean);
+    if (!list.length) return;
     setBusy(true);
-    try {
-      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
-      const out = await api(`/parts/${locId}/invoice-intake`, { method: 'POST', body: JSON.stringify({ file: b64, media_type: file.type || 'image/jpeg' }) });
-      if (out.type === 'statement') showToast(`That was a statement — ${out.vendor || 'vendor'}: ${out.missing} of ${out.line_count} invoices missing. See the Statements tab.`, out.missing ? 'error' : undefined);
-      else showToast(`Read: ${out.extracted?.vendor || '?'} · RO ${out.matched_order_number || out.extracted?.ro_ref || '—'} · ${out.recon_status}`);
-      load();
-    } catch (e) { showToast(e.message, 'error'); }
+    const res = { invoices: 0, statements: 0, flagged: 0, failed: [] };
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
+      setProgress({ done: i, total: list.length, name: file.name });
+      try {
+        const b64 = await new Promise((ok, rej) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+        const out = await api(`/parts/${locId}/invoice-intake`, { method: 'POST', body: JSON.stringify({ file: b64, media_type: file.type || 'image/jpeg' }) });
+        if (out.type === 'statement') res.statements++;
+        else {
+          res.invoices++;
+          if (out.match_status !== 'matched' && out.match_status !== 'confirmed') res.flagged++;
+          else if ((out.line_findings || []).length || out.recon_status === 'underlogged') res.flagged++;
+        }
+      } catch (e) { res.failed.push(`${file.name}: ${e.message}`); }
+    }
+    setProgress(null);
     setBusy(false);
+    load();
+    // One summary at the end rather than a toast per file.
+    if (list.length === 1 && !res.failed.length) {
+      showToast(res.statements ? 'Statement read — see the Statements tab' : 'Invoice filed');
+    } else {
+      const bits = [];
+      if (res.invoices) bits.push(`${res.invoices} invoice${res.invoices === 1 ? '' : 's'}`);
+      if (res.statements) bits.push(`${res.statements} statement${res.statements === 1 ? '' : 's'}`);
+      if (res.flagged) bits.push(`${res.flagged} need${res.flagged === 1 ? 's' : ''} a look`);
+      showToast(`Filed ${bits.join(' · ') || 'nothing'}${res.failed.length ? ` · ${res.failed.length} failed` : ''}`, res.failed.length ? 'error' : undefined);
+    }
+    if (res.failed.length) res.failed.slice(0, 3).forEach((f) => showToast(f, 'error'));
   };
   const pickMatch = async (inv) => {
     // Re-scan first — refreshes candidates after a transient scan miss and
@@ -278,8 +304,9 @@ function InvoicesView({ locId }) {
             {scanning ? 'Checking…' : '📥 Scan inbox'}
           </button>
           <label className="primary" style={{ fontSize: '12px', padding: '7px 14px', cursor: busy ? 'default' : 'pointer', borderRadius: '8px' }}>
-            {busy ? 'Reading…' : '＋ Upload invoice'}
-            <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={busy} onChange={(e) => upload(e.target.files[0])} />
+            {busy ? (progress ? `Reading ${progress.done + 1} of ${progress.total}…` : 'Reading…') : '＋ Upload invoices'}
+            <input type="file" multiple accept="image/*,application/pdf" style={{ display: 'none' }} disabled={busy}
+              onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ''; upload(f); }} />
           </label>
         </div>
       </div>
@@ -446,22 +473,30 @@ function StatementsView({ locId }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(null); // { done, total } while a batch reads
   const [open, setOpen] = useState({});
   const load = useCallback(() => {
     api(`/parts/${locId}/statements`).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
   }, [api, locId]);
   useEffect(() => { load(); }, [load]);
 
-  const upload = async (file) => {
-    if (!file) return;
+  const upload = async (files) => {
+    const list = Array.from(files || []).filter(Boolean);
+    if (!list.length) return;
     setBusy(true);
-    try {
-      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
-      const out = await api(`/parts/${locId}/statement-intake`, { method: 'POST', body: JSON.stringify({ file: b64, media_type: file.type || 'application/pdf' }) });
-      showToast(out.missing ? `${out.vendor || 'Statement'}: ${out.missing} of ${out.line_count} invoices MISSING` : `${out.vendor || 'Statement'}: all ${out.line_count} invoices accounted for ✓`, out.missing ? 'error' : undefined);
-      load();
-    } catch (e) { showToast(e.message, 'error'); }
-    setBusy(false);
+    let ok = 0, missing = 0; const failed = [];
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
+      setProgress({ done: i, total: list.length });
+      try {
+        const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+        const out = await api(`/parts/${locId}/statement-intake`, { method: 'POST', body: JSON.stringify({ file: b64, media_type: file.type || 'application/pdf' }) });
+        ok++; missing += (out.missing || 0);
+      } catch (e) { failed.push(`${file.name}: ${e.message}`); }
+    }
+    setProgress(null); setBusy(false); load();
+    showToast(`${ok} statement${ok === 1 ? '' : 's'} read${missing ? ` · ${missing} document${missing === 1 ? '' : 's'} missing` : ' · all accounted for ✓'}${failed.length ? ` · ${failed.length} failed` : ''}`, (missing || failed.length) ? 'error' : undefined);
+    failed.slice(0, 3).forEach((f) => showToast(f, 'error'));
   };
   const del = async (s) => {
     if (!await askConfirm({ title: 'Remove statement', body: `Remove ${s.vendor || 'statement'} ${s.statement_date || ''}?`, danger: true, confirmLabel: 'Remove' })) return;
@@ -488,8 +523,9 @@ function StatementsView({ locId }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
         <div style={{ fontSize: '12px', color: 'var(--text3)', flex: '1 1 260px' }}>At month-end, upload a supplier statement — it lists every invoice they billed. We flag the ones we never received or entered, so you can chase them.</div>
         <label className="primary" style={{ fontSize: '12px', padding: '7px 14px', cursor: busy ? 'default' : 'pointer', borderRadius: '8px' }}>
-          {busy ? 'Reading…' : '＋ Upload statement'}
-          <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={busy} onChange={(e) => upload(e.target.files[0])} />
+          {busy ? (progress ? `Reading ${progress.done + 1} of ${progress.total}…` : 'Reading…') : '＋ Upload statements'}
+          <input type="file" multiple accept="image/*,application/pdf" style={{ display: 'none' }} disabled={busy}
+            onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ''; upload(f); }} />
         </label>
       </div>
 
