@@ -201,8 +201,12 @@ function lineCheck(lineItems, parts, orderClosed) {
     // charge (above MIN_FLAG_CENTS) is ever worth raising.
     if (inv != null && inv <= MIN_FLAG_CENTS) continue;
     const n = normPart(li.part_number);
-    // 1) real part number on both sides → the cost has to be right
-    if (n && !GENERIC_PART.has(n) && byNum.has(n)) {
+    // 1) real part number on both sides → the cost has to be right.
+    // Skip if that WO part is already claimed: invoices repeat a part number on
+    // ancillary lines (a real Transtar invoice put "Environmental Charge $1.25"
+    // under the same A85010 as the $16.57 filter), and re-comparing the fee to
+    // the part's cost invents a bogus "cost off".
+    if (n && !GENERIC_PART.has(n) && byNum.has(n) && !claimed.has(byNum.get(n))) {
       const idx = byNum.get(n); const p = list[idx];
       claimed.add(idx);
       const woExt = partExtCents(p);
