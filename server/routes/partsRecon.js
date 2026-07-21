@@ -543,11 +543,18 @@ module.exports = (pool) => {
       // Looked like a statement but nothing parsed — fall back to invoice.
     }
     const out = await processInvoice(locationId, smLoc, apiKey, ex, source, fileBase64, mediaType);
-    // WARRANTY stamp on the page, or WARRANTY in the forwarded subject line.
-    const warranty = ex.warranty_marked || warrantyHint;
+    // Warranty can be declared three ways, in order of reliability:
+    //  • a "W" prefix on the PO given to the supplier (W0508) — travels with the
+    //    order, so it prints on THEIR invoice whether it comes back as paper, a
+    //    PDF or an emailed one. Nothing to stamp, nothing to remember later.
+    //  • a CREDIT/WARRANTY stamp on a scanned page
+    //  • WARRANTY typed in a forwarded email's subject
+    const poFlag = /^\s*w/i.test(String(ex.ro_ref || ''));
+    const warranty = poFlag || ex.warranty_marked || warrantyHint;
     if (out.id) {
       const expected = ex.subtotal_cents != null ? ex.subtotal_cents : ex.total_cents;
-      if (warranty) await openClaim(locationId, out.id, ex, { kind: 'warranty', expectedCents: expected, source: ex.warranty_marked ? 'stamp' : 'subject' });
+      const src = poFlag ? 'po' : ex.warranty_marked ? 'stamp' : 'subject';
+      if (warranty) await openClaim(locationId, out.id, ex, { kind: 'warranty', expectedCents: expected, source: src });
       try { await handleCoreLines(locationId, out.id, ex); } catch (e) { /* core watch is best-effort */ }
     }
     return { type: 'invoice', warranty, extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out };

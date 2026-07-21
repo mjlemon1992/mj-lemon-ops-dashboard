@@ -26,7 +26,7 @@ async function extractInvoice(fileBase64, mediaType) {
         invoice_date: { type: 'string', description: 'Invoice date as YYYY-MM-DD' },
         subtotal: { type: 'number', description: 'Pre-tax parts subtotal in dollars (before GST/PST/freight)' },
         total: { type: 'number', description: 'Grand total in dollars' },
-        ro_ref: { type: 'string', description: 'The repair-order / work-order / PO reference the shop wrote on the invoice — often just the last 4 digits of the RO number. Empty string if none is present.' },
+        ro_ref: { type: 'string', description: 'The repair-order / work-order / PO reference the shop gave for this order — often just the last 4 digits of the RO number. Copy it EXACTLY as printed, including any leading letter such as "W" (e.g. "W0508" must not be shortened to "0508") — that letter is meaningful. Empty string if none is present.' },
         line_items: {
           type: 'array',
           description: 'One entry per line on the invoice. ALWAYS fill in "amount" (the extended line total as printed) and "qty" when they are shown — the line total is what matters, a unit price alone is ambiguous.',
