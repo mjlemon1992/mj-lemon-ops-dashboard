@@ -153,6 +153,19 @@ module.exports = (pool) => {
   const who = (req) => req.user.email || req.user.name || req.user.role;
   const paidCentsOf = (inv) => (inv.subtotal_cents != null ? inv.subtotal_cents : inv.total_cents);
 
+  // RETENTION: we only hold the scan while the invoice needs eyes. Once it's
+  // matched AND reconciles clean with no line findings, drop the image —
+  // Hubdoc/QBO is the system of record for the document itself. Anything still
+  // unmatched, flagged, or on an open job keeps its scan so it can be viewed.
+  const purgeResolvedFiles = async (locId) => {
+    await pool.query(
+      `UPDATE vendor_invoice SET file_data=NULL, file_mime=NULL
+        WHERE location_id=$1 AND file_data IS NOT NULL
+          AND match_status IN ('matched','confirmed')
+          AND recon_status='ok'
+          AND COALESCE(jsonb_array_length(line_findings), 0) = 0`, [locId]);
+  };
+
   // JOB-TOTAL ROLL-UP: every supplier invoice matched to this RO vs the total
   // parts cost on the WO. Re-stamps ALL the job's invoices so adding one
   // re-reconciles the whole job. Returns the verdict.
@@ -167,6 +180,7 @@ module.exports = (pool) => {
               ro_parts_cost_cents=COALESCE($6, ro_parts_cost_cents)
          WHERE location_id=$1 AND matched_order_id=$2`,
       [locId, orderId, rec.status, rec.note, jobPaid, woCostCents]);
+    await purgeResolvedFiles(locId);   // anything that just settled clean drops its scan
     return { rec, jobPaid };
   };
 
