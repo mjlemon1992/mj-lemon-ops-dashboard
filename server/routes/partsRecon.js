@@ -426,15 +426,22 @@ module.exports = (pool) => {
                 found_count, missing_count, mismatch_count, lines, created_at, lines_sum_cents
            FROM vendor_statement WHERE location_id=$1 ORDER BY created_at DESC LIMIT 60`, [req.params.locationId]);
       res.json({
-        statements: rows.map((r) => ({
-          ...r,
-          total: r.total_cents != null ? r.total_cents / 100 : null,
-          lines_sum: r.lines_sum_cents != null ? r.lines_sum_cents / 100 : null,
-          // False = the lines we read don't add up to the printed total, so the
-          // missing list can't be trusted until a human looks.
-          ties_out: r.total_cents == null || r.lines_sum_cents == null
-            || Math.abs(r.lines_sum_cents - r.total_cents) <= Math.max(5000, Math.round(r.total_cents * 0.02)),
-        })),
+        statements: rows.map((r) => {
+          // Statements saved before lines_sum_cents existed still tie out — add
+          // their stored lines up on the fly rather than silently passing.
+          const sum = r.lines_sum_cents != null
+            ? r.lines_sum_cents
+            : (Array.isArray(r.lines) ? r.lines.reduce((a, l) => a + (l.amount_cents || 0), 0) : null);
+          return {
+            ...r,
+            total: r.total_cents != null ? r.total_cents / 100 : null,
+            lines_sum: sum != null ? sum / 100 : null,
+            // False = the lines we read don't add up to the printed total, so the
+            // missing list can't be trusted until a human looks.
+            ties_out: r.total_cents == null || sum == null
+              || Math.abs(sum - r.total_cents) <= Math.max(5000, Math.round(r.total_cents * 0.02)),
+          };
+        }),
       });
     } catch (e) { fail(res, e); }
   });
