@@ -1,5 +1,5 @@
 // Vendor-invoice extraction + RO matching + reconciliation (parts recon v1b).
-const { fetchOrderService, fetchOrderByNumber, fetchRecentInvoicedOrders } = require('./shopmonkey');
+const { fetchOrderService, fetchOrderByNumber, fetchRecentInvoicedOrders, fetchRecentOrders } = require('./shopmonkey');
 
 const digits = (s) => String(s || '').replace(/\D/g, '');
 const dollarsToCents = (v) => (v == null ? null : Math.round(Number(v) * 100));
@@ -143,24 +143,42 @@ async function matchInvoiceToRo(apiKey, smLocationId, { ro_ref, invoice_date }) 
   const invDate = invoice_date ? new Date(invoice_date + 'T12:00:00Z') : new Date();
   const retry = async (fn) => { let e; for (let a = 0; a < 3; a++) { try { return await fn(); } catch (x) { e = x; await new Promise((r) => setTimeout(r, 500 * (a + 1))); } } throw e; };
 
-  // Full RO number → exact lookup (1 cheap call). Last-4/partial → the most
-  // recent invoiced orders (single page, not a full sweep) filtered by suffix.
+  // Full RO number → exact lookup (1 cheap call). Short "PO" (the last-N digits
+  // the shop writes, e.g. 0549 for RO 10600549) → reconstruct the full number by
+  // borrowing the constant prefix from a sample order and look it up EXACTLY.
+  // Exact lookup finds OPEN estimates too (a parts invoice usually arrives before
+  // the RO is invoiced) and dodges the list endpoint's flakiness. Suffix-scan is
+  // only a fallback for oddballs.
   let exact = [], pool = [];
   try {
     if (ref.length >= 7) {
       exact = await retry(() => fetchOrderByNumber(apiKey, smLocationId, ref));
       pool = exact;
     } else {
-      const recent = await retry(() => fetchRecentInvoicedOrders(apiKey, smLocationId, 200));
-      const last4 = ref.slice(-4);
-      exact = recent.filter((o) => digits(o.number) === ref);
-      pool = exact.length ? exact : recent.filter((o) => digits(o.number).endsWith(last4));
+      // Learn the RO-number prefix from INVOICED orders — they always carry a
+      // clean fixed-width number (10600549). (The all-status list is mostly
+      // negative junk numbers from unsaved draft estimates, useless for this.)
+      const sample = await retry(() => fetchRecentInvoicedOrders(apiKey, smLocationId, 100));
+      const reals = sample.filter((o) => Number(o.number) > 0).map((o) => digits(o.number)).filter((dn) => dn.length > ref.length);
+      const fulls = [...new Set(reals.map((dn) => dn.slice(0, dn.length - ref.length) + ref))].slice(0, 4);
+      for (const full of fulls) {   // prefix + PO → full RO number, look up exactly
+        const hit = await retry(() => fetchOrderByNumber(apiKey, smLocationId, full));
+        if (hit.length) { exact = hit; pool = hit; break; }
+      }
+      if (!pool.length) {   // fallback: suffix-scan recent orders (real numbers only)
+        const recent = await retry(() => fetchRecentOrders(apiKey, smLocationId, 400));
+        const last4 = ref.slice(-4);
+        const real = recent.filter((o) => Number(o.number) > 0);
+        exact = real.filter((o) => digits(o.number) === ref);
+        pool = exact.length ? exact : real.filter((o) => digits(o.number).endsWith(last4));
+      }
     }
   } catch (e) { return { status: 'unmatched', candidates: [], error: e.message }; }
   if (!pool.length) return { status: 'unmatched', candidates: [] };
   const scored = pool.map((o) => {
-    const od = o.invoicedDate ? new Date(o.invoicedDate).getTime() : 0;
-    return { order_id: o.id, order_number: String(o.number), invoiced_date: o.invoicedDate, day_gap: Math.round(Math.abs(od - invDate.getTime()) / 86400000) };
+    const dstr = o.invoicedDate && o.invoicedDate !== 'empty' ? o.invoicedDate : o.createdDate;
+    const od = dstr ? new Date(dstr).getTime() : 0;
+    return { order_id: o.id, order_number: String(o.number), invoiced: !!o.invoiced, invoiced_date: o.invoicedDate, day_gap: Math.round(Math.abs(od - invDate.getTime()) / 86400000) };
   }).sort((a, b) => a.day_gap - b.day_gap);
   if (exact.length === 1) return { status: 'matched', order: scored[0], candidates: scored.slice(0, 5) };
   const clear = scored.length === 1 || (scored[0].day_gap <= 30 && (scored.length < 2 || scored[1].day_gap - scored[0].day_gap >= 14));

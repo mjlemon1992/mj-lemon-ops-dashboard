@@ -155,10 +155,14 @@ module.exports = (pool) => {
   // Match + reconcile an extracted invoice, then upsert it.
   const processInvoice = async (locId, smLoc, apiKey, ex, source) => {
     const m = await matchInvoiceToRo(apiKey, smLoc, { ro_ref: ex.ro_ref, invoice_date: ex.invoice_date });
-    let roCost = null, orderId = null, orderNum = null;
-    if (m.status === 'matched' && m.order) { orderId = m.order.order_id; orderNum = m.order.order_number; try { roCost = await roPartsCostCents(apiKey, orderId); } catch { /* leave null */ } }
+    let roCost = null, orderId = null, orderNum = null, orderOpen = false;
+    if (m.status === 'matched' && m.order) { orderId = m.order.order_id; orderNum = m.order.order_number; orderOpen = m.order.invoiced === false; try { roCost = await roPartsCostCents(apiKey, orderId); } catch { /* leave null */ } }
     const paid = ex.subtotal_cents != null ? ex.subtotal_cents : ex.total_cents;
-    const rec = reconcile(orderId ? paid : null, roCost);
+    // An open estimate isn't billed out yet — matching it is right, but flagging
+    // "unbilled" would be a false alarm until the RO is invoiced.
+    const rec = orderOpen
+      ? { status: 'pending', note: `Matched RO ${orderNum} — still an open estimate; parts aren't billed out yet. Rechecks when it's invoiced.` }
+      : reconcile(orderId ? paid : null, roCost);
     const { rows } = await pool.query(
       `INSERT INTO vendor_invoice (location_id, vendor, invoice_number, invoice_date, total_cents, subtotal_cents, ro_ref, matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents, recon_status, recon_note, line_items, source, raw_extract)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
@@ -425,9 +429,11 @@ module.exports = (pool) => {
       const apiKey = process.env.SHOPMONKEY_API_KEY;
       const ref = (req.body || {}).ro_ref != null ? String(req.body.ro_ref).trim() : inv.ro_ref;
       const m = await matchInvoiceToRo(apiKey, smLoc, { ro_ref: ref, invoice_date: inv.invoice_date });
-      let roCost = null, orderId = null, orderNum = null;
-      if (m.status === 'matched' && m.order) { orderId = m.order.order_id; orderNum = m.order.order_number; try { roCost = await roPartsCostCents(apiKey, orderId); } catch { /* null */ } }
-      const rec = reconcile(orderId ? paidCentsOf(inv) : null, roCost);
+      let roCost = null, orderId = null, orderNum = null, orderOpen = false;
+      if (m.status === 'matched' && m.order) { orderId = m.order.order_id; orderNum = m.order.order_number; orderOpen = m.order.invoiced === false; try { roCost = await roPartsCostCents(apiKey, orderId); } catch { /* null */ } }
+      const rec = orderOpen
+        ? { status: 'pending', note: `Matched RO ${orderNum} — still an open estimate; parts aren't billed out yet. Rechecks when it's invoiced.` }
+        : reconcile(orderId ? paidCentsOf(inv) : null, roCost);
       await pool.query('UPDATE vendor_invoice SET ro_ref=$2, matched_order_id=$3, matched_order_number=$4, match_status=$5, match_candidates=$6, ro_parts_cost_cents=$7, recon_status=$8, recon_note=$9 WHERE id=$1',
         [inv.id, ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, rec.status, rec.note]);
       res.json({ ok: true, match_status: m.status, matched_order_number: orderNum, candidates: m.candidates, recon_status: rec.status });
