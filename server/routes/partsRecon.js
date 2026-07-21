@@ -638,8 +638,14 @@ module.exports = (pool) => {
                 (file_data IS NOT NULL) AS has_file, file_mime,
                 EXISTS (SELECT 1 FROM warranty_claim w WHERE w.invoice_id = vendor_invoice.id) AS warranty
            FROM vendor_invoice WHERE location_id=$1 ORDER BY created_at DESC LIMIT 200`, [req.params.locationId]);
+      // Records are never purged — the statement check matches against every
+      // invoice ever captured, so deleting old ones would make them read as
+      // MISSING on a later statement. Only the list is capped; report the true
+      // total so "All" can't quietly pretend it's showing everything.
+      const { rows: cnt } = await pool.query('SELECT COUNT(*)::int AS n FROM vendor_invoice WHERE location_id=$1', [req.params.locationId]);
       const base = ORDER_URL;
       res.json({
+        total_count: cnt[0].n,
         invoices: rows.map((r) => ({
           ...r,
           total: r.total_cents != null ? r.total_cents / 100 : null,

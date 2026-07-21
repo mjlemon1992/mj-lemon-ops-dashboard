@@ -320,7 +320,7 @@ function InvoicesView({ locId }) {
 
       {!!(data.invoices || []).length && (
         <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
-          {[['attention', `Needs attention (${(data.invoices || []).filter(needsAttention).length})`], ['all', `All (${(data.invoices || []).length})`]].map(([k, l]) => (
+          {[['attention', `Needs attention (${(data.invoices || []).filter(needsAttention).length})`], ['all', `All (${(data.invoices || []).length}${data.total_count > (data.invoices || []).length ? ` of ${data.total_count}` : ''})`]].map(([k, l]) => (
             <button key={k} onClick={() => setShow(k)} className={show === k ? 'primary' : ''} style={{ fontSize: '12px', padding: '5px 12px' }}>{l}</button>
           ))}
         </div>
