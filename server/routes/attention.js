@@ -2,6 +2,7 @@ const express = require('express');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const { ensureTimeClockTables } = require('../lib/timeClockSchema');
 const { ensureBonusFuelTables } = require('../lib/bonusFuelSchema');
+const { ensurePartsReconTables } = require('../lib/partsReconSchema');
 
 // "Waiting on you" — one call that gathers every queue a human has to clear:
 // pending time-off requests, punch change requests, unassigned fuel purchases.
@@ -14,7 +15,7 @@ module.exports = (pool) => {
   // DDL once per process, not per request.
   let ensured = null;
   const ensureOnce = () => {
-    if (!ensured) ensured = Promise.all([ensureTimeClockTables(pool), ensureBonusFuelTables(pool)]).catch((e) => { ensured = null; throw e; });
+    if (!ensured) ensured = Promise.all([ensureTimeClockTables(pool), ensureBonusFuelTables(pool), ensurePartsReconTables(pool)]).catch((e) => { ensured = null; throw e; });
     return ensured;
   };
 
@@ -102,6 +103,45 @@ module.exports = (pool) => {
             WHERE f.location_id = ANY($1) AND f.status = 'answered' ORDER BY f.work_date`, [ids]),
       ]);
 
+      // Parts reconciliation queue — owner/partner only (the Parts page is).
+      // Deliberately NARROW so the rail stays trustworthy: an invoice that needs
+      // a human to match it, one where we paid more than the WO shows, or one
+      // with a proven cost problem. 'variance' (WO cost exceeds invoices in hand)
+      // is left out — that's the month-end statement's job, not a daily nag.
+      const parts = [];
+      if (['owner', 'partner'].includes(req.user.role)) {
+        const [flagged, stmts] = await Promise.all([
+          pool.query(
+            `SELECT id, location_id, vendor, matched_order_number, match_status, recon_status,
+                    COALESCE(jsonb_array_length(line_findings), 0) AS findings
+               FROM vendor_invoice
+              WHERE location_id = ANY($1)
+                AND (match_status IN ('unmatched', 'ambiguous')
+                     OR recon_status = 'underlogged'
+                     OR COALESCE(jsonb_array_length(line_findings), 0) > 0)
+              ORDER BY created_at DESC LIMIT 50`, [ids]),
+          pool.query(
+            `SELECT id, location_id, vendor, missing_count FROM vendor_statement
+              WHERE location_id = ANY($1) AND missing_count > 0
+              ORDER BY created_at DESC LIMIT 20`, [ids]),
+        ]);
+        for (const r of flagged.rows) {
+          const who = r.vendor || 'Invoice';
+          const text = ['unmatched', 'ambiguous'].includes(r.match_status)
+            ? `${who} — needs matching to an RO`
+            : r.recon_status === 'underlogged'
+              ? `${who} — paid more than RO ${r.matched_order_number || ''} shows`.trim()
+              : `${who} — ${r.findings} cost issue${r.findings === 1 ? '' : 's'} on RO ${r.matched_order_number || ''}`.trim();
+          parts.push({ id: r.id, location_id: r.location_id, location_name: nameOf[r.location_id], kind: 'invoice', text });
+        }
+        for (const s of stmts.rows) {
+          parts.push({
+            id: s.id, location_id: s.location_id, location_name: nameOf[s.location_id], kind: 'statement',
+            text: `${s.vendor || 'Statement'} — ${s.missing_count} invoice${s.missing_count === 1 ? '' : 's'} missing`,
+          });
+        }
+      }
+
       // Bonus prompt: previous month with no approved (unsuperseded) run.
       const bonus = [];
       if (bonusRuns.rows) {
@@ -130,6 +170,7 @@ module.exports = (pool) => {
       push(Object.fromEntries(fuel.rows.map((r) => [r.location_id, r.n])), 'fuel', 'unassigned fuel purchase', '/fuel-card');
       push(countByLoc(reorders.rows), 'reorder', 'stock re-order', '/time-clock');
       push(countByLoc(clockq.rows), 'clockq', 'clock question', '/time-clock');
+      push(countByLoc(parts), 'parts', 'parts invoice to review', '/parts');
 
       // Time-off amounts to HOURS (QuickBooks unit): working_days × per-day hours.
       const { openDaySet } = require('../lib/workdays');
@@ -153,6 +194,7 @@ module.exports = (pool) => {
           reorders: reorders.rows.map(withName),
           clockq: clockq.rows.map(withName),
           bonus,
+          parts,
         },
       });
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
