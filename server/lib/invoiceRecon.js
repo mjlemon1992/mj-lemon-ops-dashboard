@@ -106,7 +106,10 @@ async function extractStatement(fileBase64, mediaType) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers,
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6', max_tokens: 8000,
+      // A statement line costs ~35 output tokens, so 8k capped out around 230
+      // documents — a busy month at one supplier. 32k carries ~900, well past a
+      // 600-invoice month, and the tie-out check still catches any truncation.
+      model: 'claude-sonnet-4-6', max_tokens: 32000,
       tool_choice: { type: 'tool', name: 'record_statement' }, tools: [tool],
       messages: [{ role: 'user', content: [block, { type: 'text', text: 'This is a monthly account statement from a parts supplier. List every document it shows: invoices/charges (positive amounts) AND credit memos / returns / RMAs (NEGATIVE amounts). Credits matter as much as invoices — include them, and keep their sign negative; never convert a credit to a positive charge. Skip only payments/remittances, discounts taken, finance charges and balance-forward rows. Mark each row type as "invoice" or "credit". Your listed amounts should add up to the statement grand total, which you should also report exactly as printed.' }] }],
     }),
