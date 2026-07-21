@@ -256,13 +256,32 @@ function reconcileJob(paidCents, woCostCents, orderInvoiced) {
   return { status: 'ok', note: `Supplier invoices ${d(paidCents)} ≈ ${d(woCostCents)} of parts cost on the WO.` };
 }
 
+// A shop's RO-number format never changes, but learning it costs a 100-order
+// fetch. Cache one representative real number per digit-width, per location:
+// without this every invoice in a batch re-fetched it and tripped ShopMonkey's
+// rate limit (429), so the same PO matched on one invoice and not the next.
+const _numFormatCache = new Map();   // smLocationId -> { reps: ['10600549'], at }
+const NUM_FORMAT_TTL = 6 * 60 * 60 * 1000;
+
 // Match an invoice to its RO by the ref stamped on it: full RO number = exact,
 // else last-4 disambiguated by invoice-date proximity. Scoped to the shop.
 async function matchInvoiceToRo(apiKey, smLocationId, { ro_ref, invoice_date }) {
   const ref = digits(ro_ref);
   if (!ref) return { status: 'unmatched', candidates: [] };
   const invDate = invoice_date ? new Date(invoice_date + 'T12:00:00Z') : new Date();
-  const retry = async (fn) => { let e; for (let a = 0; a < 3; a++) { try { return await fn(); } catch (x) { e = x; await new Promise((r) => setTimeout(r, 500 * (a + 1))); } } throw e; };
+  // Back off much harder on a 429 — ShopMonkey rate-limits hard when a batch of
+  // invoices matches back-to-back alongside the metrics scheduler.
+  const retry = async (fn) => {
+    let e;
+    for (let a = 0; a < 4; a++) {
+      try { return await fn(); } catch (x) {
+        e = x;
+        const limited = /\b429\b|rate.?limit/i.test(String(x.message || ''));
+        await new Promise((r) => setTimeout(r, (limited ? 2500 : 500) * (a + 1)));
+      }
+    }
+    throw e;
+  };
 
   // Full RO number → exact lookup (1 cheap call). Short "PO" (the last-N digits
   // the shop writes, e.g. 0549 for RO 10600549) → reconstruct the full number by
@@ -276,12 +295,24 @@ async function matchInvoiceToRo(apiKey, smLocationId, { ro_ref, invoice_date }) 
       exact = await retry(() => fetchOrderByNumber(apiKey, smLocationId, ref));
       pool = exact;
     } else {
-      // Learn the RO-number prefix from INVOICED orders — they always carry a
+      // Learn the RO-number format from INVOICED orders — they always carry a
       // clean fixed-width number (10600549). (The all-status list is mostly
       // negative junk numbers from unsaved draft estimates, useless for this.)
-      const sample = await retry(() => fetchRecentInvoicedOrders(apiKey, smLocationId, 100));
-      const reals = sample.filter((o) => Number(o.number) > 0).map((o) => digits(o.number)).filter((dn) => dn.length > ref.length);
-      const fulls = [...new Set(reals.map((dn) => dn.slice(0, dn.length - ref.length) + ref))].slice(0, 4);
+      // Cached per location so a batch of invoices doesn't re-fetch it each time.
+      const cached = _numFormatCache.get(smLocationId);
+      let reps = cached && Date.now() - cached.at < NUM_FORMAT_TTL ? cached.reps : null;
+      if (!reps) {
+        const sample = await retry(() => fetchRecentInvoicedOrders(apiKey, smLocationId, 100));
+        const byWidth = new Map();
+        for (const o of sample) {
+          if (!(Number(o.number) > 0)) continue;
+          const dn = digits(o.number);
+          if (dn && !byWidth.has(dn.length)) byWidth.set(dn.length, dn);
+        }
+        reps = [...byWidth.values()];
+        if (reps.length) _numFormatCache.set(smLocationId, { reps, at: Date.now() });
+      }
+      const fulls = [...new Set(reps.filter((dn) => dn.length > ref.length).map((dn) => dn.slice(0, dn.length - ref.length) + ref))].slice(0, 4);
       for (const full of fulls) {   // prefix + PO → full RO number, look up exactly
         const hit = await retry(() => fetchOrderByNumber(apiKey, smLocationId, full));
         if (hit.length) { exact = hit; pool = hit; break; }
