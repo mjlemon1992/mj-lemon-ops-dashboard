@@ -153,9 +153,12 @@ async function woParts(apiKey, orderId) {
 // Placeholder part numbers the shop types when there isn't a real one — never
 // force a match on these, or every generic line false-flags.
 const GENERIC_PART = new Set(['NPN', 'MISC', 'NA', 'N', 'NONE', 'TBD', 'VARIOUS', 'SHOP', 'FREIGHT', '']);
-// Below this a line isn't worth raising — $0.00 shipping & handling and other
-// no-charge lines cost nothing, so they can't be unbilled money.
-const MIN_FLAG_CENTS = 5;
+// Anything under $5 is never raised. Covers $0.00 shipping & handling and the
+// small ancillary fees (environmental/eco, handling) that aren't worth chasing —
+// ShopMonkey now adds the environmental fee to the RO automatically, so those are
+// handled on the billing side anyway. Applies to both a line's total and to a
+// cost difference: under five dollars isn't a finding.
+const MIN_FLAG_CENTS = 500;
 // Compare EXTENDED (line-total) costs, never unit-vs-unit: the invoice may price
 // per-unit over a qty while the WO carries the lot as one line (or vice versa).
 // Extended-vs-extended is apples-to-apples however each side splits it.
@@ -196,10 +199,9 @@ function lineCheck(lineItems, parts, orderClosed) {
   const out = [];
   for (const li of (lineItems || [])) {
     const inv = lineExtCents(li);
-    // A no-charge line — $0.00 shipping & handling, freebies, no-charge items —
-    // can't be a leak: nothing was paid, so there's nothing to chase. Only a real
-    // charge (above MIN_FLAG_CENTS) is ever worth raising.
-    if (inv != null && inv <= MIN_FLAG_CENTS) continue;
+    // Under $5 is never worth raising — $0.00 shipping & handling, eco/handling
+    // fees, freebies. Not enough money to chase.
+    if (inv != null && inv < MIN_FLAG_CENTS) continue;
     const n = normPart(li.part_number);
     // 1) real part number on both sides → the cost has to be right.
     // Skip if that WO part is already claimed: invoices repeat a part number on
@@ -212,7 +214,7 @@ function lineCheck(lineItems, parts, orderClosed) {
       const woExt = partExtCents(p);
       if (inv != null && woExt) {
         const diff = inv - woExt;
-        const tol = Math.max(200, Math.round(woExt * 0.05));
+        const tol = Math.max(MIN_FLAG_CENTS, Math.round(woExt * 0.05));   // a sub-$5 cost difference isn't a finding either
         if (Math.abs(diff) > tol) out.push({ part_number: li.part_number, status: 'cost_off', invoice_cost_cents: inv, wo_cost_cents: woExt, diff_cents: diff });
       }
       continue;
