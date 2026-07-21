@@ -171,7 +171,10 @@ module.exports = (pool) => {
   };
 
   // Match an extracted invoice, upsert it, then reconcile the whole job.
-  const processInvoice = async (locId, smLoc, apiKey, ex, source) => {
+  // fileBase64/fileMime (when it came from a scan/upload) are kept so the owner
+  // can pull the original up to eyeball a match.
+  const processInvoice = async (locId, smLoc, apiKey, ex, source, fileBase64 = null, fileMime = null) => {
+    const fileBuf = fileBase64 ? Buffer.from(fileBase64, 'base64') : null;
     const m = await matchInvoiceToRo(apiKey, smLoc, { ro_ref: ex.ro_ref, invoice_date: ex.invoice_date });
     let orderId = null, orderNum = null, orderInvoiced = null, wo = null;
     if (m.status === 'matched' && m.order) {
@@ -182,15 +185,16 @@ module.exports = (pool) => {
     // Bonus precision: only where a real part number matches on both sides.
     const findings = wo ? lineCheck(ex.line_items, wo.parts, orderInvoiced === true) : [];
     const { rows } = await pool.query(
-      `INSERT INTO vendor_invoice (location_id, vendor, invoice_number, invoice_date, total_cents, subtotal_cents, ro_ref, matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents, recon_status, recon_note, line_items, source, raw_extract, line_findings)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+      `INSERT INTO vendor_invoice (location_id, vendor, invoice_number, invoice_date, total_cents, subtotal_cents, ro_ref, matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents, recon_status, recon_note, line_items, source, raw_extract, line_findings, file_data, file_mime)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (location_id, COALESCE(vendor,''), COALESCE(invoice_number,''), COALESCE(total_cents,0))
        DO UPDATE SET invoice_date=EXCLUDED.invoice_date, subtotal_cents=EXCLUDED.subtotal_cents, ro_ref=EXCLUDED.ro_ref,
          matched_order_id=EXCLUDED.matched_order_id, matched_order_number=EXCLUDED.matched_order_number, match_status=EXCLUDED.match_status,
          match_candidates=EXCLUDED.match_candidates, ro_parts_cost_cents=EXCLUDED.ro_parts_cost_cents, recon_status=EXCLUDED.recon_status,
-         recon_note=EXCLUDED.recon_note, line_items=EXCLUDED.line_items, line_findings=EXCLUDED.line_findings
+         recon_note=EXCLUDED.recon_note, line_items=EXCLUDED.line_items, line_findings=EXCLUDED.line_findings,
+         file_data=COALESCE(EXCLUDED.file_data, vendor_invoice.file_data), file_mime=COALESCE(EXCLUDED.file_mime, vendor_invoice.file_mime)
        RETURNING id`,
-      [locId, ex.vendor, ex.invoice_number, ex.invoice_date, ex.total_cents, ex.subtotal_cents, ex.ro_ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, 'pending', 'Reconciling…', JSON.stringify(ex.line_items || []), source, JSON.stringify(ex.raw || ex), JSON.stringify(findings)]);
+      [locId, ex.vendor, ex.invoice_number, ex.invoice_date, ex.total_cents, ex.subtotal_cents, ex.ro_ref, orderId, orderNum, m.status, JSON.stringify(m.candidates || []), roCost, 'pending', 'Reconciling…', JSON.stringify(ex.line_items || []), source, JSON.stringify(ex.raw || ex), JSON.stringify(findings), fileBuf, fileMime]);
     const id = rows[0].id;
     let rec = { status: 'pending', note: 'Not matched to a work order yet.' }, jobPaid = null;
     if (orderId) ({ rec, jobPaid } = await rollUpJob(locId, orderId, roCost, orderInvoiced));
@@ -372,7 +376,7 @@ module.exports = (pool) => {
       }
       // Looked like a statement but nothing parsed — fall back to invoice.
     }
-    const out = await processInvoice(locationId, smLoc, apiKey, ex, source);
+    const out = await processInvoice(locationId, smLoc, apiKey, ex, source, fileBase64, mediaType);
     return { type: 'invoice', extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out };
   };
 
@@ -422,7 +426,8 @@ module.exports = (pool) => {
       const { rows } = await pool.query(
         `SELECT id, vendor, invoice_number, invoice_date::text AS invoice_date, total_cents, subtotal_cents, ro_ref,
                 matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents,
-                recon_status, recon_note, source, created_at, job_paid_cents, line_findings
+                recon_status, recon_note, source, created_at, job_paid_cents, line_findings,
+                (file_data IS NOT NULL) AS has_file, file_mime
            FROM vendor_invoice WHERE location_id=$1 ORDER BY created_at DESC LIMIT 200`, [req.params.locationId]);
       const base = ORDER_URL;
       res.json({
@@ -465,6 +470,24 @@ module.exports = (pool) => {
       if (orderId) ({ rec } = await rollUpJob(inv.location_id, orderId, roCost, orderInvoiced));
       else await pool.query('UPDATE vendor_invoice SET recon_status=$2, recon_note=$3 WHERE id=$1', [inv.id, rec.status, rec.note]);
       res.json({ ok: true, match_status: m.status, matched_order_number: orderNum, candidates: m.candidates, recon_status: rec.status, recon_note: rec.note, line_findings: findings });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Quick view: the original scan/PDF, so the owner can eyeball an invoice when
+  // confirming a match. Auth'd + location-scoped; streamed, not inlined in the list.
+  router.get('/invoice/:id/file', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      await ensurePartsReconTables(pool);
+      const { rows } = await pool.query('SELECT location_id, file_data, file_mime, vendor, invoice_number FROM vendor_invoice WHERE id=$1', [req.params.id]);
+      if (!rows.length) return fail(res, 'Invoice not found', 404);
+      const r = rows[0];
+      if (!canAccessLocation(req.user, r.location_id)) return fail(res, 'Access denied for this location', 403);
+      if (!r.file_data) return fail(res, 'No scan stored for this invoice (it predates file storage, or came in as structured data).', 404);
+      const name = `${(r.vendor || 'invoice').replace(/[^\w-]+/g, '-')}-${r.invoice_number || ''}`.replace(/-+$/, '');
+      res.setHeader('Content-Type', r.file_mime || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${name}"`);
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.send(r.file_data);
     } catch (e) { fail(res, e); }
   });
 

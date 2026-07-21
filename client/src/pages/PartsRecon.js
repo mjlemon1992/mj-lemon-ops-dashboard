@@ -171,7 +171,8 @@ const RECON = {
 const MATCH_COLOR = { matched: 'var(--success)', confirmed: 'var(--success)', ambiguous: 'var(--warning)', unmatched: 'var(--danger)', pending: 'var(--text3)' };
 
 function InvoicesView({ locId }) {
-  const { api } = useAuth();
+  const { api, token } = useAuth();
+  const [preview, setPreview] = useState(null);   // { url, vendor } for the image lightbox
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -214,6 +215,19 @@ function InvoicesView({ locId }) {
     if (!await askConfirm({ title: 'Remove invoice', body: `Remove ${inv.vendor || 'invoice'} ${inv.invoice_number || ''}?`, danger: true, confirmLabel: 'Remove' })) return;
     try { await api(`/parts/invoice/${inv.id}`, { method: 'DELETE' }); load(); } catch (e) { showToast(e.message, 'error'); }
   };
+  // Quick view of the original scan so you can eyeball it while matching.
+  // Fetched with the auth header, so it can't be a plain <img src>.
+  const viewFile = async (inv) => {
+    try {
+      const r = await fetch(`/api/parts/invoice/${inv.id}/file`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Could not open the scan'); }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      if (/pdf/i.test(blob.type)) { window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+      else setPreview({ url, vendor: `${inv.vendor || 'Invoice'} ${inv.invoice_number || ''}`.trim() });
+    } catch (e) { showToast(e.message, 'error'); }
+  };
+  const closePreview = () => { if (preview) URL.revokeObjectURL(preview.url); setPreview(null); };
   const [scanning, setScanning] = useState(false);
   const scanNow = async () => {
     setScanning(true);
@@ -263,6 +277,7 @@ function InvoicesView({ locId }) {
             </div>
             <div style={{ fontSize: '11px', fontWeight: 700, color: rs.c, minWidth: '130px', textAlign: 'right' }}>{rs.t}</div>
             <div style={{ display: 'flex', gap: '6px' }}>
+              {inv.has_file && <button onClick={() => viewFile(inv)} title="Look at the original scan" style={{ fontSize: '11px', padding: '4px 10px' }}>🔍 View</button>}
               <button onClick={() => pickMatch(inv)} style={{ fontSize: '11px', padding: '4px 10px' }}>{inv.matched_order_number ? 'Re-match' : 'Match RO'}</button>
               <button onClick={() => del(inv)} title="Remove" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>✕</button>
             </div>
@@ -288,6 +303,18 @@ function InvoicesView({ locId }) {
       })}
 
       <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
+        {preview && (
+          <div onClick={closePreview} role="presentation"
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', zIndex: 3000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', cursor: 'zoom-out' }}>
+            <div style={{ color: '#fff', fontSize: '13px', marginBottom: '10px', display: 'flex', gap: '14px', alignItems: 'center' }}>
+              <span>{preview.vendor}</span>
+              <a href={preview.url} download onClick={(e) => e.stopPropagation()} style={{ color: 'var(--accent)', textDecoration: 'none' }}>⬇ Download</a>
+              <button onClick={closePreview} style={{ fontSize: '12px', padding: '3px 10px' }}>Close</button>
+            </div>
+            <img src={preview.url} alt="Supplier invoice" onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: '95vw', maxHeight: '85vh', objectFit: 'contain', background: '#fff', borderRadius: 8, cursor: 'default' }} />
+          </div>
+        )}
         Nothing is flagged until the work order is <b>complete/invoiced</b>. Then each invoice is checked line by line — every part on it must be attached to the WO at the right cost (matched by part number, or by cost where the WO line is generic like <i>npn</i>/<i>MISC</i>). <b>Possible unbilled</b> = the job's invoices total more than the parts cost on the WO. <b>Invoice may be missing</b> = the WO shows more parts cost than the invoices in hand — the <b>Statements</b> tab confirms which invoice is missing. <b>Job open</b> = still collecting invoices.
       </div>
     </div>
