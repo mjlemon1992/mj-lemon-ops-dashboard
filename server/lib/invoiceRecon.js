@@ -154,9 +154,14 @@ async function woParts(apiKey, orderId) {
 const GENERIC_PART = new Set(['NPN', 'MISC', 'NA', 'N', 'NONE', 'TBD', 'VARIOUS', 'SHOP', 'FREIGHT', '']);
 const normPart = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-// BEST-EFFORT per-line cost check: only for invoice lines whose part number
-// cleanly matches a real (non-generic) part number on the WO. Reports problems
-// only — silence means nothing suspicious was provable.
+// BEST-EFFORT per-line COST check. Only fires when the same real part number
+// appears on BOTH the invoice and the WO — then a cost difference is provable.
+//
+// Deliberately does NOT flag "invoice part isn't on the WO": the shop enters
+// most WO parts generically (npn / MISC / blank), so an unmatched part number
+// usually means "listed under a generic name", not "missing". Verified against
+// real data — invoice S277201BK $189 is on the WO as "bearing kit / npn / $189".
+// That gap is the job-total roll-up's job, not a per-line guess.
 function lineCostCheck(lineItems, parts) {
   const byNum = new Map();
   for (const p of parts || []) {
@@ -168,7 +173,7 @@ function lineCostCheck(lineItems, parts) {
     const n = normPart(li.part_number);
     if (!n || GENERIC_PART.has(n)) continue;              // generic → skip, never guess
     const p = byNum.get(n);
-    if (!p) { out.push({ part_number: li.part_number, status: 'not_on_wo', invoice_cost_cents: li.unit_cost != null ? Math.round(Number(li.unit_cost) * 100) : null }); continue; }
+    if (!p) continue;                                     // not on the WO by number → unprovable, stay quiet
     const inv = li.unit_cost != null ? Math.round(Number(li.unit_cost) * 100) : null;
     if (inv == null || !p.wholesaleCostCents) continue;   // can't compare → stay quiet
     const diff = inv - p.wholesaleCostCents;

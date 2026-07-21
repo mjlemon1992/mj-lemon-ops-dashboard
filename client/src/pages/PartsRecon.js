@@ -276,9 +276,7 @@ function InvoicesView({ locId }) {
               <div style={{ flexBasis: '100%', fontSize: '11px', color: 'var(--warning)' }}>
                 {(inv.line_findings || []).map((f, i) => (
                   <div key={i}>
-                    {f.status === 'cost_off'
-                      ? <>Part {f.part_number}: invoice {money(f.invoice_cost_cents / 100)} vs {money(f.wo_cost_cents / 100)} on the WO ({f.diff_cents > 0 ? '+' : ''}{money(f.diff_cents / 100)})</>
-                      : <>Part {f.part_number}: on this invoice but not on the WO</>}
+                    Part {f.part_number}: invoice {money(f.invoice_cost_cents / 100)} vs {money(f.wo_cost_cents / 100)} on the WO ({f.diff_cents > 0 ? '+' : ''}{money(f.diff_cents / 100)})
                   </div>
                 ))}
               </div>
