@@ -292,7 +292,7 @@ function InvoicesView({ locId }) {
     setScanning(true);
     try {
       const out = await api(`/parts/${locId}/scan-inbox`, { method: 'POST', body: JSON.stringify({}) });
-      showToast(out.processed ? `Filed ${out.processed} document${out.processed === 1 ? '' : 's'} from email (invoices + statements)` : 'No new documents in the inbox');
+      showToast(out.processed ? `Filed ${out.processed} document${out.processed === 1 ? '' : 's'} from email${out.more ? ' — more waiting, tap again' : ''}` : 'No new documents in the inbox');
       load();
     } catch (e) { showToast(e.message, 'error'); }
     setScanning(false);

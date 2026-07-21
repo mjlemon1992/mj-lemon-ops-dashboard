@@ -305,12 +305,24 @@ module.exports = (pool) => {
     if (!smLoc) return { ok: false, error: 'Location not connected to Shopmonkey', processed: 0, results: [] };
     const apiKey = process.env.SHOPMONKEY_API_KEY;
 
-    const inbox = await fetchInvoiceEmails({ user, pass, subjectTag: tag });
+    // PACING. Each document costs a Claude read plus 1-2 ShopMonkey lookups, and
+    // ShopMonkey rate-limits hard when a burst lands alongside the metrics
+    // scheduler (a throttled lookup silently returns "unmatched", so a burst
+    // doesn't just run slow — it files invoices with wrong answers). So take a
+    // bounded slice per run and breathe between documents. Anything left stays
+    // UNREAD and the next cycle picks it up, which turns a 200-file month-end
+    // catch-up into several calm passes instead of one throttled mess.
+    const MAX_PER_RUN = Math.max(1, Number(process.env.PARTS_INBOX_MAX_PER_RUN || 15));
+    const PACE_MS = Math.max(0, Number(process.env.PARTS_INBOX_PACE_MS || 1200));
+    const inbox = await fetchInvoiceEmails({ user, pass, subjectTag: tag, max: MAX_PER_RUN });
     if (!inbox.ok) return { ok: false, error: inbox.error, processed: 0, results: [] };
     await ensurePartsReconTables(pool);
     const results = [];
     const doneUids = [];
+    let first = true;
     for (const msg of inbox.messages) {
+      if (!first) await sleep(PACE_MS);
+      first = false;
       let ok = false;
       for (const att of msg.attachments) {
         try {
@@ -328,7 +340,10 @@ module.exports = (pool) => {
       if (ok) doneUids.push(msg.uid);   // only mark read if at least one attachment filed
     }
     if (doneUids.length) { try { await markSeen({ user, pass, uids: doneUids }); } catch (e) { /* leave unread to retry */ } }
-    return { ok: true, scanned: inbox.messages.length, processed: results.filter((r) => !r.error).length, results };
+    // Hitting the cap means more is very likely waiting — say so rather than
+    // letting a partial pass look like "the inbox is empty now".
+    const more = inbox.messages.length >= MAX_PER_RUN;
+    return { ok: true, scanned: inbox.messages.length, processed: results.filter((r) => !r.error).length, more, results };
   };
 
   // Manual "Scan inbox now" (owner/partner via JWT, or the automation's X-Sync-Key).
@@ -771,9 +786,16 @@ module.exports = (pool) => {
       running = true;
       try {
         for (const loc of pollLocations()) {
-          const r = await scanInboxInto(loc);
-          if (r && r.ok && r.processed) console.log(`[parts-inbox] filed ${r.processed} scanned invoice(s) into ${loc}`);
-          else if (r && !r.ok) console.warn(`[parts-inbox] ${loc}:`, r.error);
+          // Drain a backlog across several paced passes rather than trickling one
+          // capped batch per interval — a month-end dump still clears in minutes,
+          // without ever hammering ShopMonkey.
+          for (let pass = 0; pass < 8; pass++) {
+            const r = await scanInboxInto(loc);
+            if (!r || !r.ok) { if (r) console.warn(`[parts-inbox] ${loc}:`, r.error); break; }
+            if (r.processed) console.log(`[parts-inbox] filed ${r.processed} document(s) into ${loc}${r.more ? ' — more waiting' : ''}`);
+            if (!r.more || !r.scanned) break;
+            await sleep(15000);
+          }
         }
       } catch (e) { console.error('[parts-inbox] poll error:', e.message); }
       finally { running = false; }
