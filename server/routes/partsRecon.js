@@ -342,7 +342,8 @@ module.exports = (pool) => {
       const n = normNum(li.invoice_number), d = digits(li.invoice_number);
       let c = (n && byNum.get(n)) || (d && byDig.get(d)) || null;
       // Number didn't match — try an exact-amount match not already claimed.
-      if (!c && li.amount_cents != null) c = captured.find((x) => !claimed.has(x.id) && x.total_cents != null && Math.abs(x.total_cents - li.amount_cents) <= 50) || null;
+      // Compare magnitudes: a credit is negative here but may be captured either way.
+      if (!c && li.amount_cents != null) c = captured.find((x) => !claimed.has(x.id) && x.total_cents != null && Math.abs(Math.abs(x.total_cents) - Math.abs(li.amount_cents)) <= 50) || null;
       let status = 'missing', matched_invoice_id = null, captured_cents = null, on_ro = null;
       if (c) {
         claimed.add(c.id); matched_invoice_id = c.id; captured_cents = c.total_cents;
@@ -351,7 +352,7 @@ module.exports = (pool) => {
         const amtOk = li.amount_cents == null || c.total_cents == null || Math.abs(c.total_cents - li.amount_cents) <= tol;
         status = amtOk ? 'have' : 'amount_mismatch';
       }
-      return { invoice_number: li.invoice_number, invoice_date: li.invoice_date, amount_cents: li.amount_cents, status, matched_invoice_id, captured_cents, on_ro };
+      return { invoice_number: li.invoice_number, invoice_date: li.invoice_date, amount_cents: li.amount_cents, type: li.type || 'invoice', status, matched_invoice_id, captured_cents, on_ro };
     });
     const missing = lines.filter((l) => l.status === 'missing');
     const mismatch = lines.filter((l) => l.status === 'amount_mismatch');

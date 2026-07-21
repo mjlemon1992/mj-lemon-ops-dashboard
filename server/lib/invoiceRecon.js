@@ -83,13 +83,14 @@ async function extractStatement(fileBase64, mediaType) {
         total: { type: 'number', description: 'Statement grand total / balance in dollars, if shown' },
         invoices: {
           type: 'array',
-          description: 'One entry per INVOICE/CHARGE line. EXCLUDE entirely: credit memos, returns, RMAs, payments, discounts, finance charges, balance-forward and running-balance rows. A credit/return is NOT an invoice — never list it, and never flip its sign to positive. If a row is bracketed, parenthesised, marked CR/CM, or shown in a credit column, it is a credit: skip it.',
+          description: 'One entry per DOCUMENT the statement lists — BOTH invoices/charges AND credit memos/returns/RMAs. Credits matter as much as invoices, so never omit them. EXCLUDE only payments/remittances, discounts taken, finance charges, and balance-forward / running-balance rows (those are not documents we can request). The lines you list should add up to the statement total.',
           items: {
             type: 'object',
             properties: {
-              invoice_number: { type: 'string', description: 'The invoice/document number' },
+              invoice_number: { type: 'string', description: 'The invoice or credit-note number' },
               invoice_date: { type: 'string', description: 'Date as YYYY-MM-DD' },
-              amount: { type: 'number', description: 'Invoice amount in dollars (the charge, positive)' },
+              amount: { type: 'number', description: 'Dollars. POSITIVE for an invoice/charge. NEGATIVE for a credit/return — anything bracketed, parenthesised, marked CR/CM, or shown in a credit column. Never flip a credit to positive.' },
+              type: { type: 'string', description: '"invoice" for a charge, "credit" for a credit memo / return / RMA' },
             },
             required: ['invoice_number'],
           },
@@ -105,7 +106,7 @@ async function extractStatement(fileBase64, mediaType) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-6', max_tokens: 8000,
       tool_choice: { type: 'tool', name: 'record_statement' }, tools: [tool],
-      messages: [{ role: 'user', content: [block, { type: 'text', text: 'This is a monthly account statement from a parts supplier. List every INVOICE/CHARGE it shows (number, date, amount in dollars, positive). Do NOT list credit memos, returns, payments, discounts, finance charges, or balance-forward rows — those are not invoices. A credit shown in brackets, in a credit column, or marked CR/CM must be skipped entirely, never converted to a positive charge. Also report the statement grand total exactly as printed.' }] }],
+      messages: [{ role: 'user', content: [block, { type: 'text', text: 'This is a monthly account statement from a parts supplier. List every document it shows: invoices/charges (positive amounts) AND credit memos / returns / RMAs (NEGATIVE amounts). Credits matter as much as invoices — include them, and keep their sign negative; never convert a credit to a positive charge. Skip only payments/remittances, discounts taken, finance charges and balance-forward rows. Mark each row type as "invoice" or "credit". Your listed amounts should add up to the statement grand total, which you should also report exactly as printed.' }] }],
     }),
   });
   if (!r.ok) { const t = await r.text(); throw new Error(`statement extract ${r.status}: ${t.slice(0, 200)}`); }
@@ -113,11 +114,19 @@ async function extractStatement(fileBase64, mediaType) {
   const use = (j.content || []).find((c) => c.type === 'tool_use');
   if (!use) throw new Error('No structured statement extraction returned');
   const x = use.input || {};
-  const invoices = (Array.isArray(x.invoices) ? x.invoices : []).map((it) => ({
-    invoice_number: (it.invoice_number || '').toString().trim() || null,
-    invoice_date: /^\d{4}-\d{2}-\d{2}$/.test(it.invoice_date || '') ? it.invoice_date : null,
-    amount_cents: dollarsToCents(it.amount),
-  })).filter((it) => it.invoice_number || it.amount_cents != null);
+  const invoices = (Array.isArray(x.invoices) ? x.invoices : []).map((it) => {
+    const kind = /credit|return|rma|\bcm\b|\bcr\b/i.test(String(it.type || '')) ? 'credit' : 'invoice';
+    let cents = dollarsToCents(it.amount);
+    // Normalise: a credit is always negative however the model reported it, so
+    // the lines add up to the statement total.
+    if (cents != null && kind === 'credit' && cents > 0) cents = -cents;
+    return {
+      invoice_number: (it.invoice_number || '').toString().trim() || null,
+      invoice_date: /^\d{4}-\d{2}-\d{2}$/.test(it.invoice_date || '') ? it.invoice_date : null,
+      amount_cents: cents,
+      type: kind,
+    };
+  }).filter((it) => it.invoice_number || it.amount_cents != null);
   return {
     vendor: x.vendor || null,
     statement_date: /^\d{4}-\d{2}-\d{2}$/.test(x.statement_date || '') ? x.statement_date : null,

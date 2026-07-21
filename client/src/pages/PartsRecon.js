@@ -350,6 +350,18 @@ function StatementsView({ locId }) {
     if (!await askConfirm({ title: 'Remove statement', body: `Remove ${s.vendor || 'statement'} ${s.statement_date || ''}?`, danger: true, confirmLabel: 'Remove' })) return;
     try { await api(`/parts/statement/${s.id}`, { method: 'DELETE' }); load(); } catch (e) { showToast(e.message, 'error'); }
   };
+  // Paste-ready list for the "please re-send these" email to the supplier.
+  // Invoices and credits listed separately — the supplier files them differently.
+  const copyMissing = (s, missing) => {
+    const nums = (t) => missing.filter((l) => (l.type || 'invoice') === t).map((l) => l.invoice_number).filter(Boolean);
+    const inv = nums('invoice'); const cr = nums('credit');
+    const parts = [];
+    if (inv.length) parts.push(`Missing invoices (${inv.length}): ${inv.join(', ')}`);
+    if (cr.length) parts.push(`Missing credit notes (${cr.length}): ${cr.join(', ')}`);
+    const text = `${s.vendor || 'Supplier'}${s.period_label ? ` — ${s.period_label}` : ''}\n${parts.join('\n')}`;
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => showToast(`Copied ${inv.length + cr.length} number${inv.length + cr.length === 1 ? '' : 's'}`)).catch(() => showToast('Copy failed', 'error'));
+    else showToast('Copy not available in this browser', 'error');
+  };
 
   if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
   if (!data) return <Skeleton rows={5} height={18} />;
@@ -385,6 +397,7 @@ function StatementsView({ locId }) {
               </span>
               {s.ties_out === false && <span className="badge" style={{ background: 'rgba(255,184,0,0.12)', color: 'var(--warning)', padding: '4px 10px', borderRadius: '6px', fontWeight: 600 }}>⚠ CHECK THE READ</span>}
               {!!s.mismatch_count && <span className="badge" style={{ background: 'rgba(255,184,0,0.12)', color: 'var(--warning)', padding: '4px 10px', borderRadius: '6px', fontWeight: 600 }}>{s.mismatch_count} amount off</span>}
+              {!!missing.length && <button onClick={() => copyMissing(s, missing)} style={{ fontSize: '12px' }} title="Copy the missing document numbers to paste into an email to the supplier">📋 Copy numbers</button>}
               <button onClick={() => setOpen((o) => ({ ...o, [s.id]: !o[s.id] }))} style={{ fontSize: '12px' }}>{isOpen ? 'Hide' : 'Details'}</button>
               <button onClick={() => del(s)} title="Remove" style={{ color: 'var(--danger)', border: 0, background: 'none' }}>🗑</button>
             </div>
@@ -405,7 +418,10 @@ function StatementsView({ locId }) {
                       <tbody>
                         {[...missing, ...mismatch].map((l, i) => (
                           <tr key={i} style={{ borderBottom: '0.5px solid var(--border)' }}>
-                            <td style={td}>{l.invoice_number || '—'}</td>
+                            <td style={td}>
+                              {l.invoice_number || '—'}
+                              {(l.type === 'credit') && <span style={{ marginLeft: 6, fontSize: '10px', fontWeight: 700, color: 'var(--info)' }}>CREDIT</span>}
+                            </td>
                             <td style={td}>{fmtDate(l.invoice_date)}</td>
                             <td style={{ ...td, textAlign: 'right' }}>{l.amount_cents != null ? money(l.amount_cents / 100) : '—'}</td>
                             <td style={td}>
@@ -424,7 +440,7 @@ function StatementsView({ locId }) {
         );
       })}
       <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
-        <b>Missing</b> = the vendor billed it but we never captured the invoice — chase it (likeliest place an unbilled part hides). <b>Amount off</b> = we have the invoice but the total doesn’t match the statement.
+        <b>Missing</b> = the vendor billed it but we never captured it — chase it (likeliest place an unbilled part hides). Credit notes are listed too: a credit you never received is money owed back to you. <b>Amount off</b> = we have it but the total doesn’t match the statement. Use <b>📋 Copy numbers</b> to paste the list straight into an email to the supplier.
       </div>
     </div>
   );
