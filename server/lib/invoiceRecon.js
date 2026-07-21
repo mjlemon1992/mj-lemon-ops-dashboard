@@ -155,6 +155,16 @@ const GENERIC_PART = new Set(['NPN', 'MISC', 'NA', 'N', 'NONE', 'TBD', 'VARIOUS'
 // Below this a line isn't worth raising — $0.00 shipping & handling and other
 // no-charge lines cost nothing, so they can't be unbilled money.
 const MIN_FLAG_CENTS = 5;
+// Compare EXTENDED (line-total) costs, never unit-vs-unit: the invoice may price
+// per-unit over a qty while the WO carries the lot as one line (or vice versa).
+// Extended-vs-extended is apples-to-apples however each side splits it.
+const qtyOf = (v) => { const q = Number(v); return Number.isFinite(q) && q > 0 ? q : 1; };
+const lineExtCents = (li) => {
+  if (li.amount != null) return Math.round(Number(li.amount) * 100);
+  if (li.unit_cost != null) return Math.round(Number(li.unit_cost) * 100 * qtyOf(li.qty));
+  return null;
+};
+const partExtCents = (p) => Math.round((Number(p.wholesaleCostCents) || 0) * qtyOf(p.quantity));
 const normPart = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 // PER-LINE CHECK — only runs once the work order is COMPLETE/CLOSED (invoiced).
@@ -179,8 +189,7 @@ function lineCheck(lineItems, parts, orderClosed) {
   const claimed = new Set();
   const out = [];
   for (const li of (lineItems || [])) {
-    const inv = li.unit_cost != null ? Math.round(Number(li.unit_cost) * 100)
-      : (li.amount != null ? Math.round(Number(li.amount) * 100) : null);
+    const inv = lineExtCents(li);
     // A no-charge line — $0.00 shipping & handling, freebies, no-charge items —
     // can't be a leak: nothing was paid, so there's nothing to chase. Only a real
     // charge (above MIN_FLAG_CENTS) is ever worth raising.
@@ -190,17 +199,18 @@ function lineCheck(lineItems, parts, orderClosed) {
     if (n && !GENERIC_PART.has(n) && byNum.has(n)) {
       const idx = byNum.get(n); const p = list[idx];
       claimed.add(idx);
-      if (inv != null && p.wholesaleCostCents) {
-        const diff = inv - p.wholesaleCostCents;
-        const tol = Math.max(200, Math.round(p.wholesaleCostCents * 0.05));
-        if (Math.abs(diff) > tol) out.push({ part_number: li.part_number, status: 'cost_off', invoice_cost_cents: inv, wo_cost_cents: p.wholesaleCostCents, diff_cents: diff });
+      const woExt = partExtCents(p);
+      if (inv != null && woExt) {
+        const diff = inv - woExt;
+        const tol = Math.max(200, Math.round(woExt * 0.05));
+        if (Math.abs(diff) > tol) out.push({ part_number: li.part_number, status: 'cost_off', invoice_cost_cents: inv, wo_cost_cents: woExt, diff_cents: diff });
       }
       continue;
     }
     if (inv == null) continue;                    // no cost to fingerprint with → can't judge
     // 2) generic on the WO → match by cost
-    const hit = list.findIndex((p, i) => !claimed.has(i) && p.wholesaleCostCents
-      && Math.abs(p.wholesaleCostCents - inv) <= Math.max(100, Math.round(inv * 0.01)));
+    const hit = list.findIndex((p, i) => !claimed.has(i) && partExtCents(p)
+      && Math.abs(partExtCents(p) - inv) <= Math.max(100, Math.round(inv * 0.01)));
     if (hit >= 0) { claimed.add(hit); continue; }
     // 3) not attached at that cost
     out.push({ part_number: li.part_number || null, description: li.description || null, status: 'not_accounted', invoice_cost_cents: inv });
