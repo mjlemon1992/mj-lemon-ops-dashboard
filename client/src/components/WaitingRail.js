@@ -18,8 +18,8 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
   const ownerish = ['owner', 'partner'].includes(user?.role);
   const [busy, setBusy] = useState(false);
   const dismiss = (key) => onDismiss && onDismiss(key);
-  const { timeoff = [], edits = [], fuel = [], reorders = [], clockq = [], bonus = [] } = detail || {};
-  const total = timeoff.length + edits.length + fuel.length + reorders.length + clockq.length + bonus.length;
+  const { timeoff = [], edits = [], fuel = [], reorders = [], clockq = [], bonus = [], parts = [] } = detail || {};
+  const total = timeoff.length + edits.length + fuel.length + reorders.length + clockq.length + bonus.length + parts.length;
   // Deep-links must land on the card's own shop, not whatever is globally selected.
   const goTo = (locationId, path) => { select(locationId); navigate(path); };
 
@@ -151,6 +151,16 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
             ? (b.status === 'draft' ? 'Draft is calculated — review and lock it' : 'Net profit is one number from calculating')
             : (b.status === 'draft' ? 'Draft calculated — waiting on the owner to lock it' : 'Waiting on the owner for net profit from month-end close')}</div>
           <div className="wr-actions"><button onClick={() => goTo(b.location_id, '/bonus')}>{ownerish ? (b.status === 'draft' ? 'Review →' : 'Enter net →') : 'View →'}</button></div>
+        </div>
+      ))}
+
+      {parts.map((p) => (
+        <div key={`parts-${p.id}`} className="wr-card">
+          <div className="wr-card-title">
+            {p.kind === 'statement' ? 'Supplier statement' : 'Parts invoice'}{multiLoc ? ` — ${p.location_name}` : ''}
+          </div>
+          <div className="wr-card-body">{p.text}</div>
+          <div className="wr-actions"><button onClick={() => goTo(p.location_id, '/parts')}>Review →</button></div>
         </div>
       ))}
 
