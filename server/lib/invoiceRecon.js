@@ -28,7 +28,8 @@ async function extractInvoice(fileBase64, mediaType) {
         ro_ref: { type: 'string', description: 'The repair-order / work-order / PO reference the shop wrote on the invoice — often just the last 4 digits of the RO number. Empty string if none is present.' },
         line_items: {
           type: 'array',
-          items: { type: 'object', properties: { part_number: { type: 'string' }, description: { type: 'string' }, qty: { type: 'number' }, unit_cost: { type: 'number' }, amount: { type: 'number' } } },
+          description: 'One entry per line on the invoice. ALWAYS fill in "amount" (the extended line total as printed) and "qty" when they are shown — the line total is what matters, a unit price alone is ambiguous.',
+          items: { type: 'object', properties: { part_number: { type: 'string' }, description: { type: 'string' }, qty: { type: 'number', description: 'Quantity billed on this line' }, unit_cost: { type: 'number' }, amount: { type: 'number', description: 'Extended line total in dollars (qty x unit cost), exactly as printed on the invoice' } } },
         },
       },
       required: ['vendor', 'total'],
@@ -159,9 +160,14 @@ const MIN_FLAG_CENTS = 5;
 // per-unit over a qty while the WO carries the lot as one line (or vice versa).
 // Extended-vs-extended is apples-to-apples however each side splits it.
 const qtyOf = (v) => { const q = Number(v); return Number.isFinite(q) && q > 0 ? q : 1; };
+// Returns null when the line total can't be TRUSTED. A bare unit_cost with no
+// qty is not a line total — assuming qty=1 produced a false "cost off" on a real
+// Transtar line ($1.25/unit read against a $16.57 WO line on a $17.82 invoice).
+// Unknown beats wrong: an untrusted line is simply never flagged.
 const lineExtCents = (li) => {
   if (li.amount != null) return Math.round(Number(li.amount) * 100);
-  if (li.unit_cost != null) return Math.round(Number(li.unit_cost) * 100 * qtyOf(li.qty));
+  if (li.unit_cost != null && li.qty != null) return Math.round(Number(li.unit_cost) * 100 * qtyOf(li.qty));
+  if (li.unit_cost != null && Number(li.unit_cost) === 0) return 0;   // an explicit $0 line is still knowable
   return null;
 };
 const partExtCents = (p) => Math.round((Number(p.wholesaleCostCents) || 0) * qtyOf(p.quantity));
