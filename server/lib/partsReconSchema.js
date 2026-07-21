@@ -61,6 +61,9 @@ function ensurePartsReconTables(pool) {
       created_at TIMESTAMPTZ DEFAULT now()
     )`);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_vstmt_loc ON vendor_statement (location_id, created_at DESC)');
+    // Σ of the extracted lines — compared to the statement's printed total to
+    // prove the read is trustworthy before anyone chases a "missing" list.
+    await pool.query('ALTER TABLE vendor_statement ADD COLUMN IF NOT EXISTS lines_sum_cents INTEGER');
     // Re-uploading the same statement refreshes it rather than duplicating.
     await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_vstmt_dedupe ON vendor_statement (location_id, COALESCE(vendor,''), COALESCE(statement_date, '1900-01-01'), COALESCE(total_cents,0))");
   })();

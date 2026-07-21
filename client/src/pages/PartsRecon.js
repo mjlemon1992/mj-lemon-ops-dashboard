@@ -383,10 +383,16 @@ function StatementsView({ locId }) {
               <span className="badge" style={{ background: s.missing_count ? 'rgba(255,77,77,0.12)' : 'var(--bg3)', color: s.missing_count ? 'var(--danger)' : 'var(--text2)', fontWeight: 700, padding: '4px 10px', borderRadius: '6px' }}>
                 {s.missing_count ? `${s.missing_count} MISSING` : 'ALL ACCOUNTED FOR ✓'}
               </span>
+              {s.ties_out === false && <span className="badge" style={{ background: 'rgba(255,184,0,0.12)', color: 'var(--warning)', padding: '4px 10px', borderRadius: '6px', fontWeight: 600 }}>⚠ CHECK THE READ</span>}
               {!!s.mismatch_count && <span className="badge" style={{ background: 'rgba(255,184,0,0.12)', color: 'var(--warning)', padding: '4px 10px', borderRadius: '6px', fontWeight: 600 }}>{s.mismatch_count} amount off</span>}
               <button onClick={() => setOpen((o) => ({ ...o, [s.id]: !o[s.id] }))} style={{ fontSize: '12px' }}>{isOpen ? 'Hide' : 'Details'}</button>
               <button onClick={() => del(s)} title="Remove" style={{ color: 'var(--danger)', border: 0, background: 'none' }}>🗑</button>
             </div>
+            {s.ties_out === false && (
+              <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--warning)' }}>
+                The {s.line_count} lines read add up to <b>{money(s.lines_sum)}</b> but the statement total is <b>{money(s.total)}</b>. Credits/returns may have been read as charges — check against the paper before chasing the missing list.
+              </div>
+            )}
             {isOpen && (
               <div style={{ marginTop: '12px', overflowX: 'auto' }}>
                 {!missing.length && !mismatch.length

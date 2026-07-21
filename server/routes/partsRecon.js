@@ -361,18 +361,24 @@ module.exports = (pool) => {
 
   // Upsert a statement + its reconciliation; returns the summary.
   const saveStatement = async (locationId, sx, rec, source) => {
+    const linesSum = (sx.invoices || []).reduce((a, i) => a + (i.amount_cents || 0), 0);
     const { rows } = await pool.query(
-      `INSERT INTO vendor_statement (location_id, vendor, statement_date, period_label, total_cents, line_count, found_count, missing_count, mismatch_count, lines, raw_extract, source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      `INSERT INTO vendor_statement (location_id, vendor, statement_date, period_label, total_cents, line_count, found_count, missing_count, mismatch_count, lines, raw_extract, source, lines_sum_cents)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        ON CONFLICT (location_id, COALESCE(vendor,''), COALESCE(statement_date, '1900-01-01'), COALESCE(total_cents,0))
        DO UPDATE SET period_label=EXCLUDED.period_label, line_count=EXCLUDED.line_count, found_count=EXCLUDED.found_count,
          missing_count=EXCLUDED.missing_count, mismatch_count=EXCLUDED.mismatch_count, lines=EXCLUDED.lines,
-         raw_extract=EXCLUDED.raw_extract, created_at=now()
+         raw_extract=EXCLUDED.raw_extract, created_at=now(), lines_sum_cents=EXCLUDED.lines_sum_cents
        RETURNING id`,
       [locationId, sx.vendor, sx.statement_date, sx.period, sx.total_cents, sx.invoices.length,
-        rec.found_count, rec.missing_count, rec.mismatch_count, JSON.stringify(rec.lines), JSON.stringify(sx.raw || sx), source]);
+        rec.found_count, rec.missing_count, rec.mismatch_count, JSON.stringify(rec.lines), JSON.stringify(sx.raw || sx), source, linesSum]);
+    // Tie-out: the lines we read must add up to the statement's printed total. If
+    // they don't, the read is unreliable (credits counted as charges, rows missed)
+    // and the "missing" list must NOT be presented as fact.
+    const ties = sx.total_cents == null || Math.abs(linesSum - sx.total_cents) <= Math.max(5000, Math.round(sx.total_cents * 0.02));
     return { id: rows[0].id, vendor: sx.vendor, statement_date: sx.statement_date, period: sx.period,
       line_count: sx.invoices.length, found: rec.found_count, missing: rec.missing_count, mismatch: rec.mismatch_count,
+      lines_sum: linesSum / 100, total: sx.total_cents != null ? sx.total_cents / 100 : null, ties_out: ties,
       missing_list: rec.missing, mismatch_list: rec.mismatch };
   };
 
@@ -417,9 +423,19 @@ module.exports = (pool) => {
       await ensurePartsReconTables(pool);
       const { rows } = await pool.query(
         `SELECT id, vendor, statement_date::text AS statement_date, period_label, total_cents, line_count,
-                found_count, missing_count, mismatch_count, lines, created_at
+                found_count, missing_count, mismatch_count, lines, created_at, lines_sum_cents
            FROM vendor_statement WHERE location_id=$1 ORDER BY created_at DESC LIMIT 60`, [req.params.locationId]);
-      res.json({ statements: rows.map((r) => ({ ...r, total: r.total_cents != null ? r.total_cents / 100 : null })) });
+      res.json({
+        statements: rows.map((r) => ({
+          ...r,
+          total: r.total_cents != null ? r.total_cents / 100 : null,
+          lines_sum: r.lines_sum_cents != null ? r.lines_sum_cents / 100 : null,
+          // False = the lines we read don't add up to the printed total, so the
+          // missing list can't be trusted until a human looks.
+          ties_out: r.total_cents == null || r.lines_sum_cents == null
+            || Math.abs(r.lines_sum_cents - r.total_cents) <= Math.max(5000, Math.round(r.total_cents * 0.02)),
+        })),
+      });
     } catch (e) { fail(res, e); }
   });
 

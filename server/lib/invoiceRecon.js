@@ -83,7 +83,7 @@ async function extractStatement(fileBase64, mediaType) {
         total: { type: 'number', description: 'Statement grand total / balance in dollars, if shown' },
         invoices: {
           type: 'array',
-          description: 'One entry per INVOICE line on the statement. Include only invoices/charges — skip payment, credit, and running-balance rows.',
+          description: 'One entry per INVOICE/CHARGE line. EXCLUDE entirely: credit memos, returns, RMAs, payments, discounts, finance charges, balance-forward and running-balance rows. A credit/return is NOT an invoice — never list it, and never flip its sign to positive. If a row is bracketed, parenthesised, marked CR/CM, or shown in a credit column, it is a credit: skip it.',
           items: {
             type: 'object',
             properties: {
@@ -105,7 +105,7 @@ async function extractStatement(fileBase64, mediaType) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-6', max_tokens: 8000,
       tool_choice: { type: 'tool', name: 'record_statement' }, tools: [tool],
-      messages: [{ role: 'user', content: [block, { type: 'text', text: 'This is a monthly account statement from a parts supplier. List every INVOICE it shows (number, date, amount in dollars). Skip payment, credit, finance-charge, and balance-forward rows — only actual invoices.' }] }],
+      messages: [{ role: 'user', content: [block, { type: 'text', text: 'This is a monthly account statement from a parts supplier. List every INVOICE/CHARGE it shows (number, date, amount in dollars, positive). Do NOT list credit memos, returns, payments, discounts, finance charges, or balance-forward rows — those are not invoices. A credit shown in brackets, in a credit column, or marked CR/CM must be skipped entirely, never converted to a positive charge. Also report the statement grand total exactly as printed.' }] }],
     }),
   });
   if (!r.ok) { const t = await r.text(); throw new Error(`statement extract ${r.status}: ${t.slice(0, 200)}`); }
