@@ -172,6 +172,12 @@ const RECON = {
   pending: { t: 'JOB OPEN', c: 'var(--text3)' },
 };
 const MATCH_COLOR = { matched: 'var(--success)', confirmed: 'var(--success)', ambiguous: 'var(--warning)', unmatched: 'var(--danger)', pending: 'var(--text3)' };
+// What actually wants a human — the same test the Waiting-on-you rail uses, so
+// the tab and the rail can never disagree. A reconciled invoice drops out of the
+// worklist the moment it's clean; "All" keeps it as the record.
+const needsAttention = (i) => !['matched', 'confirmed'].includes(i.match_status)
+  || i.recon_status === 'underlogged'
+  || (i.line_findings || []).length > 0;
 
 function InvoicesView({ locId }) {
   const { api, token } = useAuth();
@@ -180,6 +186,7 @@ function InvoicesView({ locId }) {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null); // { done, total, name } while a batch reads
+  const [show, setShow] = useState('attention');  // default to the worklist, not the pile
 
   const load = useCallback(() => {
     api(`/parts/${locId}/invoices`).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
@@ -311,11 +318,25 @@ function InvoicesView({ locId }) {
         </div>
       </div>
 
+      {!!(data.invoices || []).length && (
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+          {[['attention', `Needs attention (${(data.invoices || []).filter(needsAttention).length})`], ['all', `All (${(data.invoices || []).length})`]].map(([k, l]) => (
+            <button key={k} onClick={() => setShow(k)} className={show === k ? 'primary' : ''} style={{ fontSize: '12px', padding: '5px 12px' }}>{l}</button>
+          ))}
+        </div>
+      )}
+
+      {show === 'attention' && (data.invoices || []).length > 0 && (data.invoices || []).filter(needsAttention).length === 0 && (
+        <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '24px' }}>
+          Nothing needs attention — {(data.invoices || []).length} invoice{(data.invoices || []).length === 1 ? '' : 's'} filed and reconciled. 🎉
+        </div>
+      )}
+
       {(!data.invoices || !data.invoices.length) && (
         <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '28px' }}>No invoices yet. Forward or upload a supplier invoice to start reconciling.</div>
       )}
 
-      {(data.invoices || []).map((inv) => {
+      {(data.invoices || []).filter((i) => show === 'all' || needsAttention(i)).map((inv) => {
         const rs = RECON[inv.recon_status] || RECON.pending;
         return (
           <div key={inv.id} className="card" style={{ marginBottom: '8px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
