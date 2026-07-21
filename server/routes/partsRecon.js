@@ -302,6 +302,9 @@ module.exports = (pool) => {
       for (const att of msg.attachments) {
         try {
           // "WARRANTY" in the forwarded subject = the digital twin of the stamp.
+          // Deliberately NOT matching "credit" here: suppliers routinely send
+          // their own mail titled "Credit Note …", which would open a bogus
+          // claim on every one. The typed subject stays the unambiguous word.
           const warrantySubject = /\bwarranty\b/i.test(msg.subject || '');
           const out = await ingestFile(locationId, smLoc, apiKey, att.base64, att.mediaType, 'email', warrantySubject);
           if (out.type === 'statement') results.push({ from: msg.from, file: att.filename, type: 'statement', vendor: out.vendor, line_count: out.line_count, missing: out.missing });

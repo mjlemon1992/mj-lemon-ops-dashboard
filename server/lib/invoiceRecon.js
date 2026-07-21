@@ -20,7 +20,7 @@ async function extractInvoice(fileBase64, mediaType) {
       type: 'object',
       properties: {
         is_statement: { type: 'boolean', description: 'TRUE only if this document is actually a monthly ACCOUNT STATEMENT that lists many invoices / an aging summary — not a single invoice. If unsure, false.' },
-        warranty_marked: { type: 'boolean', description: 'TRUE only if a WARRANTY stamp, sticker, or handwritten "WARRANTY" annotation has been physically ADDED to the page by the shop. Ignore the word "warranty" wherever it appears in the printed invoice text, part descriptions, or terms and conditions — that is NOT a mark. If unsure, false.' },
+        warranty_marked: { type: 'boolean', description: 'TRUE only if a rubber STAMP, sticker, or handwritten annotation reading "CREDIT" or "WARRANTY" has been physically ADDED to the page by the shop — typically large, in ink of a different colour, often angled or overlapping other content. It must be an obvious addition to the document, not part of it. NEVER set true for the word credit/warranty occurring in the PRINTED invoice text: "credit card", "credit terms", "credit limit", "credit memo", "credit balance", account/terms blocks, part descriptions, or terms and conditions. If it looks typeset or belongs to the invoice layout, it is NOT a mark. If unsure, false.' },
         vendor: { type: 'string', description: 'Supplier/vendor business name' },
         invoice_number: { type: 'string', description: "The vendor's invoice number" },
         invoice_date: { type: 'string', description: 'Invoice date as YYYY-MM-DD' },
