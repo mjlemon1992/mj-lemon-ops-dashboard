@@ -177,9 +177,12 @@ module.exports = (pool) => {
         return m;
       };
       const items = [];
+      // Naive "+s" breaks once the label carries a trailing verb ("parts invoice
+      // to review" → "…to reviews"), so a label may supply its own plural.
       const push = (byLoc, kind, label, path) => {
+        const [one, many] = Array.isArray(label) ? label : [label, `${label}s`];
         for (const [lid, n] of Object.entries(byLoc)) {
-          items.push({ kind, location_id: lid, location_name: nameOf[lid], count: n, label: n === 1 ? label : `${label}s`, path });
+          items.push({ kind, location_id: lid, location_name: nameOf[lid], count: n, label: n === 1 ? one : many, path });
         }
       };
       push(countByLoc(timeoff.rows), 'timeoff', 'holiday request', '/time-clock');
@@ -187,7 +190,7 @@ module.exports = (pool) => {
       push(Object.fromEntries(fuel.rows.map((r) => [r.location_id, r.n])), 'fuel', 'unassigned fuel purchase', '/fuel-card');
       push(countByLoc(reorders.rows), 'reorder', 'stock re-order', '/time-clock');
       push(countByLoc(clockq.rows), 'clockq', 'clock question', '/time-clock');
-      push(countByLoc(parts), 'parts', 'parts invoice to review', '/parts');
+      push(countByLoc(parts), 'parts', ['parts invoice to review', 'parts invoices to review'], '/parts');
 
       // Time-off amounts to HOURS (QuickBooks unit): working_days × per-day hours.
       const { openDaySet } = require('../lib/workdays');
