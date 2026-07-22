@@ -22,7 +22,12 @@ function collectAttachments(node, out = []) {
     node.childNodes.forEach((c) => collectAttachments(c, out));
     return out;
   }
-  const mt = `${node.type || ''}/${node.subtype || ''}`.toLowerCase();
+  // ImapFlow puts the FULL mime type in `type` ("application/pdf") — gluing it
+  // to `subtype` produced "application/pdf/" and every real attachment failed
+  // the type check, so nothing emailed in could ever be ingested. Accept both
+  // shapes: some servers/versions do split it.
+  const t = String(node.type || '').toLowerCase();
+  const mt = (t.includes('/') ? t : `${t}/${String(node.subtype || '').toLowerCase()}`);
   const disp = String(node.disposition || '').toLowerCase();
   const dp = node.dispositionParameters || {};
   const pp = node.parameters || {};
@@ -118,7 +123,7 @@ async function peekInbox({ user, pass, sinceDays = 7, max = 15 } = {}) {
           if (Array.isArray(n.childNodes) && n.childNodes.length) return n.childNodes.forEach(walk);
           const dp = n.dispositionParameters || {}; const pp = n.parameters || {};
           parts.push({
-            mime: `${n.type || ''}/${n.subtype || ''}`.toLowerCase(),
+            mime: (String(n.type || '').toLowerCase().includes('/') ? String(n.type).toLowerCase() : `${String(n.type || '').toLowerCase()}/${String(n.subtype || '').toLowerCase()}`),
             disposition: n.disposition || null,
             filename: dp.filename || dp.FILENAME || pp.name || pp.NAME || null,
             size: n.size || null,
