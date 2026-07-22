@@ -37,6 +37,10 @@ function ensurePartsReconTables(pool) {
     // Core charges are a deposit, not a part on the job — held separately so the
     // job roll-up can exclude them (they're tracked as their own claim).
     await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS core_cents INTEGER DEFAULT 0');
+    // Scanned in the same stack but not a parts purchase (fuel, coffee, cleaning
+    // supplies). Kept so a supplier statement still sees it as captured, but
+    // parked out of the worklist.
+    await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS not_parts BOOLEAN DEFAULT false');
     // Keep the original scan/PDF so the owner can eyeball it when confirming a match.
     await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS file_data BYTEA');
     await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS file_mime TEXT');

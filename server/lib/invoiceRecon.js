@@ -20,6 +20,7 @@ async function extractInvoice(fileBase64, mediaType) {
       type: 'object',
       properties: {
         is_statement: { type: 'boolean', description: 'TRUE only if this document is actually a monthly ACCOUNT STATEMENT that lists many invoices / an aging summary — not a single invoice. If unsure, false.' },
+        not_parts: { type: 'boolean', description: 'TRUE if this document is NOT a parts/goods purchase from an automotive supplier — e.g. a fuel or gas-station receipt, food/coffee/restaurant receipt, cleaning or shop-consumable purchase from a general retailer, courier or postage receipt, a till/POS receipt for sundries, a utility/rent/phone/software bill. Judge by what was actually bought: automotive parts, fluids, components, freight on parts, and core charges are all parts purchases (FALSE) even when bought from a general retailer. If it looks like a parts supplier invoice, or you are unsure, FALSE.' },
         warranty_marked: { type: 'boolean', description: 'TRUE only if a rubber STAMP, sticker, or handwritten annotation reading "CREDIT" or "WARRANTY" has been physically ADDED to the page by the shop — typically large, in ink of a different colour, often angled or overlapping other content. It must be an obvious addition to the document, not part of it. NEVER set true for the word credit/warranty occurring in the PRINTED invoice text: "credit card", "credit terms", "credit limit", "credit memo", "credit balance", account/terms blocks, part descriptions, or terms and conditions. If it looks typeset or belongs to the invoice layout, it is NOT a mark. If unsure, false.' },
         vendor: { type: 'string', description: 'Supplier/vendor business name' },
         invoice_number: { type: 'string', description: "The vendor's invoice number" },
@@ -43,7 +44,7 @@ async function extractInvoice(fileBase64, mediaType) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-6', max_tokens: 1500,
       tool_choice: { type: 'tool', name: 'record_invoice' }, tools: [tool],
-      messages: [{ role: 'user', content: [block, { type: 'text', text: 'Extract this parts invoice. The RO/PO reference is the work-order number the shop handwrote or stamped on it (frequently only the last 4 digits). All amounts in dollars.' }] }],
+      messages: [{ role: 'user', content: [block, { type: 'text', text: 'This page came off a shop scanner, so it may be a parts-supplier invoice OR something unrelated that was in the same stack (a fuel receipt, a coffee/food receipt, shop cleaning supplies, postage). Say which via not_parts. Then extract what you can: the RO/PO reference is the work-order number the shop handwrote or stamped on it (frequently only the last 4 digits, sometimes with a leading W). All amounts in dollars.' }] }],
     }),
   });
   if (!r.ok) { const t = await r.text(); throw new Error(`invoice extract ${r.status}: ${t.slice(0, 200)}`); }
@@ -53,6 +54,7 @@ async function extractInvoice(fileBase64, mediaType) {
   const x = use.input || {};
   return {
     is_statement: !!x.is_statement,
+    not_parts: !!x.not_parts,
     warranty_marked: !!x.warranty_marked,
     vendor: x.vendor || null, invoice_number: x.invoice_number || null,
     invoice_date: /^\d{4}-\d{2}-\d{2}$/.test(x.invoice_date || '') ? x.invoice_date : null,
