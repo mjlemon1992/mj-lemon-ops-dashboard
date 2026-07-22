@@ -356,6 +356,7 @@ module.exports = (pool) => {
           const warrantySubject = /\bwarranty\b/i.test(msg.subject || '');
           const out = await ingestFile(locationId, smLoc, apiKey, att.base64, att.mediaType, 'email', warrantySubject);
           if (out.type === 'statement') results.push({ from: msg.from, file: att.filename, type: 'statement', vendor: out.vendor, line_count: out.line_count, missing: out.missing });
+          else if (out.type === 'skipped') results.push({ from: msg.from, file: att.filename, type: 'skipped', reason: out.reason });
           else results.push({ from: msg.from, file: att.filename, type: 'invoice', vendor: out.vendor, ro_ref: out.ro_ref, match_status: out.match_status, recon_status: out.recon_status });
           ok = true;
         } catch (e) { results.push({ from: msg.from, file: att.filename, error: String(e.message || e) }); }
@@ -602,6 +603,16 @@ module.exports = (pool) => {
         return { type: 'statement', ...s };
       }
       // Looked like a statement but nothing parsed — fall back to invoice.
+    }
+    // Nothing readable came off the page — no vendor, no number, no total, no
+    // lines. This is almost always an email-signature logo or a stray graphic
+    // riding along on a forwarded message, NOT an invoice. Skip it rather than
+    // filing a blank row (and, before dollarsToCents was hardened, a NaN total
+    // here 500'd the whole scan). Nothing to view, nothing to chase.
+    const hasContent = ex.vendor || ex.invoice_number || ex.total_cents != null
+      || ex.subtotal_cents != null || (Array.isArray(ex.line_items) && ex.line_items.length);
+    if (!hasContent) {
+      return { type: 'skipped', reason: 'unreadable', vendor: null, match_status: 'skipped' };
     }
     const out = await processInvoice(locationId, smLoc, apiKey, ex, source, fileBase64, mediaType);
     // Warranty can be declared three ways, in order of reliability:

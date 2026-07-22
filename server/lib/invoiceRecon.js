@@ -2,7 +2,16 @@
 const { fetchOrderService, fetchOrderByNumber, fetchRecentInvoicedOrders, fetchRecentOrders } = require('./shopmonkey');
 
 const digits = (s) => String(s || '').replace(/\D/g, '');
-const dollarsToCents = (v) => (v == null ? null : Math.round(Number(v) * 100));
+// null/'' → null; anything that doesn't parse to a finite number (Claude
+// sometimes answers "NaN"/"unknown"/"" when it can't read a value off a page,
+// e.g. an email-signature logo mistaken for an invoice) → null, never NaN.
+// A raw NaN reaching an INTEGER column throws "invalid input syntax for type
+// integer: NaN" and 500s the whole ingest.
+const dollarsToCents = (v) => {
+  if (v == null || v === '') return null;
+  const n = Math.round(Number(v) * 100);
+  return Number.isFinite(n) ? n : null;
+};
 
 // AI-extract a scanned supplier invoice into structured fields via Claude vision
 // with a forced tool call. Accepts a base64 image or PDF.
