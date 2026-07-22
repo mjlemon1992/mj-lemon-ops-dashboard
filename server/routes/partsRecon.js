@@ -20,7 +20,10 @@ module.exports = (pool) => {
   const MAX_ORDERS = 600;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const REASONS = ['warranty', 'rebilled', 'vendor_query', 'ignore'];
-  const ORDER_URL = process.env.SHOPMONKEY_ORDER_URL_TEMPLATE || 'https://app.shopmonkey.cloud/#/orders/{id}';
+  // Confirmed from a real ShopMonkey session (2026-07-21): singular /order/, no
+  // hash fragment. The earlier guess of '#/orders/{id}' silently dumped you on
+  // the dashboard — a wrong hash loads the app root and the fragment is ignored.
+  const ORDER_URL = process.env.SHOPMONKEY_ORDER_URL_TEMPLATE || 'https://app.shopmonkey.cloud/order/{id}';
   const MIN_CORE_CENTS = 500;   // ignore trivial "core" lines, same $5 floor as everything else
   // A reman part's refundable deposit, printed as its own line ("CORE CHARGE | R8311477BB").
   const CORE_RE = /\bcores?\b|core charge/i;
