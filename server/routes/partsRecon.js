@@ -683,6 +683,7 @@ module.exports = (pool) => {
       const { rows } = await pool.query('SELECT location_id FROM vendor_statement WHERE id=$1', [req.params.id]);
       if (!rows.length) return fail(res, 'Statement not found', 404);
       if (!canAccessLocation(req.user, rows[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      console.warn(`[parts-delete] STATEMENT ${req.params.id} deleted by ${req.user && req.user.email} (${req.user && req.user.role}) ip=${req.ip} ua=${(req.headers['user-agent'] || '').slice(0, 60)}`);
       await pool.query('DELETE FROM vendor_statement WHERE id=$1', [req.params.id]);
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
@@ -815,7 +816,7 @@ module.exports = (pool) => {
         const mime = inv.file_mime || 'application/pdf';
         const out = await ingestFile(inv.location_id, smLoc, process.env.SHOPMONKEY_API_KEY, inv.file_data.toString('base64'), mime, inv.source || 'upload');
         // The re-read supersedes the parked row unless it landed on the same one.
-        if (out.id && out.id !== inv.id) await pool.query('DELETE FROM vendor_invoice WHERE id=$1', [inv.id]);
+        if (out.id && out.id !== inv.id) { console.warn(`[parts-delete] INVOICE ${inv.id} superseded by re-read ${out.id} (is-parts) by ${req.user && req.user.email}`); await pool.query('DELETE FROM vendor_invoice WHERE id=$1', [inv.id]); }
         else await pool.query('UPDATE vendor_invoice SET not_parts=false WHERE id=$1', [inv.id]);
         return res.json({ ok: true, reread: true, ...out });
       }
@@ -842,6 +843,7 @@ module.exports = (pool) => {
       const { rows: ir } = await pool.query('SELECT location_id FROM vendor_invoice WHERE id=$1', [req.params.id]);
       if (!ir.length) return res.json({ ok: true });
       if (!canAccessLocation(req.user, ir[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      console.warn(`[parts-delete] INVOICE ${req.params.id} deleted by ${req.user && req.user.email} (${req.user && req.user.role}) ip=${req.ip} ua=${(req.headers['user-agent'] || '').slice(0, 60)}`);
       await pool.query("DELETE FROM warranty_claim WHERE invoice_id=$1 AND status='awaiting'", [req.params.id]);
       await pool.query('DELETE FROM vendor_invoice WHERE id=$1', [req.params.id]);
       res.json({ ok: true });
