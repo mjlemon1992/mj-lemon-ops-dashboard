@@ -195,6 +195,26 @@ module.exports = (pool) => {
   // can pull the original up to eyeball a match.
   const processInvoice = async (locId, smLoc, apiKey, ex, source, fileBase64 = null, fileMime = null) => {
     const fileBuf = fileBase64 ? Buffer.from(fileBase64, 'base64') : null;
+    // Something else off the same scanner stack — fuel, coffee, shop cleaning
+    // supplies, postage. Kept (a parts supplier's own consumables invoice WILL
+    // appear on their statement, so it must still count as captured) but parked:
+    // no RO lookup, no roll-up, never in the worklist. match_status 'skipped'
+    // keeps it out of the attention rail for free.
+    if (ex.not_parts) {
+      const { rows: nr } = await pool.query(
+        `INSERT INTO vendor_invoice (location_id, vendor, invoice_number, invoice_date, total_cents, subtotal_cents, ro_ref,
+                                     match_status, recon_status, recon_note, line_items, source, raw_extract, file_data, file_mime, not_parts)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'skipped','not_parts',$8,$9,$10,$11,$12,$13,true)
+         ON CONFLICT (location_id, COALESCE(vendor,''), COALESCE(invoice_number,''), COALESCE(total_cents,0))
+         DO UPDATE SET invoice_date=EXCLUDED.invoice_date, subtotal_cents=EXCLUDED.subtotal_cents, line_items=EXCLUDED.line_items,
+           match_status='skipped', recon_status='not_parts', recon_note=EXCLUDED.recon_note, not_parts=true,
+           file_data=COALESCE(EXCLUDED.file_data, vendor_invoice.file_data), file_mime=COALESCE(EXCLUDED.file_mime, vendor_invoice.file_mime)
+         RETURNING id`,
+        [locId, ex.vendor, ex.invoice_number, ex.invoice_date, ex.total_cents, ex.subtotal_cents, ex.ro_ref,
+          'Not a parts purchase — parked, so it never reaches the worklist. Tap “Is parts” if that’s wrong.',
+          JSON.stringify(ex.line_items || []), source, JSON.stringify(ex.raw || ex), fileBuf, fileMime]);
+      return { id: nr[0].id, vendor: ex.vendor, not_parts: true, match_status: 'skipped', recon_status: 'not_parts', line_findings: [] };
+    }
     const m = await matchInvoiceToRo(apiKey, smLoc, { ro_ref: ex.ro_ref, invoice_date: ex.invoice_date });
     let orderId = null, orderNum = null, orderInvoiced = null, wo = null;
     if (m.status === 'matched' && m.order) {
@@ -580,7 +600,7 @@ module.exports = (pool) => {
     //  • WARRANTY typed in a forwarded email's subject
     const poFlag = /^\s*w/i.test(String(ex.ro_ref || ''));
     const warranty = poFlag || ex.warranty_marked || warrantyHint;
-    if (out.id) {
+    if (out.id && !ex.not_parts) {
       const expected = ex.subtotal_cents != null ? ex.subtotal_cents : ex.total_cents;
       const src = poFlag ? 'po' : ex.warranty_marked ? 'stamp' : 'subject';
       if (warranty) await openClaim(locationId, out.id, ex, { kind: 'warranty', expectedCents: expected, source: src });
@@ -653,7 +673,7 @@ module.exports = (pool) => {
         `SELECT id, vendor, invoice_number, invoice_date::text AS invoice_date, total_cents, subtotal_cents, ro_ref,
                 matched_order_id, matched_order_number, match_status, match_candidates, ro_parts_cost_cents,
                 recon_status, recon_note, source, created_at, job_paid_cents, line_findings,
-                (file_data IS NOT NULL) AS has_file, file_mime,
+                (file_data IS NOT NULL) AS has_file, file_mime, not_parts,
                 EXISTS (SELECT 1 FROM warranty_claim w WHERE w.invoice_id = vendor_invoice.id) AS warranty
            FROM vendor_invoice WHERE location_id=$1 ORDER BY created_at DESC LIMIT 200`, [req.params.locationId]);
       // Records are never purged — the statement check matches against every
@@ -752,6 +772,34 @@ module.exports = (pool) => {
         [inv.id, b.order_id, String(b.order_number), roCost, JSON.stringify(findings), who(req)]);
       const { rec } = await rollUpJob(inv.location_id, b.order_id, roCost, orderInvoiced);
       res.json({ ok: true, recon_status: rec.status, recon_note: rec.note, line_findings: findings });
+    } catch (e) { fail(res, e); }
+  });
+
+  // "Actually, this IS parts" — reclassify a parked document and run it through
+  // the normal pipeline. Re-reads the stored scan so it gets a real match rather
+  // than inheriting the extraction that mis-called it.
+  router.put('/invoice/:id/is-parts', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      await ensurePartsReconTables(pool);
+      const { rows } = await pool.query('SELECT * FROM vendor_invoice WHERE id=$1', [req.params.id]);
+      if (!rows.length) return fail(res, 'Invoice not found', 404);
+      const inv = rows[0];
+      if (!canAccessLocation(req.user, inv.location_id)) return fail(res, 'Access denied for this location', 403);
+      const { rows: lr } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [inv.location_id]);
+      const smLoc = lr[0] && lr[0].shopmonkey_location_id;
+      if (!smLoc) return fail(res, 'Location not connected to Shopmonkey', 400);
+      if (inv.file_data) {
+        const mime = inv.file_mime || 'application/pdf';
+        const out = await ingestFile(inv.location_id, smLoc, process.env.SHOPMONKEY_API_KEY, inv.file_data.toString('base64'), mime, inv.source || 'upload');
+        // The re-read supersedes the parked row unless it landed on the same one.
+        if (out.id && out.id !== inv.id) await pool.query('DELETE FROM vendor_invoice WHERE id=$1', [inv.id]);
+        else await pool.query('UPDATE vendor_invoice SET not_parts=false WHERE id=$1', [inv.id]);
+        return res.json({ ok: true, reread: true, ...out });
+      }
+      // No stored scan (it reconciled clean and the image was dropped) — just
+      // un-park it and re-match on what we already extracted.
+      await pool.query("UPDATE vendor_invoice SET not_parts=false, match_status='pending' WHERE id=$1", [inv.id]);
+      res.json({ ok: true, reread: false });
     } catch (e) { fail(res, e); }
   });
 

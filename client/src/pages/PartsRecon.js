@@ -175,9 +175,10 @@ const MATCH_COLOR = { matched: 'var(--success)', confirmed: 'var(--success)', am
 // What actually wants a human — the same test the Waiting-on-you rail uses, so
 // the tab and the rail can never disagree. A reconciled invoice drops out of the
 // worklist the moment it's clean; "All" keeps it as the record.
-const needsAttention = (i) => !['matched', 'confirmed'].includes(i.match_status)
+const needsAttention = (i) => !i.not_parts && (
+  !['matched', 'confirmed'].includes(i.match_status)
   || i.recon_status === 'underlogged'
-  || (i.line_findings || []).length > 0;
+  || (i.line_findings || []).length > 0);
 
 function InvoicesView({ locId }) {
   const { api, token } = useAuth();
@@ -186,6 +187,14 @@ function InvoicesView({ locId }) {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null); // { done, total, name } while a batch reads
+  // A parked document the reader called wrong — re-read it and run it properly.
+  const isParts = async (inv) => {
+    try {
+      const out = await api(`/parts/invoice/${inv.id}/is-parts`, { method: 'PUT', body: JSON.stringify({}) });
+      showToast(out.matched_order_number ? `Now matched to RO ${out.matched_order_number}` : 'Moved back into parts — check the match');
+      load();
+    } catch (e) { showToast(e.message, 'error'); }
+  };
   const [show, setShow] = useState('attention');  // default to the worklist, not the pile
 
   const load = useCallback(() => {
@@ -320,7 +329,9 @@ function InvoicesView({ locId }) {
 
       {!!(data.invoices || []).length && (
         <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
-          {[['attention', `Needs attention (${(data.invoices || []).filter(needsAttention).length})`], ['all', `All (${(data.invoices || []).length}${data.total_count > (data.invoices || []).length ? ` of ${data.total_count}` : ''})`]].map(([k, l]) => (
+          {[['attention', `Needs attention (${(data.invoices || []).filter(needsAttention).length})`],
+            ['all', `All (${(data.invoices || []).filter((i) => !i.not_parts).length}${data.total_count > (data.invoices || []).length ? ` of ${data.total_count}` : ''})`],
+            ['notparts', `Not parts (${(data.invoices || []).filter((i) => i.not_parts).length})`]].map(([k, l]) => (
             <button key={k} onClick={() => setShow(k)} className={show === k ? 'primary' : ''} style={{ fontSize: '12px', padding: '5px 12px' }}>{l}</button>
           ))}
         </div>
@@ -336,7 +347,7 @@ function InvoicesView({ locId }) {
         <div className="card" style={{ color: 'var(--text3)', textAlign: 'center', padding: '28px' }}>No invoices yet. Forward or upload a supplier invoice to start reconciling.</div>
       )}
 
-      {(data.invoices || []).filter((i) => show === 'all' || needsAttention(i)).map((inv) => {
+      {(data.invoices || []).filter((i) => (show === 'notparts' ? i.not_parts : show === 'all' ? !i.not_parts : needsAttention(i))).map((inv) => {
         const rs = RECON[inv.recon_status] || RECON.pending;
         return (
           <div key={inv.id} className="card" style={{ marginBottom: '8px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -352,8 +363,9 @@ function InvoicesView({ locId }) {
             <div style={{ fontSize: '11px', fontWeight: 700, color: rs.c, minWidth: '130px', textAlign: 'right' }}>{rs.t}</div>
             <div style={{ display: 'flex', gap: '6px' }}>
               {inv.has_file && <button onClick={() => viewFile(inv)} title="Look at the original scan" style={{ fontSize: '11px', padding: '4px 10px' }}>🔍 View</button>}
-              <button onClick={() => markWarranty(inv)} title={inv.warranty ? 'Already a warranty claim — tap to change the expected credit' : 'Mark as warranty — watch for the supplier credit'}
-                style={{ fontSize: '11px', padding: '4px 10px', color: inv.warranty ? 'var(--info)' : undefined }}>🛡 {inv.warranty ? 'Warranty' : 'Warranty'}</button>
+              {inv.not_parts && <button onClick={() => isParts(inv)} title="This is a parts purchase after all — re-read it and match to an RO" style={{ fontSize: '11px', padding: '4px 10px' }}>↩ Is parts</button>}
+              {!inv.not_parts && <button onClick={() => markWarranty(inv)} title={inv.warranty ? 'Already a warranty claim — tap to change the expected credit' : 'Mark as warranty — watch for the supplier credit'}
+                style={{ fontSize: '11px', padding: '4px 10px', color: inv.warranty ? 'var(--info)' : undefined }}>🛡 Warranty</button>}
               <button onClick={() => pickMatch(inv)} style={{ fontSize: '11px', padding: '4px 10px' }}>{inv.matched_order_number ? 'Re-match' : 'Match RO'}</button>
               <button onClick={() => del(inv)} title="Remove" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>✕</button>
             </div>
@@ -616,7 +628,7 @@ function StatementsView({ locId }) {
         );
       })}
       <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
-        <b>Missing</b> = the vendor billed it but we never captured it — chase it (likeliest place an unbilled part hides). Credit notes are listed too: a credit you never received is money owed back to you. <b>Amount off</b> = we have it but the total doesn’t match the statement. Use <b>📋 Copy numbers</b> to paste the list straight into an email to the supplier.
+        <b>Missing</b> = the vendor billed it but we never captured it — chase it (likeliest place an unbilled part hides). Credit notes are listed too: a credit you never received is money owed back to you. <b>Amount off</b> = we have it but the total doesn’t match the statement. Use <b>📋 Copy numbers</b> to paste the list straight into an email to the supplier. Anything scanned in the same stack that isn't a parts purchase — fuel, coffee, cleaning supplies — is parked under <b>Not parts</b> and never reaches the worklist; tap <b>↩ Is parts</b> if one was called wrong.
       </div>
     </div>
   );
