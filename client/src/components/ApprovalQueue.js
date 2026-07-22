@@ -368,7 +368,40 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
     if (f) onPick(f);
   };
 
-  const regen = async (id) => {
+  // Regenerate a draft. For a POSTER (we tagged it "<type> poster" at intake and
+  // image gen is available) this makes a NEW hero picture — flipping the photo
+  // engine (OpenAI <-> Gemini) so you can compare — re-overlays fresh copy, and
+  // replaces the stored image. For an uploaded floor photo (or if image gen is
+  // off) there's no picture to redraw, so it just re-writes the captions.
+  const regen = async (post) => {
+    const id = post.id;
+    const m = post.note && /^(seasonal|educational|testimonial) poster$/.exec(String(post.note).trim());
+    if (m && imageGen) {
+      const ptype = m[1];
+      setBusy(s => ({ ...s, [id]: true })); setErr(null); setNotice('Drawing a new picture… (this can take ~15s)');
+      try {
+        const copyData = await api('/marketing/posts/poster-copy', { method: 'POST', body: JSON.stringify({ type: ptype, topic: '' }) });
+        let bg = null, usedProvider = null;
+        try {
+          const q = imgProvider ? `?provider=${imgProvider}` : '';
+          const im = await api(`/marketing/posts/poster-image${q}`, { method: 'POST', body: JSON.stringify({ type: ptype, topic: '' }) });
+          bg = (im && im.image) || null; usedProvider = im && im.provider;
+        } catch (e) { /* fall back to flat template */ }
+        const blob = await renderPoster({ type: ptype, ...copyData, locName, bg });
+        const res = await fetch(`/api/marketing/posts/post/${id}/replace-image?recap=1`, {
+          method: 'POST', headers: { 'Content-Type': 'image/jpeg', Authorization: `Bearer ${token}` }, body: blob,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not replace the picture');
+        if (usedProvider) setImgProvider(usedProvider === 'openai' ? 'gemini' : 'openai');
+        const nextName = usedProvider === 'openai' ? 'Gemini' : 'OpenAI';
+        const art = usedProvider ? ` — art by ${usedProvider === 'openai' ? 'OpenAI' : 'Gemini'}; regenerate again to try ${nextName}` : '';
+        setNotice(`New picture created${art}.`);
+        refresh();
+      } catch (e) { setErr(String(e.message || e)); setNotice(null); }
+      finally { setBusy(s => { const n = { ...s }; delete n[id]; return n; }); }
+      return;
+    }
     setBusy(s => ({ ...s, [id]: true })); setErr(null);
     try { await api(`/marketing/posts/post/${id}/regenerate`, { method: 'POST' }); refresh(); }
     catch (e) { setErr(String(e.message || e)); }
@@ -424,10 +457,31 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
     finally { setGenPoster(false); }
   };
 
-  // Ask AI for timely, seasonal poster ideas to build.
+  // Suggest ideas. For a TESTIMONIAL poster we pull the shop's real Google
+  // reviews (5★ first) and offer each as a pick — the words come straight from
+  // a real customer, never AI-invented (no fake reviews). For other types we
+  // ask the AI for timely, seasonal ideas.
+  const snippet = (t, n = 64) => { t = (t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
   const suggestIdeas = async () => {
-    setIdeasLoading(true); setErr(null);
+    setIdeasLoading(true); setErr(null); setNotice(null);
     try {
+      if (posterType === 'testimonial') {
+        if (!locId) { setErr('Pick a location first.'); setIdeas([]); return; }
+        let data;
+        try { data = await api(`/marketing/reviews/${locId}`); }
+        catch (e) { setErr('Google reviews aren’t connected for this location yet — add its Google place in settings.'); setIdeas([]); return; }
+        const all = Array.isArray(data.reviews) ? data.reviews : [];
+        const five = all.filter(r => Number(r.rating) === 5);
+        const pick = five.length ? five : all;   // fall back to 4★+ only if there are no recent 5★
+        if (!pick.length) { setErr('No recent 5★ reviews to turn into a poster yet.'); setIdeas([]); return; }
+        setIdeas(pick.map(r => ({
+          type: 'testimonial',
+          topic: r.text,
+          label: `★${r.rating} ${r.author || 'Customer'} — “${snippet(r.text)}”`,
+          why: r.text,
+        })));
+        return;
+      }
       const month = new Date().toLocaleDateString('en-CA', { month: 'long' });
       const res = await api('/marketing/posts/poster-ideas', { method: 'POST', body: JSON.stringify({ month }) });
       setIdeas(Array.isArray(res.ideas) ? res.ideas : []);
@@ -532,9 +586,12 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
             <option value="testimonial">Testimonial</option>
           </select>
           <input value={posterTopic} onChange={e => setPosterTopic(e.target.value)}
-            placeholder={posterType === 'testimonial' ? 'paste a customer quote (optional)' : 'topic / offer (optional)'}
+            placeholder={posterType === 'testimonial' ? 'a customer quote — or hit “Pull 5★ reviews”' : 'topic / offer (optional)'}
             style={{ flex: 1, minWidth: '160px' }} />
-          <button onClick={suggestIdeas} disabled={!configured || ideasLoading}>{ideasLoading ? 'Thinking…' : '💡 Suggest ideas'}</button>
+          <button onClick={suggestIdeas} disabled={!configured || ideasLoading}
+            title={posterType === 'testimonial' ? 'Pull your real 5★ Google reviews to build a testimonial poster' : 'Get timely, seasonal poster ideas'}>
+            {ideasLoading ? (posterType === 'testimonial' ? 'Fetching reviews…' : 'Thinking…') : (posterType === 'testimonial' ? '★ Pull 5★ reviews' : '💡 Suggest ideas')}
+          </button>
           <button className="primary" disabled={!configured || genPoster || !locId} onClick={makePoster}>
             {genPoster ? 'Designing…' : '🎨 Generate poster'}
           </button>
@@ -600,7 +657,15 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
               <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '11px 14px', borderTop: '0.5px solid var(--border)', background: 'var(--bg3)' }}>
                 <button className="primary" onClick={() => act(p.id, 'approve')}>Approve</button>
                 {dirty && <button onClick={() => saveEdits(p.id)}>Save edits</button>}
-                <button onClick={() => regen(p.id)} disabled={!!busy[p.id]}>{busy[p.id] ? 'Regenerating…' : '✨ Regenerate'}</button>
+                {(() => {
+                  const isPoster = imageGen && p.note && /^(seasonal|educational|testimonial) poster$/.test(String(p.note).trim());
+                  return (
+                    <button onClick={() => regen(p)} disabled={!!busy[p.id]}
+                      title={isPoster ? 'New picture (flips the photo engine so you can compare)' : 'Re-write the captions'}>
+                      {busy[p.id] ? (isPoster ? 'Drawing…' : 'Regenerating…') : (isPoster ? '🎨 New picture' : '✨ Regenerate')}
+                    </button>
+                  );
+                })()}
                 <button onClick={() => download(p)}>⬇ Image</button>
                 <span style={{ marginLeft: 'auto' }} />
                 <span className="badge neutral">{p.location_name}</span>

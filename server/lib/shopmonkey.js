@@ -94,6 +94,25 @@ async function fetchRecentInvoicedOrders(apiKey, smLocationId, limit = 150) {
   return out.filter((o) => !o.deleted && o.invoicedDate && (!o.locationId || o.locationId === smLocationId));
 }
 
+// Most-recent orders for a location across ALL statuses (open estimates too),
+// createdDate desc. Used to sample the RO-number format and as a suffix-scan
+// fallback when matching a short "PO" to its full work-order number.
+async function fetchRecentOrders(apiKey, smLocationId, limit = 100) {
+  const sort = JSON.stringify([{ name: 'createdDate', order: 'desc' }]);
+  const where = JSON.stringify({ createdDate: { gte: '2000-01-01T00:00:00.000Z' } });
+  const out = [];
+  for (let skip = 0; skip < limit; skip += 100) {
+    const p = new URLSearchParams({ where, limit: '100', skip: String(skip), sort, locationId: smLocationId });
+    const r = await fetch(`${SM}/order?${p}`, { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+    if (!r.ok) throw new Error(`recent orders ${r.status}`);
+    const b = await r.json();
+    const batch = Array.isArray(b.data) ? b.data : (b.data && b.data.data) || [];
+    out.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return out.filter((o) => !o.deleted && (!o.locationId || o.locationId === smLocationId));
+}
+
 // One order's service lines (each carries labors[] + parts[]). limit 100.
 async function fetchOrderService(apiKey, orderId) {
   const res = await fetch(`${SM}/order/${orderId}/service?limit=100`, {
@@ -104,4 +123,4 @@ async function fetchOrderService(apiKey, orderId) {
   return (j && j.data && j.data.data) ? j.data.data : (j.data || []);
 }
 
-module.exports = { parseShopmonkeyDate, centsToDollars, monthStartFor, sweepOrders, fetchInvoicedOrdersForLocation, fetchOrderService, fetchOrderByNumber, fetchRecentInvoicedOrders };
+module.exports = { parseShopmonkeyDate, centsToDollars, monthStartFor, sweepOrders, fetchInvoicedOrdersForLocation, fetchOrderService, fetchOrderByNumber, fetchRecentInvoicedOrders, fetchRecentOrders };

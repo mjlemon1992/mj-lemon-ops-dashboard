@@ -15,6 +15,12 @@ const pool = new Pool({
 app.use(cors({ origin: process.env.CLIENT_URL || '*' }));
 // Stash the raw body alongside the parsed JSON so the Slack events endpoint can
 // verify request signatures (Slack signs the raw bytes, not the parsed object).
+// Parts invoice/statement SCANS arrive as base64 inside JSON and are far bigger
+// than body-parser's 100kb default — a phone photo or multi-page PDF blows past
+// it and 413s. This bigger parser is mounted FIRST for that router only (rather
+// than raising the limit for the whole API); body-parser marks the request
+// parsed, so the global parser below skips it.
+app.use('/api/parts', express.json({ limit: '30mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 const authRoutes = require('./routes/auth');
