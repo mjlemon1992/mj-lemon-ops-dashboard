@@ -97,4 +97,48 @@ async function markSeen({ user, pass, uids } = {}) {
   }
 }
 
-module.exports = { fetchInvoiceEmails, markSeen };
+// Diagnostic: what's actually in the mailbox and why a message was or wasn't
+// picked up. Reads metadata only — never downloads or ingests anything.
+async function peekInbox({ user, pass, sinceDays = 7, max = 15 } = {}) {
+  if (!user || !pass) return { ok: false, error: 'IMAP user/pass not set', messages: [] };
+  const client = new ImapFlow({ host: 'imap.gmail.com', port: 993, secure: true, auth: { user, pass }, logger: false, emitLogs: false });
+  const messages = [];
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      const since = new Date(Date.now() - sinceDays * 86400 * 1000);
+      const uids = await client.search({ since }, { uid: true });   // read state ignored
+      for (const uid of (Array.isArray(uids) ? uids : []).slice(-max)) {
+        const msg = await client.fetchOne(uid, { uid: true, envelope: true, flags: true, bodyStructure: true }, { uid: true });
+        if (!msg) continue;
+        const parts = [];
+        (function walk(n) {
+          if (!n) return;
+          if (Array.isArray(n.childNodes) && n.childNodes.length) return n.childNodes.forEach(walk);
+          const dp = n.dispositionParameters || {}; const pp = n.parameters || {};
+          parts.push({
+            mime: `${n.type || ''}/${n.subtype || ''}`.toLowerCase(),
+            disposition: n.disposition || null,
+            filename: dp.filename || dp.FILENAME || pp.name || pp.NAME || null,
+            size: n.size || null,
+          });
+        }(msg.bodyStructure));
+        const from = msg.envelope && msg.envelope.from && msg.envelope.from[0];
+        messages.push({
+          uid,
+          subject: (msg.envelope && msg.envelope.subject) || '(no subject)',
+          from: (from && from.address) || '',
+          date: msg.envelope && msg.envelope.date,
+          seen: !!(msg.flags && msg.flags.has('\\Seen')),
+          parts,
+        });
+      }
+    } finally { lock.release(); }
+    return { ok: true, messages };
+  } catch (e) {
+    return { ok: false, error: e.message, messages: [] };
+  } finally { try { await client.logout(); } catch (e) { /* ignore */ } }
+}
+
+module.exports = { fetchInvoiceEmails, markSeen, peekInbox };

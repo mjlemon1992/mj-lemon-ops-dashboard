@@ -4,7 +4,7 @@ const { monthStartFor, fetchInvoicedOrdersForLocation, fetchOrderService } = req
 const { ensurePartsReconTables } = require('../lib/partsReconSchema');
 const { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCheck, reconcileJob, matchInvoiceToRo, digits } = require('../lib/invoiceRecon');
 const { fetchOrderByNumber } = require('../lib/shopmonkey');
-const { fetchInvoiceEmails, markSeen } = require('../lib/invoiceInbox');
+const { fetchInvoiceEmails, markSeen, peekInbox } = require('../lib/invoiceInbox');
 
 // Parts reconciliation — v1a: ShopMonkey-only parts margin / exposure per RO.
 // For each invoiced order in the window, compare each part's wholesale cost
@@ -448,6 +448,18 @@ module.exports = (pool) => {
         `UPDATE warranty_claim SET status=$2, credited_cents=$3, credited_number=$4, credited_at=now(), note=COALESCE($5, note) WHERE id=$1`,
         [req.params.id, st, b.credited != null ? Math.round(Number(b.credited) * 100) : null, b.credited_number || null, b.note || null]);
       res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Diagnostic: show what's sitting in the mailbox and how each message looks to
+  // the poller (read state, attachment types) — metadata only, ingests nothing.
+  router.get('/:locationId/inbox-peek', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
+    try {
+      const { user, pass } = inboxConfigFor(req.params.locationId);
+      const out = await peekInbox({ user, pass, sinceDays: Number(req.query.days || 7) });
+      if (!out.ok) return fail(res, out.error, 400);
+      res.json({ mailbox: user, ...out });
     } catch (e) { fail(res, e); }
   });
 
