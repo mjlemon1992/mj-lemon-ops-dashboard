@@ -302,7 +302,7 @@ export default function Layout() {
                         ...d.reorders.map(r => ({ key: `ro-${r.id}`, icon: '📦', text: `Re-order: ${r.item}`, loc: r.location_id, locName: r.location_name, path: user?.role === 'advisor' ? '/reorders' : '/time-clock' })),
                         ...d.clockq.map(r => ({ key: `cq-${r.id}`, icon: '⏱', text: `${r.person_name} — ${r.kind === 'overtime' ? 'overtime' : 'missed break'}`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
                         ...d.bonus.map(b => ({ key: `bo-${b.location_id}`, icon: '◆', text: `Bonus — ${b.status === 'draft' ? 'draft awaiting lock' : 'month open'}`, loc: b.location_id, locName: b.location_name, path: '/bonus' })),
-                        ...d.parts.map(r => ({ key: `pt-${r.id}`, icon: '🔧', text: r.text, loc: r.location_id, locName: r.location_name, path: '/parts' })),
+                        ...d.parts.map(r => ({ key: `pt-${r.id}`, icon: '🔧', text: r.text, loc: r.location_id, locName: r.location_name, path: `/parts?tab=${r.kind === 'statement' ? 'statements' : r.kind === 'warranty' ? 'warranty' : 'invoices'}` })),
                       ].map((it) => (
                         <div key={it.key}
                           onClick={() => { setAttnOpen(false); select(it.loc); navigate(it.path); }}

@@ -160,7 +160,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
             {p.kind === 'statement' ? 'Supplier statement' : p.kind === 'warranty' ? 'Warranty credit' : 'Parts invoice'}{multiLoc ? ` — ${p.location_name}` : ''}
           </div>
           <div className="wr-card-body">{p.text}</div>
-          <div className="wr-actions"><button onClick={() => goTo(p.location_id, '/parts')}>Review →</button></div>
+          <div className="wr-actions"><button onClick={() => goTo(p.location_id, `/parts?tab=${p.kind === 'statement' ? 'statements' : p.kind === 'warranty' ? 'warranty' : 'invoices'}`)}>Review →</button></div>
         </div>
       ))}
 

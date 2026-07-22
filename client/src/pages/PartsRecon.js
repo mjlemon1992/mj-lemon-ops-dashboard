@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import PerLocationPage from '../components/PerLocationPage';
 import { money } from '../utils/format';
@@ -21,8 +22,16 @@ export default function PartsRecon() {
   return <PerLocationPage>{(locId) => <PartsTabs locId={locId} />}</PerLocationPage>;
 }
 
+const TABS = ['margin', 'invoices', 'statements', 'warranty'];
 function PartsTabs({ locId }) {
-  const [view, setView] = useState('margin');
+  // Tab lives in the URL (?tab=) so the waiting-on-you rail can deep-link
+  // straight to the invoice / statement / credit it's flagging — a plain
+  // /parts link always dumped the owner on Margin (and did nothing at all when
+  // they were already on the page), which is why "Review →" looked dead.
+  const [params, setParams] = useSearchParams();
+  const urlTab = params.get('tab');
+  const view = TABS.includes(urlTab) ? urlTab : 'margin';
+  const setView = (k) => setParams(k === 'margin' ? {} : { tab: k }, { replace: true });
   return (
     <div>
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
