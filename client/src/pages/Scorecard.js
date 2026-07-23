@@ -95,10 +95,14 @@ function ScorecardView({ locId }) {
         </div>
       ) : (
         <div className="stat-grid" style={{ marginBottom: '20px' }}>
-          <Tile label="Net income" value={money0(net)} tone={num(net) >= 0 ? 'good' : 'bad'}
+          <Tile label="Net income" value={money0(net)} tone={num(net) >= 0 && !(netMargin > 30) ? (num(net) >= 0 ? 'good' : 'bad') : ''}
             sub={netMargin != null ? `${netMargin.toFixed(1)}% net margin` : ''} />
+          {/* A net margin far above the 15–22% band on month-to-date QuickBooks is
+              almost always books-not-closed (income posted, expenses lagging), NOT a
+              win — so don't paint it green, and say why. */}
           <Tile label="Net margin" value={netMargin != null ? `${netMargin.toFixed(1)}%` : '—'}
-            tone={netMargin >= 15 ? 'good' : 'warn'} sub="target 15–22%" />
+            tone={(netMargin >= 15 && netMargin <= 30) ? 'good' : 'warn'}
+            sub={netMargin > 30 ? 'above range — books likely not closed yet' : 'target 15–22%'} />
           <Tile label="Income" value={money0(income)} sub="this month" />
           <Tile label="Expenses" value={money0(expenses)} sub="this month" />
         </div>

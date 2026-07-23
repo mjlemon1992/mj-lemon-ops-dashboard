@@ -250,9 +250,12 @@ function TechniciansView({ locId }) {
             </div>
           )}
 
-          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
-            Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks, goodwill). Labour revenue is pre-tax, after discounts. Efficiency = hours sold ÷ worked hours, measured month-to-date; worked = each tech’s weekly hours × weeks elapsed this month. Multi-tech jobs attribute each labour line to the tech who performed it, matching Shopmonkey&rsquo;s per-technician report.
-          </div>
+          <details style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text2)', userSelect: 'none' }}>How these numbers are worked out</summary>
+            <div style={{ marginTop: '6px', lineHeight: 1.5 }}>
+              Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks, goodwill). Labour revenue is pre-tax, after discounts. Efficiency = hours sold ÷ worked hours, measured month-to-date; worked = each tech’s weekly hours × weeks elapsed this month. Multi-tech jobs attribute each labour line to the tech who performed it, matching Shopmonkey&rsquo;s per-technician report.
+            </div>
+          </details>
         </>
       )}
     </div>

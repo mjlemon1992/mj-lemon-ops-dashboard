@@ -501,6 +501,28 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       refresh();
     } catch (e) { setErr(String(e.message || e)); }
   };
+  // Scheduled release: approve-and-hold, or reschedule/post-now an approved post.
+  const [schedId, setSchedId] = useState(null);   // which card has its date picker open
+  const [schedVal, setSchedVal] = useState('');
+  const fmtSched = (iso) => { try { return new Date(iso).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { return iso; } };
+  const approveAt = async (id, localdt) => {
+    try {
+      const iso = localdt ? new Date(localdt).toISOString() : null;
+      await api(`/marketing/posts/post/${id}/approve`, { method: 'POST', body: JSON.stringify({ scheduled_for: iso }) });
+      setSchedId(null); setSchedVal('');
+      setNotice(iso ? `Scheduled for ${fmtSched(iso)} — it posts automatically then.` : 'Approved — moved to “Ready to post” below.');
+      refresh();
+    } catch (e) { setErr(String(e.message || e)); }
+  };
+  const reschedule = async (id, localdt) => {
+    try {
+      const iso = localdt ? new Date(localdt).toISOString() : null;
+      await api(`/marketing/posts/post/${id}/schedule`, { method: 'POST', body: JSON.stringify({ scheduled_for: iso }) });
+      setSchedId(null); setSchedVal('');
+      setNotice(iso ? `Rescheduled for ${fmtSched(iso)}.` : 'Posting now.');
+      refresh();
+    } catch (e) { setErr(String(e.message || e)); }
+  };
   // Soft delete — for when the wrong image got imported. Recoverable from
   // "Recently deleted" below, so this no longer destroys anything outright.
   const del = async (id) => {
@@ -654,8 +676,17 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
                   ))}
                 </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '11px 14px', borderTop: '0.5px solid var(--border)', background: 'var(--bg3)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '11px 14px', borderTop: '0.5px solid var(--border)', background: 'var(--bg3)', flexWrap: 'wrap' }}>
                 <button className="primary" onClick={() => act(p.id, 'approve')}>Approve</button>
+                {schedId === p.id ? (
+                  <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                    <input type="datetime-local" value={schedVal} onChange={e => setSchedVal(e.target.value)} style={{ fontSize: '12px', padding: '4px 6px' }} />
+                    <button onClick={() => approveAt(p.id, schedVal)} disabled={!schedVal}>Schedule</button>
+                    <button onClick={() => { setSchedId(null); setSchedVal(''); }} style={{ color: 'var(--text3)', border: 0, background: 'none' }}>cancel</button>
+                  </span>
+                ) : (
+                  <button onClick={() => { setSchedId(p.id); setSchedVal(''); }} title="Approve now but hold posting until a set time">⏰ Schedule</button>
+                )}
                 {dirty && <button onClick={() => saveEdits(p.id)}>Save edits</button>}
                 {(() => {
                   const isPoster = imageGen && p.note && /^(seasonal|educational|testimonial) poster$/.test(String(p.note).trim());
@@ -689,7 +720,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
             Ready to post <span style={{ color: 'var(--text3)', fontWeight: 400 }}>({approved.length})</span>
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text3)', margin: '2px 0 10px' }}>
-            Approved and waiting — these publish automatically once Meta/GBP access is live.
+            Approved and waiting — these publish automatically once Meta/GBP access is live. Scheduled ones (⏰) fire at their set time.
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {approved.map(p => (
@@ -700,8 +731,24 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
                 <div style={{ flex: '1 1 160px', minWidth: 0, fontSize: '12px', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {p.captions?.ig || p.note || '(no caption)'}
                 </div>
-                <span className="badge success">approved</span>
+                {p.scheduled_for && !p.published_at
+                  ? <span className="badge warning" title="Approved — auto-posts at this time">⏰ {fmtSched(p.scheduled_for)}</span>
+                  : <span className="badge success">approved</span>}
                 <PubChips p={p} />
+                {p.scheduled_for && !p.published_at && (
+                  schedId === p.id ? (
+                    <span style={{ display: 'inline-flex', gap: '5px', alignItems: 'center' }}>
+                      <input type="datetime-local" value={schedVal} onChange={e => setSchedVal(e.target.value)} style={{ fontSize: '12px', padding: '3px 5px' }} />
+                      <button onClick={() => reschedule(p.id, schedVal)} disabled={!schedVal} style={{ fontSize: '12px' }}>Set</button>
+                      <button onClick={() => { setSchedId(null); setSchedVal(''); }} style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '12px' }}>cancel</button>
+                    </span>
+                  ) : (
+                    <>
+                      <button onClick={() => reschedule(p.id, null)} style={{ fontSize: '12px' }} title="Publish immediately">Post now</button>
+                      <button onClick={() => { setSchedId(p.id); setSchedVal(''); }} style={{ fontSize: '12px' }}>Reschedule</button>
+                    </>
+                  )
+                )}
                 <button onClick={() => download(p)} style={{ fontSize: '12px' }}>⬇ Image</button>
                 <button onClick={() => copy(p.captions?.ig)} style={{ fontSize: '12px' }} title="Copy Instagram caption">IG</button>
                 <button onClick={() => copy(p.captions?.fb)} style={{ fontSize: '12px' }} title="Copy Facebook caption">FB</button>

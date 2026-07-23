@@ -183,6 +183,12 @@ module.exports = (pool) => {
     await pool.query('ALTER TABLE marketing_post ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ');
     await pool.query('ALTER TABLE marketing_post ADD COLUMN IF NOT EXISTS deleted_via VARCHAR(20)');
     await pool.query('ALTER TABLE marketing_post ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(120)');
+    // Scheduled release: an approved post can be HELD until scheduled_for, then the
+    // release worker publishes it. published_at marks it done (so it never fires
+    // twice). Both null on a plain immediate-approve = today's behaviour.
+    await pool.query('ALTER TABLE marketing_post ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMPTZ');
+    await pool.query('ALTER TABLE marketing_post ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ');
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_marketing_post_due ON marketing_post(scheduled_for) WHERE status='approved' AND published_at IS NULL AND scheduled_for IS NOT NULL");
     // Append-only audit: every lifecycle event (create/approve/skip/delete/
     // restore/purge) so "why did this post change/vanish" is always answerable.
     await pool.query(`
@@ -388,7 +394,8 @@ module.exports = (pool) => {
       const params = status === 'deleted' ? [req.params.locationId] : [req.params.locationId, status];
       const { rows } = await pool.query(
         `SELECT id, location_name, status, note, image_mime, image_data,
-                caption_ig, caption_fb, caption_gbp, created_at, actioned_at, deleted_at, deleted_via
+                caption_ig, caption_fb, caption_gbp, created_at, actioned_at, deleted_at, deleted_via,
+                scheduled_for, published_at
            FROM marketing_post WHERE ${where}
            ORDER BY COALESCE(deleted_at, created_at) DESC LIMIT 50`,
         params
@@ -405,6 +412,7 @@ module.exports = (pool) => {
         captions: { ig: r.caption_ig, fb: r.caption_fb, gbp: r.caption_gbp },
         image: dataUri(r), created_at: r.created_at, actioned_at: r.actioned_at,
         deleted_at: r.deleted_at, deleted_via: r.deleted_via,
+        scheduled_for: r.scheduled_for, published_at: r.published_at,
         publish: pubBy[r.id] || null,
       })));
     } catch (e) { fail(res, e); }
@@ -438,9 +446,45 @@ module.exports = (pool) => {
   // Approve = ready AND published: fire the publish engine after the status
   // flips. Fire-and-forget — per-channel outcomes land on the card's chips;
   // channels without credentials record not_connected and nothing goes out.
+  // Approve now, or approve + SCHEDULE for later. Body { scheduled_for } (ISO) →
+  // hold it; the release worker publishes when due. No scheduled_for → publish now.
+  const parseFuture = (raw) => {
+    if (!raw) return { when: null };
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return { error: 'Invalid date/time' };
+    if (d.getTime() <= Date.now() + 30000) return { error: 'Pick a time at least a minute from now' };
+    return { when: d };
+  };
   router.post('/post/:postId/approve', ...gate, postGuard, async (req, res) => {
-    await setStatus('approved')(req, res);
-    publishPost(pool, req.params.postId).catch(() => {});
+    try {
+      await ensureTables();
+      const { when, error } = parseFuture((req.body || {}).scheduled_for);
+      if (error) return fail(res, error, 400);
+      const { rows } = await pool.query(
+        `UPDATE marketing_post SET status='approved', actioned_at=NOW(), scheduled_for=$2, published_at=$3
+           WHERE id=$1 AND deleted_at IS NULL RETURNING id, location_id`,
+        [req.params.postId, when, when ? null : new Date()]);
+      if (!rows.length) return res.status(404).json({ error: 'Post not found' });
+      await audit(rows[0].id, rows[0].location_id, when ? 'scheduled' : 'approved', actorOf(req), when ? when.toISOString() : null);
+      res.json({ ok: true, id: rows[0].id, status: 'approved', scheduled_for: when ? when.toISOString() : null });
+      if (!when) publishPost(pool, req.params.postId).catch(() => {});   // immediate: fire now
+    } catch (e) { fail(res, e); }
+  });
+  // Reschedule an approved-but-unpublished post, or clear the schedule to post NOW.
+  router.post('/post/:postId/schedule', ...gate, postGuard, async (req, res) => {
+    try {
+      await ensureTables();
+      const { when, error } = parseFuture((req.body || {}).scheduled_for);
+      if (error) return fail(res, error, 400);
+      const { rows } = await pool.query(
+        `UPDATE marketing_post SET status='approved', actioned_at=NOW(), scheduled_for=$2, published_at=$3
+           WHERE id=$1 AND deleted_at IS NULL RETURNING id, location_id`,
+        [req.params.postId, when, when ? null : new Date()]);
+      if (!rows.length) return res.status(404).json({ error: 'Post not found' });
+      await audit(rows[0].id, rows[0].location_id, when ? 'rescheduled' : 'released', actorOf(req), when ? when.toISOString() : null);
+      res.json({ ok: true, scheduled_for: when ? when.toISOString() : null });
+      if (!when) publishPost(pool, req.params.postId).catch(() => {});   // post now
+    } catch (e) { fail(res, e); }
   });
   // Manual (re)publish — retry failed channels from the queue card.
   router.post('/post/:postId/publish', ...gate, postGuard, async (req, res) => {
@@ -626,6 +670,33 @@ Honest, on-brand, no hype, no invented stats.`;
       res.json({ ideas: Array.isArray(ideas) ? ideas.slice(0, 6) : [] });
     } catch (e) { fail(res, e); }
   });
+
+  // ── Scheduled-release worker ───────────────────────────────────────────────
+  // Every minute, publish any approved post whose scheduled time has passed.
+  // published_at is stamped BEFORE publishing so a slow publish can't double-fire,
+  // and re-entrancy-guarded so overlapping ticks don't race. Single instance.
+  let _releasing = false;
+  const releaseDue = async () => {
+    if (_releasing) return;
+    _releasing = true;
+    try {
+      await ensureTables();
+      const { rows } = await pool.query(
+        `SELECT id, location_id FROM marketing_post
+          WHERE status='approved' AND published_at IS NULL AND scheduled_for IS NOT NULL
+            AND scheduled_for <= NOW() AND deleted_at IS NULL
+          ORDER BY scheduled_for LIMIT 20`);
+      for (const r of rows) {
+        const upd = await pool.query('UPDATE marketing_post SET published_at=NOW() WHERE id=$1 AND published_at IS NULL RETURNING id', [r.id]);
+        if (!upd.rows.length) continue;   // another tick grabbed it
+        try { await publishPost(pool, r.id); } catch (e) { /* per-channel chips carry the error */ }
+        try { await audit(r.id, r.location_id, 'released', 'scheduler', null); } catch (e) { /* best-effort */ }
+        console.log(`[marketing] released scheduled post ${r.id}`);
+      }
+    } catch (e) { console.error('[marketing] release worker:', e.message); }
+    finally { _releasing = false; }
+  };
+  setInterval(releaseDue, 60 * 1000).unref?.();
 
   return router;
 };

@@ -156,6 +156,17 @@ function MarketingView({ locId }) {
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '9px' }}>
               <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Calls</span>
               <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{summary ? `${monthLabel(summary.period_start)} · Marchex` : 'Marchex'}</span>
+              {summary && (() => {
+                // Flag stale data — the Marchex report is uploaded by hand, so it
+                // lags. Say how old the latest one is so a 2-month-old number isn't
+                // mistaken for this month's.
+                const d = new Date(String(summary.period_start).slice(0, 10) + 'T12:00:00Z');
+                if (isNaN(d.getTime())) return null;
+                const now = new Date();
+                const monthsOld = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
+                if (monthsOld <= 0) return null;
+                return <span style={{ fontSize: '11px', color: 'var(--warning)', fontWeight: 600 }} title="Upload the latest Marchex PDF to refresh">· {monthsOld} mo old</span>;
+              })()}
             </div>
 
             {loading && !summary && <div style={{ color: 'var(--text3)', padding: '8px 0' }}>Loading…</div>}
