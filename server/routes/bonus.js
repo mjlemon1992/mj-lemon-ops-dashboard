@@ -177,10 +177,25 @@ module.exports = (pool) => {
         ORDER BY effective_from_month DESC, version_no DESC LIMIT 1`, [locationId, month]);
     return rows[0] || null;
   };
+  // Names of techs hidden on the Technicians page — hiding someone there now
+  // drops them from bonus too (calc + roster), so it's the single "this person
+  // is off the shop" switch. Matched by folded name (bonus_person has no tech_id).
+  const hiddenNameSet = async (locationId) => {
+    try {
+      const { rows } = await pool.query('SELECT tech_name FROM hidden_techs WHERE location_id=$1', [locationId]);
+      return new Set(rows.map((r) => normName(r.tech_name)).filter(Boolean));
+    } catch (e) { return new Set(); }
+  };
   // Bonus participants only — clock-only crew (in_bonus=false, e.g. probation
-  // hires) are excluded from every calculation and payout.
-  const activePeople = async (locationId) => (await pool.query(
-    'SELECT id, name, role, efficiency_floor FROM bonus_person WHERE location_id=$1 AND active=true AND in_bonus IS NOT FALSE ORDER BY role, name', [locationId])).rows;
+  // hires) AND anyone hidden on the Technicians page are excluded from every
+  // calculation and payout.
+  const activePeople = async (locationId) => {
+    const [{ rows }, hidden] = await Promise.all([
+      pool.query('SELECT id, name, role, efficiency_floor FROM bonus_person WHERE location_id=$1 AND active=true AND in_bonus IS NOT FALSE ORDER BY role, name', [locationId]),
+      hiddenNameSet(locationId),
+    ]);
+    return rows.filter((p) => !hidden.has(normName(p.name)));
+  };
   const effInputs = async (locationId, month) => {
     const { rows } = await pool.query('SELECT person_id, billed_hours, clocked_hours FROM efficiency_input WHERE location_id=$1 AND month=$2', [locationId, month]);
     const map = {};
@@ -274,7 +289,9 @@ module.exports = (pool) => {
       const lines = run ? (await pool.query('SELECT * FROM bonus_line WHERE bonus_run_id=$1 ORDER BY role_at_calc, person_name', [run.id])).rows : [];
       const formula = await formulaFor(locationId, viewMonth);
       const { rows: versions } = await pool.query('SELECT * FROM formula_version WHERE location_id=$1 ORDER BY version_no', [locationId]);
-      const people = (await pool.query('SELECT * FROM bonus_person WHERE location_id=$1 ORDER BY active DESC, role, name', [locationId])).rows;
+      const _allPeople = (await pool.query('SELECT * FROM bonus_person WHERE location_id=$1 ORDER BY active DESC, role, name', [locationId])).rows;
+      const _hiddenNames = await hiddenNameSet(locationId);
+      const people = _allPeople.filter((p) => !_hiddenNames.has(normName(p.name)));
       const efficiency = await effInputs(locationId, viewMonth);
       const { rows: targets } = await pool.query('SELECT month, target FROM sales_target WHERE location_id=$1 ORDER BY month', [locationId]);
 
