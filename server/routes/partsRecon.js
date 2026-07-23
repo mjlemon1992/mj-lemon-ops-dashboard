@@ -335,6 +335,39 @@ module.exports = (pool) => {
       dedicated: !!(process.env.PARTS_IMAP_USER && process.env.PARTS_IMAP_PASS),
     };
   };
+  // Hubdoc fan-out — the DASHBOARD forwards each FILED document to the books,
+  // replacing the blanket Gmail filter (which would forward a stacked scan as
+  // one unreadable brick). Because this fires per document AFTER splitting,
+  // Hubdoc receives individual invoices. Config: add "hubdoc":"<intake address>"
+  // to the location's PARTS_INBOX_MAP entry; sends from that same mailbox.
+  // One-shot per row: hubdoc_sent_at is claimed atomically before sending and
+  // released on failure, so re-ingests never double-file but a failed send
+  // retries on the next ingest of the same document.
+  const forwardToHubdoc = async (locationId, table, rowId, fileBase64, mediaType, label) => {
+    try {
+      if (!rowId || !fileBase64) return;
+      const hit = parseInboxMap().find((m) => m && m.location === locationId);
+      if (!hit || !hit.hubdoc || !hit.user || !hit.pass) return;
+      const claim = await pool.query(`UPDATE ${table} SET hubdoc_sent_at=NOW() WHERE id=$1 AND hubdoc_sent_at IS NULL RETURNING id`, [rowId]);
+      if (!claim.rows.length) return;   // already forwarded
+      const nodemailer = require('nodemailer');
+      const tx = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: hit.user, pass: hit.pass } });
+      const ext = /pdf/i.test(String(mediaType || '')) ? 'pdf' : 'jpg';
+      const safe = String(label || 'document').replace(/[^\w.\- ]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'document';
+      try {
+        await tx.sendMail({
+          from: hit.user, to: hit.hubdoc, subject: safe,
+          text: 'Filed by OPS parts intake.',
+          attachments: [{ filename: `${safe}.${ext}`, content: Buffer.from(fileBase64, 'base64'), contentType: mediaType || 'application/pdf' }],
+        });
+        console.log(`[hubdoc] forwarded "${safe}" (${table} ${rowId})`);
+      } catch (e) {
+        await pool.query(`UPDATE ${table} SET hubdoc_sent_at=NULL WHERE id=$1`, [rowId]).catch(() => {});
+        console.error('[hubdoc] send failed:', e.message);
+      }
+    } catch (e) { console.error('[hubdoc] forward error:', e.message); }
+  };
+
   // Locations the always-on poller should sweep: every mapped location, else the
   // single fallback location.
   const pollLocations = () => {
@@ -699,6 +732,8 @@ module.exports = (pool) => {
       if (sx.invoices && sx.invoices.length) {
         const rec = await reconcileStatement(locationId, sx);
         const s = await saveStatement(locationId, sx, rec, source);
+        await forwardToHubdoc(locationId, 'vendor_statement', s.id, fileBase64, mediaType,
+          `${sx.vendor || 'Statement'} ${sx.period_label || sx.statement_date || ''}`.trim());
         return { type: 'statement', ...s };
       }
       // Looked like a statement but nothing parsed — fall back to invoice.
@@ -718,6 +753,11 @@ module.exports = (pool) => {
       return { type: 'skipped', reason: 'unreadable', vendor: ex.vendor || null, match_status: 'skipped' };
     }
     const out = await processInvoice(locationId, smLoc, apiKey, ex, source, fileBase64, mediaType);
+    // Books copy — deliberately includes not_parts documents (fuel/consumable
+    // receipts are still legitimate expenses for bookkeeping); only unreadable
+    // junk (skipped above) never reaches Hubdoc.
+    await forwardToHubdoc(locationId, 'vendor_invoice', out.id, fileBase64, mediaType,
+      `${ex.vendor || 'Invoice'} ${ex.invoice_number || ''}`.trim());
     // Warranty can be declared three ways, in order of reliability:
     //  • a "W" prefix on the PO given to the supplier (W0508) — travels with the
     //    order, so it prints on THEIR invoice whether it comes back as paper, a

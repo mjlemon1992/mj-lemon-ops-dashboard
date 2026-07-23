@@ -44,6 +44,9 @@ function ensurePartsReconTables(pool) {
     // Keep the original scan/PDF so the owner can eyeball it when confirming a match.
     await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS file_data BYTEA');
     await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS file_mime TEXT');
+    // When the dashboard itself forwarded this document to Hubdoc (per split
+    // document, replacing the blanket Gmail filter). NULL = not sent yet.
+    await pool.query('ALTER TABLE vendor_invoice ADD COLUMN IF NOT EXISTS hubdoc_sent_at TIMESTAMPTZ');
     // De-dupe re-sent scans: same vendor+number+total for a location = one row.
     await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_vinv_dedupe ON vendor_invoice (location_id, COALESCE(vendor,''), COALESCE(invoice_number,''), COALESCE(total_cents,0))");
 
@@ -71,6 +74,7 @@ function ensurePartsReconTables(pool) {
     // Σ of the extracted lines — compared to the statement's printed total to
     // prove the read is trustworthy before anyone chases a "missing" list.
     await pool.query('ALTER TABLE vendor_statement ADD COLUMN IF NOT EXISTS lines_sum_cents INTEGER');
+    await pool.query('ALTER TABLE vendor_statement ADD COLUMN IF NOT EXISTS hubdoc_sent_at TIMESTAMPTZ');
 
     // v1e — WARRANTY CREDIT WATCH. A warranty part is paid for now and should be
     // credited back on a later statement. Flagged by a WARRANTY stamp on the
