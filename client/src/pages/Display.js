@@ -79,10 +79,15 @@ export default function Display() {
   const SHIFTS = [[0, 0], [1, 1], [0, 2], [2, 0]];
   const nudge = { transform: `translate(${SHIFTS[shift][0]}px, ${SHIFTS[shift][1]}px)` };
 
-  // After close (9pm–6am local): rest screen instead of numbers glowing at an
-  // empty shop all night. Data keeps refreshing quietly behind it.
+  // After close: rest screen instead of numbers glowing at an empty shop all
+  // night. Window is per-location (Locations → Shop-floor display), on the TV's
+  // local clock; start === end disables it. Data keeps refreshing behind it.
   const hourNow = new Date(nowTick).getHours();
-  const night = hourNow >= 21 || hourNow < 6;
+  const nightStart = Number.isInteger(Number(data?.location?.night_start)) ? Number(data.location.night_start) : 21;
+  const nightEnd = Number.isInteger(Number(data?.location?.night_end)) ? Number(data.location.night_end) : 6;
+  const night = nightStart !== nightEnd && (nightStart < nightEnd
+    ? (hourNow >= nightStart && hourNow < nightEnd)          // same-day window (e.g. 1am–5am)
+    : (hourNow >= nightStart || hourNow < nightEnd));        // wraps midnight (e.g. 9pm–6am)
 
   // One-time celebration the moment the month crosses target — full-screen for
   // 30s, then never again that month (per board, via localStorage).

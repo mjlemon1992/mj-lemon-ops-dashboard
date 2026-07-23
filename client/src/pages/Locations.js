@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', qbo_slug: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, display_show_leaderboard: true, open_days: 'mon,tue,wed,thu,fri', active: true, fb_page_id: '', ig_user_id: '', gbp_location_name: '' };
+const EMPTY = { name: '', address: '', city: '', province: 'BC', shopmonkey_location_id: '', qbo_slug: '', slack_channel: '', num_technicians: 5, labour_rate: 170, stale_threshold_days: 5, parts_margin_target: 55, efficiency_target: 80, pph_target: 254, display_pin: '', weekly_hours: 40, display_show_leaderboard: true, open_days: 'mon,tue,wed,thu,fri', active: true, fb_page_id: '', ig_user_id: '', gbp_location_name: '', night_start: 21, night_end: 6 };
 
 export default function Locations() {
   const { api } = useAuth();
@@ -122,6 +122,27 @@ export default function Locations() {
               </select>
               <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>
                 Hide keeps other locations' figures off this TV entirely — they never leave the server.
+              </div>
+            </div>
+            <div className="form-group" style={{ marginTop: '10px' }}>
+              <label className="form-label">Night screen (board rests instead of showing numbers)</label>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {['night_start', 'night_end'].map((k, i) => (
+                  <React.Fragment key={k}>
+                    {i === 1 && <span style={{ color: 'var(--text3)', fontSize: '12px' }}>until</span>}
+                    <select value={form[k] ?? (k === 'night_start' ? 21 : 6)}
+                      onChange={e => setForm(f => ({ ...f, [k]: Number(e.target.value) }))}>
+                      {Array.from({ length: 24 }, (_, h) => (
+                        <option key={h} value={h}>
+                          {h === 0 ? '12 am' : h < 12 ? `${h} am` : h === 12 ? '12 pm' : `${h - 12} pm`}
+                        </option>
+                      ))}
+                    </select>
+                  </React.Fragment>
+                ))}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>
+                On the TV's own clock. Set both to the same hour to turn the night screen off entirely.
               </div>
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>

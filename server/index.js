@@ -18,6 +18,11 @@ const { setAuthPool } = require('./middleware/auth');
 setAuthPool(pool);
 pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 1')
   .catch((e) => console.error('token_version column ensure failed:', e.message));
+// Night-screen window columns must exist before the PIN-only display route
+// (which never runs the locations admin migration) SELECTs them.
+pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS night_start INTEGER DEFAULT 21')
+  .then(() => pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS night_end INTEGER DEFAULT 6'))
+  .catch((e) => console.error('night window columns ensure failed:', e.message));
 
 app.use(cors({ origin: process.env.CLIENT_URL || '*' }));
 // Stash the raw body alongside the parsed JSON so the Slack events endpoint can

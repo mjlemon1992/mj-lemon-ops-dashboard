@@ -330,7 +330,11 @@ module.exports = (pool) => {
 
       res.set('Cache-Control', 'no-store');
       res.json({
-        location: { id: loc.id, name: loc.name, city: loc.city, province, weekly_hours: locWeekly },
+        location: {
+          id: loc.id, name: loc.name, city: loc.city, province, weekly_hours: locWeekly,
+          night_start: Number.isInteger(Number(loc.night_start)) ? Number(loc.night_start) : 21,
+          night_end: Number.isInteger(Number(loc.night_end)) ? Number(loc.night_end) : 6,
+        },
         clock,
         revenue,
         target,
