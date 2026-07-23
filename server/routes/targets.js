@@ -226,6 +226,24 @@ module.exports = (pool) => {
     return data;
   };
 
+  // Owner-supplied corrections for history months where the books are wrong
+  // (e.g. June 2025: QBO shows $102k from acquisition-era bookkeeping, real
+  // sales were $184,036). An override wins over both ShopMonkey and QBO for
+  // that month, in the Goals board's last-year row and in curve building.
+  let _ovInit = false;
+  const historyOverrides = async (locationId, year) => {
+    if (!_ovInit) {
+      await pool.query(`CREATE TABLE IF NOT EXISTS target_history_override (
+        location_id UUID NOT NULL, ym VARCHAR(7) NOT NULL, revenue INTEGER NOT NULL,
+        note TEXT, PRIMARY KEY (location_id, ym))`);
+      _ovInit = true;
+    }
+    const { rows } = await pool.query('SELECT ym, revenue FROM target_history_override WHERE location_id=$1 AND ym LIKE $2', [locationId, `${year}-%`]);
+    const out = {};
+    for (const r of rows) out[Number(r.ym.slice(5))] = Number(r.revenue);
+    return out;
+  };
+
   // QuickBooks fallback for months ShopMonkey history doesn't reach (this shop
   // moved onto ShopMonkey in early 2026 — 2025 lives only in the books).
   // Monthly income via the parkland-qbo connector, cached 24h. Revenue only:
@@ -290,6 +308,16 @@ module.exports = (pool) => {
           }
         } catch (e) { /* books fallback is best-effort */ }
       }
+      // Owner corrections trump both sources for the last-year row.
+      try {
+        const ov = await historyOverrides(req.params.locationId, year - 1);
+        for (const m of months) {
+          if (ov[m.month] != null) {
+            const prev = m.last_year || {};
+            m.last_year = { ...prev, revenue: ov[m.month], awo: prev.cars > 0 ? Math.round(ov[m.month] / prev.cars) : prev.awo || null, source: 'override' };
+          }
+        }
+      } catch (e) { /* corrections are best-effort */ }
       const sum = (list, f) => list.reduce((a, x) => a + (f(x) || 0), 0);
       res.json({
         year, months, qbo_used: qboUsed,
@@ -318,6 +346,11 @@ module.exports = (pool) => {
       if (!actuals) return res.status(400).json({ error: 'This location is not connected to Shopmonkey yet — no history to shape the curve from.' });
       const ly = [];
       for (let m = 1; m <= 12; m++) ly.push(actuals[`${year - 1}-${String(m).padStart(2, '0')}`] || null);
+      // Owner corrections replace the revenue for their month regardless of source.
+      const ov = await historyOverrides(req.params.locationId, year - 1);
+      for (let m = 1; m <= 12; m++) {
+        if (ov[m] != null) ly[m - 1] = { revenue: ov[m], cars: ly[m - 1] ? ly[m - 1].cars : 0 };
+      }
       let withData = ly.filter((x) => x && x.revenue > 0).length;
       let basisSource = 'shopmonkey';
       if (withData < 6) {
@@ -328,7 +361,9 @@ module.exports = (pool) => {
         const qboMonths = qbo ? Object.keys(qbo).length : 0;
         if (qboMonths >= 6) {
           for (let m = 1; m <= 12; m++) ly[m - 1] = qbo[m] ? { revenue: qbo[m], cars: 0 } : null;
-          withData = qboMonths;
+          // Re-apply owner corrections — the books rebuild just clobbered them.
+          for (let m = 1; m <= 12; m++) if (ov[m] != null) ly[m - 1] = { revenue: ov[m], cars: 0 };
+          withData = ly.filter((x) => x && x.revenue > 0).length;
           basisSource = 'quickbooks';
         } else {
           return res.status(400).json({ error: `Only ${withData} month(s) of ${year - 1} in ShopMonkey and ${qboMonths} in QuickBooks — not enough history to shape a seasonal curve. Use even amounts instead.` });
