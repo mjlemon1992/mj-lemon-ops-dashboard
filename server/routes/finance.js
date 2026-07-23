@@ -72,7 +72,7 @@ module.exports = (pool) => {
 
   // Default date window: YTD (Jan 1 -> today).
   const window = (q) => {
-    const end = q.end || new Date().toISOString().slice(0, 10);
+    const end = q.end || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
     const start = q.start || `${end.slice(0, 4)}-01-01`;
     return { start, end };
   };
@@ -124,7 +124,7 @@ module.exports = (pool) => {
     try {
       if (!assertLoc(req, res)) return;
       const slug = await slugFor(req.params.locationId);
-      const date = req.query.date || new Date().toISOString().slice(0, 10);
+      const date = req.query.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
       res.json(await connectorGet(`/qbo/${slug}/aged-receivables?date=${date}`));
     } catch (e) { fail(res, e); }
   });
@@ -133,7 +133,7 @@ module.exports = (pool) => {
     try {
       if (!assertLoc(req, res)) return;
       const slug = await slugFor(req.params.locationId);
-      const date = req.query.date || new Date().toISOString().slice(0, 10);
+      const date = req.query.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
       res.json(await connectorGet(`/qbo/${slug}/aged-payables?date=${date}`));
     } catch (e) { fail(res, e); }
   });

@@ -10,7 +10,19 @@ module.exports = (pool) => {
   const router = express.Router();
   // Token in the connector URL. Falls back to SYNC_SECRET so no new env var is
   // needed (SYNC_SECRET is already set on Railway for the scheduler/sync).
+  // Prefer a DISTINCT token: reusing SYNC_SECRET means a leaked connector URL
+  // (URLs land in logs/proxies/history) hands over the owner machine-auth key
+  // and every syncAuth route with it. Falls back for backward-compat but warns.
   const TOKEN = process.env.COS_MCP_TOKEN || process.env.SYNC_SECRET;
+  if (!process.env.COS_MCP_TOKEN && process.env.SYNC_SECRET) {
+    console.warn('[mcp] COS_MCP_TOKEN not set — MCP connector is sharing SYNC_SECRET. Set a distinct COS_MCP_TOKEN in Railway.');
+  }
+  const crypto = require('crypto');
+  const tokenOk = (provided) => {
+    if (!TOKEN || !provided) return false;
+    const a = Buffer.from(String(provided)), b = Buffer.from(String(TOKEN));
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  };
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
   const MODEL = 'claude-sonnet-4-6';
   const PROTOCOL_VERSION = '2025-03-26';
@@ -112,7 +124,7 @@ module.exports = (pool) => {
 
   // ---- MCP Streamable HTTP endpoint (JSON-RPC over POST), token in the path ----
   router.post('/:token', express.json({ limit: '1mb' }), async (req, res) => {
-    if (!TOKEN || req.params.token !== TOKEN) return res.status(404).json({ error: 'Not found' });
+    if (!tokenOk(req.params.token)) return res.status(404).json({ error: 'Not found' });
     const msg = req.body || {};
     const send = (result, error) => {
       if (msg.id === undefined || msg.id === null) return res.status(202).end(); // notification
@@ -147,7 +159,7 @@ module.exports = (pool) => {
 
   // GET on the endpoint (some clients probe it) — no SSE stream; just 200.
   router.get('/:token', (req, res) => {
-    if (!TOKEN || req.params.token !== TOKEN) return res.status(404).json({ error: 'Not found' });
+    if (!tokenOk(req.params.token)) return res.status(404).json({ error: 'Not found' });
     res.status(200).json({ ok: true, server: 'LemonOps MCP' });
   });
 

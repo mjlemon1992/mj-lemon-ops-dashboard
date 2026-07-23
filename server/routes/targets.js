@@ -183,10 +183,16 @@ module.exports = (pool) => {
         });
       }
       const perMonthBump = shortfall / remainingMonths.length;
-      const proposed = remainingMonths.map((m) => ({
-        month: m, old_revenue: Math.round(targetRev[m] || 0),
-        new_revenue: Math.max(0, Math.round((targetRev[m] || 0) + perMonthBump)),
-      }));
+      // Distribute whole dollars so the bumps sum EXACTLY to the shortfall (the
+      // first `remainder` months carry one extra dollar) — independent rounding
+      // drifted the annual total by up to `remaining_count` dollars.
+      const base = Math.floor(shortfall / remainingMonths.length);
+      let remainder = shortfall - base * remainingMonths.length;
+      const proposed = remainingMonths.map((m) => {
+        const bump = base + (remainder > 0 ? 1 : 0);
+        if (remainder > 0) remainder -= 1;
+        return { month: m, old_revenue: Math.round(targetRev[m] || 0), new_revenue: Math.max(0, Math.round(targetRev[m] || 0) + bump) };
+      });
       res.json({ status: 'behind', yearly_target: Math.round(yearlyTarget), shortfall, per_month_bump: Math.round(perMonthBump), completed, proposed, skipped, remaining_count: remainingMonths.length });
     } catch (err) {
       res.status(500).json({ error: err.message });
