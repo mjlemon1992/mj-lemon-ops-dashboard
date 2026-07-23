@@ -68,8 +68,16 @@ module.exports = (pool) => {
       pinFails.delete(rk);
 
       const now = new Date();
-      const year = now.getFullYear();
-      const month = now.getMonth() + 1;
+      // Shop-tz calendar, not server UTC: revenue_mtd is computed in Mountain time,
+      // so the target/pace must use the same month. On the last evening of a month
+      // UTC is already next month, which blanked the target and spiked pace on the
+      // bay TV for ~6h at every rollover.
+      const _edm = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Edmonton', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(now);
+      const year = Number(_edm.find((p) => p.type === 'year').value);
+      const month = Number(_edm.find((p) => p.type === 'month').value);
+      // A noon-UTC anchor on the shop-tz calendar day keeps the pace fraction on
+      // the correct month/day regardless of the server's timezone.
+      const nowShop = new Date(`${year}-${String(month).padStart(2, '0')}-${String(Number(_edm.find((p) => p.type === 'day').value)).padStart(2, '0')}T12:00:00Z`);
       const province = loc.province || 'ab';
       const locWeekly = Number(loc.weekly_hours) || 40;
 
@@ -87,7 +95,7 @@ module.exports = (pool) => {
         [req.params.locationId, year, month]
       );
       const target = tRes.rows[0] && tRes.rows[0].revenue != null ? Number(tRes.rows[0].revenue) : null;
-      const frac = workingPaceFrac(province, now);
+      const frac = workingPaceFrac(province, nowShop);
       const pacePct = (target && target > 0 && frac && frac > 0) ? Math.round((revenue / (target * frac)) * 100) : null;
       const gap = target != null ? Math.round((target - revenue) * 100) / 100 : null;
       const pctToTarget = (target && target > 0) ? Math.round((revenue / target) * 100) : null;

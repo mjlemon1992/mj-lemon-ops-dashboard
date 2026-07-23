@@ -178,7 +178,7 @@ async function fetchOpenOrders(apiKey, locationId) {
 //            profitability already on the object) is below parts_margin_target.
 // Each alert carries structured fields; the client formats the display text,
 // so the RO number is always the one Shopmonkey reports for that exact order.
-async function buildAlerts(apiKey, loc, mtdOrders) {
+async function buildAlerts(apiKey, loc, mtdOrders, prevAlerts = []) {
   const DAY = 86400000;
   const now = Date.now();
   const staleThreshold = parseInt(loc.stale_threshold_days, 10) || 5;
@@ -186,9 +186,9 @@ async function buildAlerts(apiKey, loc, mtdOrders) {
   const locName = loc.name || 'Location';
   const alerts = [];
 
-  let open = [];
+  let open = [], openFailed = false;
   try { open = await fetchOpenOrders(apiKey, loc.shopmonkey_location_id || ''); }
-  catch (e) { console.error('fetchOpenOrders failed:', e.message); open = []; }
+  catch (e) { console.error('fetchOpenOrders failed:', e.message); open = []; openFailed = true; }
   for (const o of open) {
     if (!loc.shopmonkey_location_id) continue; // location not connected to Shopmonkey: never inherit account-wide orders
     if (o.locationId && o.locationId !== loc.shopmonkey_location_id) continue;
@@ -231,6 +231,14 @@ async function buildAlerts(apiKey, loc, mtdOrders) {
     if (a.type === 'stale') return b.days_on_site - a.days_on_site;
     return a.parts_margin - b.parts_margin;
   });
+  // If the open-orders fetch was throttled, DON'T silently drop every stale-vehicle
+  // alert — carry forward the last-good ones (margin alerts, from mtdOrders, are
+  // still fresh). Otherwise a transient 429 blanks the whole "car sitting too long"
+  // list until the next clean sync.
+  if (openFailed) {
+    const prevStale = (prevAlerts || []).filter((a) => a && a.type === 'stale');
+    return [...alerts.filter((a) => a.type !== 'stale'), ...prevStale];
+  }
   return alerts;
 }
 // ---- end live alerts -------------------------------------------------------
@@ -413,8 +421,12 @@ module.exports = (pool) => {
       // Live alerts (stale vehicles + per-RO margin flags). Best-effort: a failure
       // here must not break the metrics refresh, so it falls back to an empty list.
       let alerts = [];
-      try { alerts = await buildAlerts(apiKey, loc, mtdOrders); }
-      catch (e) { console.error('buildAlerts failed:', e.message); }
+      const { rows: prevAlertRows } = await pool.query('SELECT alerts FROM metrics_cache WHERE location_id=$1 ORDER BY created_at DESC LIMIT 1', [loc.id]).catch(() => ({ rows: [] }));
+      let prevAlerts = (prevAlertRows[0] && prevAlertRows[0].alerts) || [];
+      if (typeof prevAlerts === 'string') { try { prevAlerts = JSON.parse(prevAlerts); } catch (e) { prevAlerts = []; } }
+      if (!Array.isArray(prevAlerts)) prevAlerts = [];
+      try { alerts = await buildAlerts(apiKey, loc, mtdOrders, prevAlerts); }
+      catch (e) { console.error('buildAlerts failed:', e.message); alerts = prevAlerts; }
 
       const payload = {
         revenue_mtd: Math.round(revenue * 100) / 100,

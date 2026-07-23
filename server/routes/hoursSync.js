@@ -84,26 +84,33 @@ async function fetchTechNames(pool, locationId) {
   return map;
 }
 
-async function fetchInvoicedOrdersBetween(apiKey, startIso, endIso, maxPages = 40) {
-  const pageSize = 100;
-  let all = [];
-  for (let page = 0; page < maxPages; page++) {
-    const params = new URLSearchParams({
-      where: JSON.stringify({ invoicedDate: { gte: startIso, lte: endIso } }),
-      limit: String(pageSize),
-      skip: String(page * pageSize)
-    });
-    const res = await smFetch(`https://api.shopmonkey.cloud/v3/order?${params}`, {
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
-    });
-    if (!res.ok) throw new Error(`order list ${res.status}: ${await res.text()}`);
-    const j = await res.json();
-    const rows = (j && j.data && j.data.data) ? j.data.data : (j.data || []);
-    all = all.concat(rows);
-    const meta = j.meta || (j.data && j.data.meta) || {};
-    if (!meta.hasMore || rows.length === 0) break;
+// Union-until-complete + complete-or-throw, same as the revenue sweeps. The SM
+// list endpoint returns partial pages and lies about hasMore; the old code
+// trusted hasMore and could silently under-count sold hours. Sweep, dedupe by
+// id until byId.size reaches meta.total, and throw rather than return partial.
+async function fetchInvoicedOrdersBetween(apiKey, startIso, endIso, maxSweeps = 5) {
+  const where = JSON.stringify({ invoicedDate: { gte: startIso, lte: endIso } });
+  const sort = JSON.stringify([{ name: 'createdDate', order: 'asc' }]);
+  const byId = new Map();
+  let total = null;
+  for (let sweep = 0; sweep < maxSweeps; sweep++) {
+    for (let skip = 0; skip < 5000; skip += 100) {
+      const params = new URLSearchParams({ where, limit: '100', skip: String(skip), sort });
+      const res = await smFetch(`https://api.shopmonkey.cloud/v3/order?${params}`, {
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+      });
+      if (!res.ok) throw new Error(`order list ${res.status}: ${await res.text()}`);
+      const j = await res.json();
+      const meta = j.meta || (j.data && j.data.meta) || {};
+      if (typeof meta.total === 'number') total = meta.total;
+      const rows = (j && j.data && j.data.data) ? j.data.data : (j.data || []);
+      for (const o of rows) if (o && o.id) byId.set(o.id, o);
+      if (rows.length < 100) break;
+    }
+    if (total !== null && byId.size >= total) break;
   }
-  return all;
+  if (total !== null && byId.size < total) throw new Error(`Shopmonkey incomplete: ${byId.size}/${total} orders (throttled?) — try again shortly`);
+  return [...byId.values()];
 }
 
 // Only this location's orders. Mirrors refresh-tech's guard: the Shopmonkey

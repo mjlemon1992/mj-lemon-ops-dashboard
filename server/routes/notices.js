@@ -125,7 +125,8 @@ module.exports = (pool) => {
       await ensureTable();
       const r = await pool.query('SELECT image_data, image_mime, location_id FROM shop_notices WHERE id = $1', [req.params.id]);
       if (!r.rows.length || !r.rows[0].image_data) return res.status(404).json({ error: 'No image' });
-      if (req.user.role === 'manager' && r.rows[0].location_id && r.rows[0].location_id !== req.user.location_id) {
+      // A location-scoped role (manager/advisor) may only read its own shop's images.
+      if (!['owner', 'partner'].includes(req.user.role) && r.rows[0].location_id && r.rows[0].location_id !== req.user.location_id) {
         return res.status(403).json({ error: 'Access denied for this notice' });
       }
       res.set('Content-Type', r.rows[0].image_mime || 'image/jpeg');
@@ -322,8 +323,10 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
     try {
       await ensureTable();
       let { id, location_id, kind, title, body, image_url, priority, active, expires_at, pending_image } = req.body || {};
-      // A shop operator always posts to their own board — never global/others'.
-      if (req.user.role === 'manager') location_id = req.user.location_id;
+      // A location-scoped role (manager OR advisor) always posts to their OWN
+      // board — never global/others'. Only owner/partner (and the sync key, which
+      // authenticates as owner) may target another shop or an all-locations notice.
+      if (!['owner', 'partner'].includes(req.user.role)) location_id = req.user.location_id;
       const k = KINDS.includes(kind) ? kind : 'notice';
       // pending_image: the client creates first, then uploads the file to
       // /:id/image — an image-only poster has no title/body/url at this point.
@@ -331,7 +334,7 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
         return res.status(400).json({ error: 'title, body or image_url required' });
       }
       if (id) {
-        if (req.user.role === 'manager') {
+        if (!['owner', 'partner'].includes(req.user.role)) {
           const own = await pool.query('SELECT location_id FROM shop_notices WHERE id = $1', [id]);
           if (!own.rows.length) return res.status(404).json({ error: 'Notice not found' });
           if (!manages(req.user, own.rows[0].location_id)) return res.status(403).json({ error: 'Access denied for this notice' });
