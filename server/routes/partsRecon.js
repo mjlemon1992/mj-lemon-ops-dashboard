@@ -786,6 +786,10 @@ module.exports = (pool) => {
   // owner has already adjusted.
   const openClaim = async (locId, invoiceId, ex, { kind = 'warranty', expectedCents, partNumber = null, source = 'manual', by = null, note = null }) => {
     if (expectedCents == null) return;
+    // A W-marked document with a NEGATIVE total is the supplier's credit note
+    // itself — the credit has arrived, there is nothing left to wait for. A
+    // claim expecting a negative credit is always junk, so never open one.
+    if (expectedCents <= 0) { console.log(`[credits] skip claim on credit-note ${ex.vendor || ''} #${ex.invoice_number || ''} (${expectedCents}c)`); return; }
     await pool.query(
       `INSERT INTO warranty_claim (location_id, invoice_id, vendor, invoice_number, invoice_date, expected_cents, kind, part_number, source, note, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
