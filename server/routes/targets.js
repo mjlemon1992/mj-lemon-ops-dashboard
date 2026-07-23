@@ -125,11 +125,14 @@ module.exports = (pool) => {
       // ShopMonkey's order list is flaky (a sweep can land a couple of orders
       // short when the metrics scheduler is hammering it). Retry a few times
       // before giving up rather than failing the whole button on a transient miss.
+      // A full sweep is ~15-20s; keep the retry budget small so a throttled run
+      // can't blow Railway's ~60s edge timeout (which surfaces as a confusing
+      // "Application failed to respond"). One retry clears the common transient.
       let actuals = null;
       let lastErr = null;
-      for (let attempt = 0; attempt < 4; attempt++) {
+      for (let attempt = 0; attempt < 2; attempt++) {
         try { actuals = await actualRevenueByMonth(apiKey, smLoc, `${year}-01`, endYm); break; }
-        catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 3000 * (attempt + 1))); }
+        catch (e) { lastErr = e; if (attempt < 1) await new Promise((r) => setTimeout(r, 3000)); }
       }
       if (!actuals) return res.status(503).json({ error: `Couldn't pull complete actuals from Shopmonkey (${(lastErr && lastErr.message) || 'throttled'}) — give it a minute and try again.` });
       const actualFor = (m) => actuals[`${year}-${String(m).padStart(2, '0')}`] || 0;
