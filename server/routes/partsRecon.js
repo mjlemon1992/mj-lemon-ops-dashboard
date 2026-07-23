@@ -581,10 +581,15 @@ module.exports = (pool) => {
     if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
     try {
       await ensurePartsReconTables(pool);
+      // Awaiting claims oldest-first — that's the chase order; settled history after.
       const { rows } = await pool.query(
         `SELECT w.*, w.invoice_date::text AS invoice_date, v.matched_order_number, (v.file_data IS NOT NULL) AS has_file
            FROM warranty_claim w LEFT JOIN vendor_invoice v ON v.id = w.invoice_id
-          WHERE w.location_id=$1 ORDER BY (w.status='awaiting') DESC, w.created_at DESC LIMIT 200`, [req.params.locationId]);
+          WHERE w.location_id=$1
+          ORDER BY (w.status='awaiting') DESC,
+                   CASE WHEN w.status='awaiting' THEN w.created_at END ASC,
+                   w.created_at DESC
+          LIMIT 200`, [req.params.locationId]);
       const now = Date.now();
       res.json({
         claims: rows.map((r) => ({
@@ -594,6 +599,22 @@ module.exports = (pool) => {
           age_days: Math.floor((now - new Date(r.created_at).getTime()) / 86400000),
         })),
       });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Featherweight credits glance — count / dollars / oldest age of claims still
+  // awaiting. Drives the live badge on the "Credits due" tab so the money owed
+  // back is visible from anywhere on the Parts page without opening the tab.
+  router.get('/:locationId/credits-summary', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
+    try {
+      await ensurePartsReconTables(pool);
+      const { rows } = await pool.query(
+        `SELECT COUNT(*)::int AS n, COALESCE(SUM(expected_cents),0)::bigint AS cents,
+                COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400), 0)::int AS oldest_days
+           FROM warranty_claim WHERE location_id=$1 AND status='awaiting'`, [req.params.locationId]);
+      const r = rows[0];
+      res.json({ count: r.n, expected: Number(r.cents) / 100, oldest_days: r.oldest_days });
     } catch (e) { fail(res, e); }
   });
 

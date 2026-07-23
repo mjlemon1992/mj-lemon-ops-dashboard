@@ -32,11 +32,27 @@ function PartsTabs({ locId }) {
   const urlTab = params.get('tab');
   const view = TABS.includes(urlTab) ? urlTab : 'margin';
   const setView = (k) => setParams(k === 'margin' ? {} : { tab: k }, { replace: true });
+  // Credits glance — badge on the tab so money-owed-back is visible from any
+  // tab. Refreshes when you leave the Credits tab (you likely just settled one).
+  const { api } = useAuth();
+  const [credSum, setCredSum] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    api(`/parts/${locId}/credits-summary`).then((s) => { if (!dead) setCredSum(s); }).catch(() => {});
+    return () => { dead = true; };
+  }, [locId, view === 'warranty']);
   return (
     <div>
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
         {[['margin', 'Margin / exposure'], ['invoices', 'Vendor invoices'], ['statements', 'Statements'], ['warranty', 'Credits due']].map(([k, l]) => (
-          <button key={k} onClick={() => setView(k)} className={view === k ? 'primary' : ''} style={{ fontSize: '13px', padding: '7px 16px' }}>{l}</button>
+          <button key={k} onClick={() => setView(k)} className={view === k ? 'primary' : ''} style={{ fontSize: '13px', padding: '7px 16px' }}>
+            {l}
+            {k === 'warranty' && credSum && credSum.count > 0 && (
+              <span style={{ marginLeft: 6, fontSize: '11px', fontWeight: 700, padding: '1px 7px', borderRadius: 9, background: 'rgba(255,184,0,0.18)', color: view === k ? undefined : 'var(--warning)' }}>
+                {credSum.count} · ${Math.round(credSum.expected).toLocaleString('en-CA')}
+              </span>
+            )}
+          </button>
         ))}
       </div>
       {view === 'margin' ? <MarginView locId={locId} />
@@ -480,6 +496,12 @@ function WarrantyView({ locId }) {
         <div style={{ textAlign: 'right' }}>
           <div className="spec-label">Awaiting credit</div>
           <div style={{ fontSize: '20px', fontWeight: 700, color: owed > 0 ? 'var(--warning)' : 'var(--text)' }}>{money(owed)}</div>
+          {open.length > 0 && (
+            <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
+              {open.length} invoice{open.length === 1 ? '' : 's'} waiting · oldest {Math.max(...open.map((c) => c.age_days || 0))}d
+              {open.some((c) => (c.age_days || 0) >= 60) && <span style={{ color: 'var(--danger)', fontWeight: 700 }}> · {open.filter((c) => (c.age_days || 0) >= 60).length} overdue</span>}
+            </div>
+          )}
         </div>
       </div>
 
