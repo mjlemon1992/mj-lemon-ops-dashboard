@@ -78,6 +78,10 @@ export default function App() {
             <Route path="notices" element={<Notices />} />
             <Route path="users" element={<ProtectedRoute ownerOnly><Users /></ProtectedRoute>} />
           </Route>
+          {/* No route matched (stale bookmark, mistyped deep link) → Home, not a
+              dead black screen. Logged-out users still bounce to /login via the
+              ProtectedRoute on "/". */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
