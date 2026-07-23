@@ -351,7 +351,18 @@ module.exports = (pool) => {
       const claim = await pool.query(`UPDATE ${table} SET hubdoc_sent_at=NOW() WHERE id=$1 AND hubdoc_sent_at IS NULL RETURNING id`, [rowId]);
       if (!claim.rows.length) return;   // already forwarded
       const nodemailer = require('nodemailer');
-      const tx = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: hit.user, pass: hit.pass } });
+      // Railway egress: IPv6 to Gmail is unroutable (ENETUNREACH) and 465 has
+      // timed out — resolve an IPv4 address explicitly and use the 587
+      // submission port with STARTTLS, keeping the TLS servername so the cert
+      // still validates against smtp.gmail.com.
+      let smtpHost = 'smtp.gmail.com';
+      try { const a = await require('dns').promises.resolve4('smtp.gmail.com'); if (a.length) smtpHost = a[0]; } catch (e) { /* fall back to hostname */ }
+      const tx = nodemailer.createTransport({
+        host: smtpHost, port: 587, secure: false, requireTLS: true,
+        auth: { user: hit.user, pass: hit.pass },
+        tls: { servername: 'smtp.gmail.com' },
+        connectionTimeout: 20000, greetingTimeout: 20000, socketTimeout: 30000,
+      });
       const ext = /pdf/i.test(String(mediaType || '')) ? 'pdf' : 'jpg';
       const safe = String(label || 'document').replace(/[^\w.\- ]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'document';
       try {
@@ -470,6 +481,37 @@ module.exports = (pool) => {
     return { ok: true, scanned: inbox.messages.length, processed: results.filter((r) => !r.error).length, more, results };
     } finally { scanningLocations.delete(locationId); }
   };
+
+  // Retry Hubdoc forwarding for anything filed but not yet sent (send failures
+  // release the hubdoc_sent_at claim). Works off the stored file bytes, so no
+  // re-extraction and no double-file risk. syncAuth like the other pipeline pokes.
+  router.post('/:locationId/hubdoc-resend', syncAuth, async (req, res) => {
+    try {
+      if (!canAccessLocation(req.user, req.params.locationId)) return fail(res, 'Access denied for this location', 403);
+      await ensurePartsReconTables(pool);
+      const loc = req.params.locationId;
+      const out = { invoices: 0, statements: 0, failed: 0 };
+      const { rows: invs } = await pool.query(
+        `SELECT id, vendor, invoice_number, file_data, file_mime FROM vendor_invoice
+          WHERE location_id=$1 AND hubdoc_sent_at IS NULL AND file_data IS NOT NULL
+          ORDER BY created_at DESC LIMIT 40`, [loc]);
+      for (const r of invs) {
+        await forwardToHubdoc(loc, 'vendor_invoice', r.id, r.file_data.toString('base64'), r.file_mime, `${r.vendor || 'Invoice'} ${r.invoice_number || ''}`.trim());
+        const chk = await pool.query('SELECT hubdoc_sent_at FROM vendor_invoice WHERE id=$1', [r.id]);
+        if (chk.rows[0] && chk.rows[0].hubdoc_sent_at) out.invoices++; else out.failed++;
+      }
+      const { rows: stms } = await pool.query(
+        `SELECT id, vendor, period_label, statement_date, file_data, file_mime FROM vendor_statement
+          WHERE location_id=$1 AND hubdoc_sent_at IS NULL AND file_data IS NOT NULL
+          ORDER BY created_at DESC LIMIT 20`, [loc]).catch(() => ({ rows: [] }));
+      for (const r of stms) {
+        await forwardToHubdoc(loc, 'vendor_statement', r.id, r.file_data.toString('base64'), r.file_mime, `${r.vendor || 'Statement'} ${r.period_label || r.statement_date || ''}`.trim());
+        const chk = await pool.query('SELECT hubdoc_sent_at FROM vendor_statement WHERE id=$1', [r.id]);
+        if (chk.rows[0] && chk.rows[0].hubdoc_sent_at) out.statements++; else out.failed++;
+      }
+      res.json({ ok: true, ...out });
+    } catch (e) { fail(res, e); }
+  });
 
   // Manual "Scan inbox now" (owner/partner via JWT, or the automation's X-Sync-Key).
   router.post('/:locationId/scan-inbox', syncAuth, async (req, res) => {
