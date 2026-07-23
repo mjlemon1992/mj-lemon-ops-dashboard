@@ -111,7 +111,7 @@ export default function Targets() {
           {locations.length === 0 && <option>Hwy 97 Mister Transmission</option>}
         </select>
         <select value={year} onChange={e => setYear(parseInt(e.target.value))} style={{ width: 'auto' }}>
-          {[2025, 2026, 2027].map(y => <option key={y}>{y}</option>)}
+          {(() => { const c = new Date().getFullYear(); return [c - 1, c, c + 1]; })().map(y => <option key={y}>{y}</option>)}
         </select>
         <button onClick={recalcTargets} disabled={recalcing || saving} style={{ marginLeft: 'auto' }}
           title="If completed months missed target, bump the remaining months so the year still hits its annual target">
