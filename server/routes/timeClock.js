@@ -74,18 +74,29 @@ module.exports = (pool) => {
   // clock-outs and raises the overtime (and missed-break) questions.
   const autoCloseStale = async (locationId, cfg) => {
     if (!cfg.end) return;
+    // Only clamp punches whose clock-in day is an OPEN day — same gate the
+    // clock-in path uses. A forgotten Saturday-emergency punch on a Mon-Fri shop
+    // has no shift_end to clamp to, so it's left open for a human to correct
+    // rather than force-closed to weekday rules (which over/underpaid). Also fold
+    // any in-progress break into break_seconds (capped at the clamped clock_out)
+    // so an unfinished break isn't silently paid.
+    const openDows = Array.from(cfg.openSet);
     const { rows } = await pool.query(
       `WITH s AS (
          SELECT id, person_id,
            (to_char(clock_in AT TIME ZONE '${EDM}','YYYY-MM-DD')||' '||$2::text)::timestamp AT TIME ZONE '${EDM}' AS end_ts,
            clock_in
-         FROM time_clock_entry WHERE location_id=$1 AND clock_out IS NULL)
+         FROM time_clock_entry
+          WHERE location_id=$1 AND clock_out IS NULL
+            AND EXTRACT(DOW FROM clock_in AT TIME ZONE '${EDM}')::int = ANY($3::int[]))
        UPDATE time_clock_entry e
-          SET clock_out = GREATEST(s.end_ts, e.clock_in), raw_clock_out = now(),
-              auto_out = true, break_started_at = NULL
+          SET clock_out = GREATEST(s.end_ts, e.clock_in),
+              break_seconds = e.break_seconds + CASE WHEN e.break_started_at IS NOT NULL
+                THEN GREATEST(0, EXTRACT(EPOCH FROM (GREATEST(s.end_ts, e.clock_in) - e.break_started_at)))::int ELSE 0 END,
+              raw_clock_out = now(), auto_out = true, break_started_at = NULL
          FROM s WHERE e.id = s.id AND now() > s.end_ts
        RETURNING e.id, e.person_id, e.break_seconds, (e.clock_out AT TIME ZONE '${EDM}')::date::text AS work_date`,
-      [locationId, cfg.end]);
+      [locationId, cfg.end, openDows]);
     if (!rows.length) return;
     const { rows: pp } = await pool.query('SELECT id, track_break FROM bonus_person WHERE id = ANY($1)', [rows.map((r) => r.person_id)]);
     const tb = Object.fromEntries(pp.map((p) => [p.id, p.track_break !== false]));
@@ -138,7 +149,7 @@ module.exports = (pool) => {
         WHERE id=$1
         RETURNING id, break_seconds, (raw_clock_out > clock_out) AS was_ot,
           (clock_out AT TIME ZONE '${EDM}')::date::text AS work_date,
-          ROUND((EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2) AS paid_hours`,
+          ROUND(GREATEST(0, EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2) AS paid_hours`,
       [open.id, JSON.stringify(open.break_started_at ? closeSegs() : segs), clamp, today, cfg.end || '23:59']);
     const c = closed[0];
     const missedBreak = person.track_break !== false && Number(c.break_seconds) === 0;
@@ -429,7 +440,7 @@ module.exports = (pool) => {
   // ══ CORRECTIONS + PINs (owner + that location's manager) ══════════════
   const authed = [authenticateToken, requireRole('owner', 'partner', 'manager')];
   const scoped = (req, res, next) => canAccessLocation(req.user, req.params.locationId) ? next() : res.status(403).json({ error: 'Access denied for this location' });
-  const paidExpr = "ROUND((EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2)";
+  const paidExpr = "ROUND(GREATEST(0, EXTRACT(EPOCH FROM (clock_out - clock_in)) - break_seconds)/3600.0, 2)";
 
   // Payroll components beyond punches (Jamie's contractual rules):
   //  • a stat holiday landing on an OPEN day pays every tech the contractual
@@ -655,10 +666,12 @@ module.exports = (pool) => {
       if (!person_id || !clock_in) return fail(res, 'person_id + clock_in required', 400);
       if (isNaN(new Date(clock_in).getTime()) || (clock_out && isNaN(new Date(clock_out).getTime()))) return fail(res, 'Invalid clock time', 400);
       if (clock_out && new Date(clock_out) <= new Date(clock_in)) return fail(res, 'clock_out must be after clock_in', 400);
-      // Reject a punch that overlaps an existing one for this person (double-pay guard).
+      // Reject a punch that overlaps an existing one for this person (double-pay
+      // guard). COALESCE(clock_out,'infinity') so an OPEN shift counts too — else
+      // a manual punch inside a live shift both get paid and double-count hours.
       const ov = await pool.query(
-        `SELECT 1 FROM time_clock_entry WHERE person_id=$1 AND clock_out IS NOT NULL
-           AND clock_in < $3 AND clock_out > $2 LIMIT 1`,
+        `SELECT 1 FROM time_clock_entry WHERE person_id=$1
+           AND clock_in < $3 AND COALESCE(clock_out, 'infinity') > $2 LIMIT 1`,
         [person_id, clock_in, clock_out || clock_in]);
       if (ov.rows.length) return fail(res, 'That overlaps an existing punch for this person', 409);
       const { rows } = await pool.query(
@@ -683,8 +696,8 @@ module.exports = (pool) => {
       if (clockOut && new Date(clockOut) <= new Date(clockIn)) return fail(res, 'clock_out must be after clock_in', 400);
       if (clockOut) {
         const ov = await pool.query(
-          `SELECT 1 FROM time_clock_entry WHERE person_id=$1 AND id<>$2 AND clock_out IS NOT NULL
-             AND clock_in < $4 AND clock_out > $3 LIMIT 1`,
+          `SELECT 1 FROM time_clock_entry WHERE person_id=$1 AND id<>$2
+             AND clock_in < $4 AND COALESCE(clock_out, 'infinity') > $3 LIMIT 1`,
           [er[0].person_id, er[0].id, clockIn, clockOut]);
         if (ov.rows.length) return fail(res, 'That overlaps an existing punch for this person', 409);
       }
@@ -1165,7 +1178,7 @@ module.exports = (pool) => {
         `SELECT order_number, invoiced_date::text AS invoiced_date, vehicle, tech_name, hours_sold, hours_billed, synced_at
            FROM tech_work_detail WHERE location_id=$1 AND month=$2
           ORDER BY invoiced_date DESC NULLS LAST, order_number DESC`, [req.params.locationId, month]).then((r) => r.rows).catch(() => []);
-      const mine = work.filter((w) => normName(w.tech_name).startsWith(first));
+      const mine = work.filter((w) => { const n = normName(w.tech_name); return n === first || n.startsWith(first + ' '); });
       const clocked = (await paidHoursByMonth(pool, req.params.locationId, month))[person.id] || 0;
       res.json({
         name: person.name, month,
