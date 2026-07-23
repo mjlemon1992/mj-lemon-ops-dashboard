@@ -73,7 +73,7 @@ export default function Notices() {
   const [genSvg, setGenSvg] = useState(null);         // raw design SVG (sent with 👍/👎 feedback)
   const [rated, setRated] = useState(null);           // 'up' after a thumbs-up on the current design
   const [lightbox, setLightbox] = useState(null);     // enlarged preview overlay
-  const [form, setForm] = useState({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '' });
+  const [form, setForm] = useState({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '', publish_at: '' });
 
   const [ideas, setIdeas] = useState([]);
   const [ideasLoading, setIdeasLoading] = useState(false);
@@ -150,8 +150,13 @@ export default function Notices() {
     }
     setSaving(true); setError('');
     try {
+      // Scheduled go-live: "Runs for N days" counts from when it APPEARS on the
+      // board, not from when it was saved — so a Monday-7am safety poster set to
+      // run 5 days comes down Saturday, not Thursday.
+      const publish_at = form.publish_at ? new Date(form.publish_at).toISOString() : null;
+      const expiryBase = publish_at ? new Date(form.publish_at).getTime() : Date.now();
       const expires_at = form.expires_days
-        ? new Date(Date.now() + Number(form.expires_days) * 86400000).toISOString()
+        ? new Date(expiryBase + Number(form.expires_days) * 86400000).toISOString()
         : null;
       const created = await api('/notices', {
         method: 'POST',
@@ -164,7 +169,8 @@ export default function Notices() {
           body: form.body || null,
           image_url: form.image_url || null,
           pending_image: !!upload,
-          expires_at
+          expires_at,
+          publish_at
         })
       });
       // Poster bytes upload as a raw image body (same pattern as marketing intake).
@@ -181,7 +187,7 @@ export default function Notices() {
           throw upErr;
         }
       }
-      setForm({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '' });
+      setForm({ location_id: '', kind: 'notice', title: '', body: '', image_url: '', expires_days: '', publish_at: '' });
       setFile(null);
       clearGenerated();
       load();
@@ -204,7 +210,7 @@ export default function Notices() {
       </div>
 
       <form onSubmit={submit} style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '14px', padding: '20px', marginBottom: '28px', display: 'grid', gap: '14px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px' }}>
           <div>
             <span style={label}>Board</span>
             <select value={form.location_id} onChange={e => set('location_id', e.target.value)} style={input}>
@@ -223,6 +229,11 @@ export default function Notices() {
             <select value={form.expires_days} onChange={e => set('expires_days', e.target.value)} style={input}>
               {EXPIRY.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
             </select>
+          </div>
+          <div>
+            <span style={label}>Goes live</span>
+            <input type="datetime-local" value={form.publish_at} onChange={e => set('publish_at', e.target.value)}
+              title="Leave empty to go live immediately. Set a time to hold it off the board until then — “Runs for” counts from go-live." style={input} />
           </div>
         </div>
         <div>
@@ -317,11 +328,12 @@ export default function Notices() {
         {items.map(n => {
           const kind = KINDS.find(k => k.value === n.kind) || KINDS[0];
           const expired = n.expires_at && new Date(n.expires_at) < new Date();
-          const live = n.active && !expired;
+          const scheduled = n.active && !expired && n.publish_at && new Date(n.publish_at) > new Date();
+          const live = n.active && !expired && !scheduled;
           return (
-            <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 20px', borderBottom: '0.5px solid var(--border)', opacity: live ? 1 : 0.55 }}>
-              <span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.08em', padding: '3px 10px', borderRadius: '10px', background: live ? 'var(--success)' : 'var(--bg3)', color: live ? '#1a1a1a' : 'var(--text3)', flexShrink: 0 }}>
-                {live ? 'LIVE' : (expired ? 'EXPIRED' : 'OFF')}
+            <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 20px', borderBottom: '0.5px solid var(--border)', opacity: live || scheduled ? 1 : 0.55 }}>
+              <span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.08em', padding: '3px 10px', borderRadius: '10px', background: live ? 'var(--success)' : (scheduled ? 'var(--warning, #e2a336)' : 'var(--bg3)'), color: live || scheduled ? '#1a1a1a' : 'var(--text3)', flexShrink: 0 }}>
+                {live ? 'LIVE' : (scheduled ? '⏰ SCHEDULED' : (expired ? 'EXPIRED' : 'OFF'))}
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -329,6 +341,7 @@ export default function Notices() {
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '2px' }}>
                   {n.location_id ? locName(n.location_id) : 'All locations'} · by {n.created_by || '—'} · {new Date(n.created_at).toLocaleDateString('en-CA')}
+                  {scheduled ? ` · goes live ${new Date(n.publish_at).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
                   {n.expires_at ? ` · until ${new Date(n.expires_at).toLocaleDateString('en-CA')}` : ''}
                 </div>
               </div>

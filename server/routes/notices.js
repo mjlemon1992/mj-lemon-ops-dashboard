@@ -29,6 +29,9 @@ module.exports = (pool) => {
     // Uploaded poster bytes (same Postgres-bytea pattern as marketing_post).
     await pool.query('ALTER TABLE shop_notices ADD COLUMN IF NOT EXISTS image_data BYTEA');
     await pool.query('ALTER TABLE shop_notices ADD COLUMN IF NOT EXISTS image_mime VARCHAR(60)');
+    // Scheduled go-live: the notice exists (a human wrote/approved it) but stays
+    // off the board until this time. NULL = live immediately. Mirrors expires_at.
+    await pool.query('ALTER TABLE shop_notices ADD COLUMN IF NOT EXISTS publish_at TIMESTAMP');
     // Owner taste feedback on AI-designed posters (👍/👎 + the rated SVG).
     // Recent rows are fed back into the design prompt as aesthetic exemplars,
     // so the designer converges on what the owner actually likes.
@@ -69,6 +72,7 @@ module.exports = (pool) => {
          FROM shop_notices
         WHERE active = true
           AND (location_id IS NULL OR location_id = $1)
+          AND (publish_at IS NULL OR publish_at <= NOW())
           AND (expires_at IS NULL OR expires_at > NOW())
         ORDER BY priority ASC, created_at DESC
         LIMIT 20`,
@@ -85,7 +89,7 @@ module.exports = (pool) => {
       const mgrFilter = req.user.role === 'manager';
       const r = await pool.query(
         `SELECT id, location_id, kind, title, body, image_url, priority, active,
-                expires_at, created_by, created_at, updated_at,
+                expires_at, publish_at, created_by, created_at, updated_at,
                 (image_data IS NOT NULL) AS has_image
            FROM shop_notices
           ${mgrFilter ? 'WHERE (location_id IS NULL OR location_id = $1)' : ''}
@@ -322,7 +326,15 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
   router.post('/', syncAuth, requireRole('owner', 'partner', 'manager', 'advisor'), async (req, res) => {
     try {
       await ensureTable();
-      let { id, location_id, kind, title, body, image_url, priority, active, expires_at, pending_image } = req.body || {};
+      let { id, location_id, kind, title, body, image_url, priority, active, expires_at, publish_at, pending_image } = req.body || {};
+      // Scheduled go-live must be a valid timestamp or null; a past time is
+      // treated as "live now" (stored as null) rather than rejected — the
+      // intent is clearly immediate visibility.
+      if (publish_at != null) {
+        const p = new Date(publish_at);
+        if (isNaN(p.getTime())) return res.status(400).json({ error: 'Invalid publish_at date/time' });
+        publish_at = p.getTime() > Date.now() ? p : null;
+      }
       // A location-scoped role (manager OR advisor) always posts to their OWN
       // board — never global/others'. Only owner/partner (and the sync key, which
       // authenticates as owner) may target another shop or an all-locations notice.
@@ -349,18 +361,19 @@ Voice: positive, plain-spoken, respectful of the trade. No hype, no corporate fl
              priority = COALESCE($7, priority),
              active = COALESCE($8, active),
              expires_at = $9,
+             publish_at = $10,
              updated_at = NOW()
            WHERE id = $1 RETURNING *`,
-          [id, location_id, kind ? k : null, title, body, image_url, priority, active, expires_at || null]
+          [id, location_id, kind ? k : null, title, body, image_url, priority, active, expires_at || null, publish_at || null]
         );
         if (!r.rows.length) return res.status(404).json({ error: 'Notice not found' });
         return res.json(r.rows[0]);
       }
       const r = await pool.query(
-        `INSERT INTO shop_notices (location_id, kind, title, body, image_url, priority, active, expires_at, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+        `INSERT INTO shop_notices (location_id, kind, title, body, image_url, priority, active, expires_at, publish_at, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
         [location_id || null, k, title || null, body || null, image_url || null,
-         priority != null ? priority : 5, active !== false, expires_at || null,
+         priority != null ? priority : 5, active !== false, expires_at || null, publish_at || null,
          req.user.via === 'sync-key' ? 'chief-of-staff' : (req.user.email || req.user.name || 'owner')]
       );
       res.json(r.rows[0]);

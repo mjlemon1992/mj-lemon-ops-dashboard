@@ -5,6 +5,7 @@ const { ensurePartsReconTables } = require('../lib/partsReconSchema');
 const { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCheck, reconcileJob, matchInvoiceToRo, digits } = require('../lib/invoiceRecon');
 const { fetchOrderByNumber } = require('../lib/shopmonkey');
 const { fetchInvoiceEmails, markSeen, peekInbox } = require('../lib/invoiceInbox');
+const { ingestCallsPdf, looksLikeCallReport } = require('../lib/callsIngest');
 
 // Parts reconciliation — v1a: ShopMonkey-only parts margin / exposure per RO.
 // For each invoiced order in the window, compare each part's wholesale cost
@@ -377,6 +378,23 @@ module.exports = (pool) => {
       if (!first) await sleep(PACE_MS);
       first = false;
       let anyOk = false, anyFail = false;
+      // Marchex/Telmetrics call report forwarded to the same inbox: route its
+      // PDF(s) to the marketing calls ingester, NOT the invoice pipeline —
+      // Claude would otherwise gamely try to file a call report as a parts
+      // invoice. Non-PDF attachments (logos in the signature) are skipped.
+      if (looksLikeCallReport(msg.from, msg.subject)) {
+        for (const att of msg.attachments) {
+          if (!/pdf/i.test(att.mediaType || '')) continue;
+          try {
+            const out = await ingestCallsPdf(pool, locationId, att.base64, 'marchex');
+            results.push({ from: msg.from, file: att.filename, type: 'call_report', period: out.period, totals: out.totals });
+            anyOk = true;
+            console.log(`[parts-inbox] routed call report ${att.filename} -> marketing calls (${out.period?.start})`);
+          } catch (e) { anyFail = true; results.push({ from: msg.from, file: att.filename, error: `call report: ${String(e.message || e)}` }); }
+        }
+        if (anyOk && !anyFail) doneUids.push(msg.uid);
+        continue;
+      }
       for (const att of msg.attachments) {
         try {
           // "WARRANTY" in the forwarded subject = the digital twin of the stamp.

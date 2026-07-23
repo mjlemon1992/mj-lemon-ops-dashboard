@@ -183,6 +183,7 @@ module.exports = (pool) => {
              FROM shop_notices
             WHERE active = true
               AND (location_id IS NULL OR location_id = $1)
+              AND (publish_at IS NULL OR publish_at <= NOW())
               AND (expires_at IS NULL OR expires_at > NOW())
             ORDER BY priority ASC, created_at DESC
             LIMIT 20`,
