@@ -106,17 +106,18 @@ export default function Targets() {
     try {
       const r = await api(`/targets/${selectedLoc}/${year}/build-from-curve`, { method: 'POST', body: JSON.stringify({ total_revenue: total }) });
       const k = (n) => '$' + Math.round(n).toLocaleString('en-CA');
-      const lines = r.proposed.map((p) => `${SHORT[p.month - 1]}:  ${k(p.revenue)}  (${p.weight_pct}% · ${p.car_count} cars)`).join('\n');
+      const lines = r.proposed.map((p) => `${SHORT[p.month - 1]}:  ${k(p.revenue)}  (${p.weight_pct}%${p.car_count != null ? ` · ${p.car_count} cars` : ''})`).join('\n');
+      const src = r.basis_source === 'quickbooks' ? 'QuickBooks books income' : 'ShopMonkey sales';
       const ok = await askConfirm({
         title: `Build ${year} from ${r.basis_year}'s curve`,
-        body: `${r.basis_year} did ${k(r.basis_total)}; this shapes ${k(r.total)} (${r.growth_pct >= 0 ? '+' : ''}${r.growth_pct}%) the same way:\n\n${lines}\n\nThis OVERWRITES the revenue, car count and avg-RO targets for all 12 months of ${year} (other fields keep their values).`,
+        body: `${r.basis_year} did ${k(r.basis_total)} (${src}); this shapes ${k(r.total)} (${r.growth_pct >= 0 ? '+' : ''}${r.growth_pct}%) the same way:\n\n${lines}\n\nThis OVERWRITES the monthly revenue targets for all 12 months of ${year}${r.basis_source === 'quickbooks' ? ' (car counts and avg-RO keep their current values — the books have no car counts)' : ', plus car count and avg-RO'}. Other fields keep their values.`,
         confirmLabel: 'Apply & save',
       });
       if (!ok) { setBuilding(false); return; }
       const byMonth = Object.fromEntries(r.proposed.map((p) => [p.month, p]));
       const next = targets.map((t, i) => {
         const p = byMonth[i + 1];
-        return p ? { ...t, revenue: p.revenue, car_count: p.car_count, avg_ro_value: p.avg_ro_value ?? t.avg_ro_value } : t;
+        return p ? { ...t, revenue: p.revenue, car_count: p.car_count ?? t.car_count, avg_ro_value: p.avg_ro_value ?? t.avg_ro_value } : t;
       });
       setTargets(next);
       await api(`/targets/${selectedLoc}/${year}/bulk`, { method: 'POST', body: JSON.stringify({ targets: next.map((t, i) => ({ ...t, month: i + 1 })) }) });
@@ -172,7 +173,9 @@ export default function Targets() {
       <div className="card" style={{ marginBottom: '16px', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', marginBottom: '4px' }}>
           <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Going for the goals — {year}</div>
-          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Actual & last year from ShopMonkey · goal from this page</div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
+            Actual & last year from ShopMonkey{goals && goals.qbo_used ? ' · last-year months ShopMonkey can’t see use QuickBooks books income (no car counts)' : ''} · goal from this page
+          </div>
           <button onClick={() => setGoalsTick(n => n + 1)} disabled={goalsLoading} style={{ marginLeft: 'auto', fontSize: '12px' }}>↻ Refresh</button>
         </div>
         {goalsLoading && <div style={{ color: 'var(--text3)', fontSize: '12px', padding: '18px 0' }}>Pulling ShopMonkey history — first load takes ~20 seconds…</div>}

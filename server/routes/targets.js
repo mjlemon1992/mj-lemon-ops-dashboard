@@ -226,6 +226,37 @@ module.exports = (pool) => {
     return data;
   };
 
+  // QuickBooks fallback for months ShopMonkey history doesn't reach (this shop
+  // moved onto ShopMonkey in early 2026 — 2025 lives only in the books).
+  // Monthly income via the parkland-qbo connector, cached 24h. Revenue only:
+  // QBO has no car counts, so those cells stay blank.
+  const qboCache = new Map();
+  const qboMonthlyIncome = async (locationId, year) => {
+    const key = `qbo:${locationId}:${year}`;
+    const hit = qboCache.get(key);
+    if (hit && Date.now() - hit.ts < 24 * 60 * 60 * 1000) return hit.data;
+    const BASE = process.env.QBO_CONNECTOR_URL, TOKEN = process.env.QBO_API_TOKEN;
+    if (!BASE || !TOKEN) return null;
+    const { rows } = await pool.query('SELECT qbo_slug FROM locations WHERE id=$1', [locationId]);
+    let slug = rows[0] && rows[0].qbo_slug;
+    if (!slug && process.env.QBO_DEFAULT_SLUG && process.env.QBO_DEFAULT_SLUG_LOCATION_ID === locationId) slug = process.env.QBO_DEFAULT_SLUG;
+    if (!slug) return null;
+    const out = {};
+    for (let m = 1; m <= 12; m++) {
+      const mm = String(m).padStart(2, '0');
+      const endDay = new Date(Date.UTC(year, m, 0)).getUTCDate();
+      try {
+        const r = await fetch(`${BASE}/qbo/${slug}/pnl?start=${year}-${mm}-01&end=${year}-${mm}-${String(endDay).padStart(2, '0')}`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+        if (!r.ok) continue;
+        const j = await r.json();
+        const inc = j && j.headline && Number(j.headline.income);
+        if (Number.isFinite(inc) && inc > 0) out[m] = Math.round(inc);
+      } catch (e) { /* month stays blank */ }
+    }
+    qboCache.set(key, { data: out, ts: Date.now() });
+    return out;
+  };
+
   // Grid data for the "Going for the Goals" board: per month — actual, goal,
   // last year (sales / cars / avg WO). Advisors never see this route (role gate).
   router.get('/:locationId/:year/goals', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
@@ -248,9 +279,20 @@ module.exports = (pool) => {
           goal: g ? { revenue: Number(g.revenue) || 0, cars: Number(g.car_count) || 0, awo: Number(g.avg_ro_value) || null } : null,
         });
       }
+      // Last-year months ShopMonkey can't see get books income from QuickBooks
+      // (revenue only — no car counts in the books).
+      let qboUsed = false;
+      if (months.some((m) => !m.last_year)) {
+        try {
+          const qbo = await qboMonthlyIncome(req.params.locationId, year - 1);
+          if (qbo) for (const m of months) {
+            if (!m.last_year && qbo[m.month]) { m.last_year = { revenue: qbo[m.month], cars: null, awo: null, source: 'qbo' }; qboUsed = true; }
+          }
+        } catch (e) { /* books fallback is best-effort */ }
+      }
       const sum = (list, f) => list.reduce((a, x) => a + (f(x) || 0), 0);
       res.json({
-        year, months,
+        year, months, qbo_used: qboUsed,
         totals: {
           actual: { revenue: Math.round(sum(months, (x) => x.actual && x.actual.revenue)), cars: sum(months, (x) => x.actual && x.actual.cars) },
           goal: { revenue: Math.round(sum(months, (x) => x.goal && x.goal.revenue)), cars: sum(months, (x) => x.goal && x.goal.cars) },
@@ -276,8 +318,22 @@ module.exports = (pool) => {
       if (!actuals) return res.status(400).json({ error: 'This location is not connected to Shopmonkey yet — no history to shape the curve from.' });
       const ly = [];
       for (let m = 1; m <= 12; m++) ly.push(actuals[`${year - 1}-${String(m).padStart(2, '0')}`] || null);
-      const withData = ly.filter((x) => x && x.revenue > 0).length;
-      if (withData < 6) return res.status(400).json({ error: `Only ${withData} month(s) of ${year - 1} history in Shopmonkey — not enough to shape a seasonal curve. Use even amounts instead.` });
+      let withData = ly.filter((x) => x && x.revenue > 0).length;
+      let basisSource = 'shopmonkey';
+      if (withData < 6) {
+        // ShopMonkey can't see that far back — shape the curve from the books
+        // instead (QuickBooks monthly income; no car counts, so those pass
+        // through untouched on apply).
+        const qbo = await qboMonthlyIncome(req.params.locationId, year - 1);
+        const qboMonths = qbo ? Object.keys(qbo).length : 0;
+        if (qboMonths >= 6) {
+          for (let m = 1; m <= 12; m++) ly[m - 1] = qbo[m] ? { revenue: qbo[m], cars: 0 } : null;
+          withData = qboMonths;
+          basisSource = 'quickbooks';
+        } else {
+          return res.status(400).json({ error: `Only ${withData} month(s) of ${year - 1} in ShopMonkey and ${qboMonths} in QuickBooks — not enough history to shape a seasonal curve. Use even amounts instead.` });
+        }
+      }
       // Months with no history get the average weight of the months that have
       // it, so a data gap doesn't zero out a target month.
       const lyTotal = ly.reduce((a, x) => a + (x ? x.revenue : 0), 0);
@@ -293,6 +349,11 @@ module.exports = (pool) => {
       const lyCars = ly.reduce((a, x) => a + (x ? x.cars : 0), 0);
       const growth = lyTotal > 0 ? total / lyTotal : 1;
       const proposed = alloc.map((rev, i) => {
+        // Books-based curve has no car counts — leave car/ARO targets untouched
+        // on apply (null = keep whatever is already set for that month).
+        if (basisSource === 'quickbooks') {
+          return { month: i + 1, revenue: rev, car_count: null, avg_ro_value: null, last_year_revenue: ly[i] ? Math.round(ly[i].revenue) : null, weight_pct: Math.round((weights[i] / wTotal) * 1000) / 10 };
+        }
         const carsLy = ly[i] ? ly[i].cars : (lyCars && withData ? Math.round(lyCars / withData) : 0);
         const cars = Math.max(0, Math.round(carsLy * growth));
         return {
@@ -302,7 +363,7 @@ module.exports = (pool) => {
           weight_pct: Math.round((weights[i] / wTotal) * 1000) / 10,
         };
       });
-      res.json({ year, total, basis_year: year - 1, basis_total: Math.round(lyTotal), months_with_history: withData, growth_pct: Math.round((growth - 1) * 1000) / 10, proposed });
+      res.json({ year, total, basis_year: year - 1, basis_source: basisSource, basis_total: Math.round(lyTotal), months_with_history: withData, growth_pct: Math.round((growth - 1) * 1000) / 10, proposed });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
