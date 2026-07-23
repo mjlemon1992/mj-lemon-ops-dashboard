@@ -138,11 +138,20 @@ module.exports = (pool) => {
         month: m, target: Math.round(targetRev[m] || 0), actual: Math.round(actualFor(m)),
         delta: Math.round(actualFor(m) - (targetRev[m] || 0)),
       }));
-      const shortfall = Math.round(completed.reduce((a, c) => a + (c.target - c.actual), 0));  // + = behind
+      // A $0 actual in a completed month is almost always a data gap (Shopmonkey
+      // history doesn't reach back that far) rather than a real zero, and counting
+      // it as a full miss would wildly over-inflate the catch-up. Skip those from
+      // the shortfall and report them so the owner can account for them by hand.
+      const scored = completed.filter((c) => c.actual > 0);
+      const skipped = completed.filter((c) => c.actual <= 0).map((c) => c.month);
+      const shortfall = Math.round(scored.reduce((a, c) => a + (c.target - c.actual), 0));  // + = behind
 
+      if (!scored.length) {
+        return res.json({ status: 'no_actuals', skipped, completed, yearly_target: Math.round(yearlyTarget), message: 'No completed month has Shopmonkey revenue yet, so there’s nothing to measure a shortfall against.' });
+      }
       if (shortfall <= 0) {
         return res.json({
-          status: 'ahead', yearly_target: Math.round(yearlyTarget), shortfall,
+          status: 'ahead', yearly_target: Math.round(yearlyTarget), shortfall, skipped,
           completed, remaining_count: remainingMonths.length,
           message: shortfall === 0 ? 'Completed months are exactly on target — no catch-up needed.' : `Ahead of pace by $${Math.abs(shortfall).toLocaleString('en-CA')} — targets left as-is.`,
         });
@@ -152,7 +161,7 @@ module.exports = (pool) => {
         month: m, old_revenue: Math.round(targetRev[m] || 0),
         new_revenue: Math.max(0, Math.round((targetRev[m] || 0) + perMonthBump)),
       }));
-      res.json({ status: 'behind', yearly_target: Math.round(yearlyTarget), shortfall, per_month_bump: Math.round(perMonthBump), completed, proposed, remaining_count: remainingMonths.length });
+      res.json({ status: 'behind', yearly_target: Math.round(yearlyTarget), shortfall, per_month_bump: Math.round(perMonthBump), completed, proposed, skipped, remaining_count: remainingMonths.length });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

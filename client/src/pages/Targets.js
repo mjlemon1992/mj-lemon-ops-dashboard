@@ -78,9 +78,12 @@ export default function Targets() {
       if (r.status !== 'behind') { showToast(r.message || 'Nothing to recalculate', r.status === 'ahead' ? 'success' : undefined); setRecalcing(false); return; }
       const k = (n) => '$' + Math.round(n).toLocaleString('en-CA');
       const lines = r.proposed.map((p) => `${MONTHS[p.month - 1]}:  ${k(p.old_revenue)} → ${k(p.new_revenue)}`).join('\n');
+      const skipNote = (r.skipped && r.skipped.length)
+        ? `\n\nSkipped (no Shopmonkey data): ${r.skipped.map((m) => SHORT[m - 1]).join(', ')} — not counted as misses.`
+        : '';
       const ok = await askConfirm({
         title: 'Recalculate to yearly target',
-        body: `Completed months are ${k(r.shortfall)} behind the ${k(r.yearly_target)} annual target.\n\nEven split adds ${k(r.per_month_bump)} to each of the ${r.remaining_count} remaining months so the year still lands on ${k(r.yearly_target)}:\n\n${lines}`,
+        body: `Completed months are ${k(r.shortfall)} behind the ${k(r.yearly_target)} annual target.\n\nEven split adds ${k(r.per_month_bump)} to each of the ${r.remaining_count} remaining months so the year still lands on ${k(r.yearly_target)}:\n\n${lines}${skipNote}`,
         confirmLabel: 'Apply & save',
       });
       if (!ok) { setRecalcing(false); return; }
