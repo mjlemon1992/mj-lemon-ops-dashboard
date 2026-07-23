@@ -1087,6 +1087,24 @@ module.exports = (pool) => {
   // "Actually, this IS parts" — reclassify a parked document and run it through
   // the normal pipeline. Re-reads the stored scan so it gets a real match rather
   // than inheriting the extraction that mis-called it.
+  // The third exit for an unmatched invoice: it legitimately has no RO (stock
+  // order, shop supplies from a parts supplier). Clears it from the needs-
+  // matching queue and the waiting-on-you rail while keeping it filed for
+  // statement reconciliation. Undo = ↻ re-match (runs matching again).
+  router.put('/invoice/:id/no-ro', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
+    try {
+      await ensurePartsReconTables(pool);
+      const { rows } = await pool.query(
+        `UPDATE vendor_invoice SET match_status='no_ro', recon_status='stock',
+                recon_note='No RO — stock/shop purchase (owner-confirmed)'
+          WHERE id=$1 RETURNING id, location_id, vendor, invoice_number`, [req.params.id]);
+      if (!rows.length) return fail(res, 'Invoice not found', 404);
+      if (!canAccessLocation(req.user, rows[0].location_id)) return fail(res, 'Access denied for this location', 403);
+      console.log(`[parts] no-ro: ${rows[0].vendor || ''} #${rows[0].invoice_number || ''} by ${req.user.email}`);
+      res.json({ ok: true, id: rows[0].id, match_status: 'no_ro' });
+    } catch (e) { fail(res, e); }
+  });
+
   router.put('/invoice/:id/is-parts', authenticateToken, requireRole('owner', 'partner'), async (req, res) => {
     try {
       await ensurePartsReconTables(pool);

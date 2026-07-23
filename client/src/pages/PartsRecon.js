@@ -195,13 +195,14 @@ const RECON = {
   variance: { t: 'PARTIAL — NOT ALL INVOICES IN', c: 'var(--text3)' },   // legacy rows only; clears on next reconcile
   ok: { t: 'OK', c: 'var(--success)' },
   pending: { t: 'JOB OPEN', c: 'var(--text3)' },
+  stock: { t: 'STOCK / NO RO', c: 'var(--text3)' },
 };
-const MATCH_COLOR = { matched: 'var(--success)', confirmed: 'var(--success)', ambiguous: 'var(--warning)', unmatched: 'var(--danger)', pending: 'var(--text3)' };
+const MATCH_COLOR = { matched: 'var(--success)', confirmed: 'var(--success)', ambiguous: 'var(--warning)', unmatched: 'var(--danger)', pending: 'var(--text3)', no_ro: 'var(--text3)' };
 // What actually wants a human — the same test the Waiting-on-you rail uses, so
 // the tab and the rail can never disagree. A reconciled invoice drops out of the
 // worklist the moment it's clean; "All" keeps it as the record.
 const needsAttention = (i) => !i.not_parts && (
-  !['matched', 'confirmed'].includes(i.match_status)
+  !['matched', 'confirmed', 'no_ro'].includes(i.match_status)
   || i.recon_status === 'underlogged'
   || (i.line_findings || []).length > 0);
 
@@ -279,6 +280,11 @@ function InvoicesView({ locId }) {
     const c = cands[Number(pick) - 1];
     if (!c) return;
     try { const out = await api(`/parts/invoice/${inv.id}/confirm-match`, { method: 'PUT', body: JSON.stringify({ order_id: c.order_id, order_number: c.order_number }) }); showToast(`Matched RO ${c.order_number} — ${out.recon_status}`); load(); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
+  const noRo = async (inv) => {
+    if (!await askConfirm({ title: 'No work order for this one?', body: `Mark ${inv.vendor || 'this invoice'} ${inv.invoice_number || ''} as a stock/shop purchase with no RO? It stays filed for statement matching but stops asking to be matched. (Undo: tap Match RO later.)`, confirmLabel: 'No RO — stock' })) return;
+    try { await api(`/parts/invoice/${inv.id}/no-ro`, { method: 'PUT', body: JSON.stringify({}) }); showToast('Filed as stock — off the needs-matching list'); load(); }
     catch (e) { showToast(e.message, 'error'); }
   };
   const del = async (inv) => {
@@ -383,7 +389,7 @@ function InvoicesView({ locId }) {
             <div style={{ fontSize: '12px', minWidth: '120px' }}>
               {inv.matched_order_number
                 ? <span style={{ color: MATCH_COLOR[inv.match_status] }}>RO {inv.matched_order_number}{inv.sm_url && <> · <a href={inv.sm_url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>Open ↗</a></>}</span>
-                : <span style={{ color: MATCH_COLOR[inv.match_status] || 'var(--text3)' }}>{inv.match_status}</span>}
+                : <span style={{ color: MATCH_COLOR[inv.match_status] || 'var(--text3)' }}>{inv.match_status === 'no_ro' ? 'no RO · stock' : inv.match_status}</span>}
             </div>
             <div style={{ fontSize: '11px', fontWeight: 700, color: rs.c, minWidth: '130px', textAlign: 'right' }}>{rs.t}</div>
             <div style={{ display: 'flex', gap: '6px' }}>
@@ -392,6 +398,8 @@ function InvoicesView({ locId }) {
               {!inv.not_parts && <button onClick={() => markWarranty(inv)} title={inv.warranty ? 'Already a warranty claim — tap to change the expected credit' : 'Mark as warranty — watch for the supplier credit'}
                 style={{ fontSize: '11px', padding: '4px 10px', color: inv.warranty ? 'var(--info)' : undefined }}>🛡 Warranty</button>}
               <button onClick={() => pickMatch(inv)} style={{ fontSize: '11px', padding: '4px 10px' }}>{inv.matched_order_number ? 'Re-match' : 'Match RO'}</button>
+              {!inv.not_parts && !['matched', 'confirmed', 'no_ro'].includes(inv.match_status) &&
+                <button onClick={() => noRo(inv)} title="This purchase has no work order — stock or shop supplies. Clears it from the needs-matching list." style={{ fontSize: '11px', padding: '4px 10px' }}>📦 No RO</button>}
               <button onClick={() => del(inv)} title="Remove" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>✕</button>
             </div>
             {inv.recon_note && <div style={{ flexBasis: '100%', fontSize: '11px', color: 'var(--text3)' }}>{inv.recon_note}</div>}
