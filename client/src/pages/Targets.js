@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { askConfirm, showToast } from '../components/Feedback';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -65,6 +66,33 @@ export default function Targets() {
     setSaving(false);
   };
 
+  const [recalcing, setRecalcing] = useState(false);
+  // Missed a month? Pull actuals for completed months, and if we're behind,
+  // spread the shortfall evenly across the remaining months so the year still
+  // lands on its original annual target. Preview first, then save on confirm.
+  const recalcTargets = async () => {
+    if (!selectedLoc) return;
+    setRecalcing(true);
+    try {
+      const r = await api(`/targets/${selectedLoc}/${year}/recalculate`, { method: 'POST', body: JSON.stringify({}) });
+      if (r.status !== 'behind') { showToast(r.message || 'Nothing to recalculate', r.status === 'ahead' ? 'success' : undefined); setRecalcing(false); return; }
+      const k = (n) => '$' + Math.round(n).toLocaleString('en-CA');
+      const lines = r.proposed.map((p) => `${MONTHS[p.month - 1]}:  ${k(p.old_revenue)} → ${k(p.new_revenue)}`).join('\n');
+      const ok = await askConfirm({
+        title: 'Recalculate to yearly target',
+        body: `Completed months are ${k(r.shortfall)} behind the ${k(r.yearly_target)} annual target.\n\nEven split adds ${k(r.per_month_bump)} to each of the ${r.remaining_count} remaining months so the year still lands on ${k(r.yearly_target)}:\n\n${lines}`,
+        confirmLabel: 'Apply & save',
+      });
+      if (!ok) { setRecalcing(false); return; }
+      const bump = Object.fromEntries(r.proposed.map((p) => [p.month, p.new_revenue]));
+      const next = targets.map((t, i) => (bump[i + 1] != null ? { ...t, revenue: bump[i + 1] } : t));
+      setTargets(next);
+      await api(`/targets/${selectedLoc}/${year}/bulk`, { method: 'POST', body: JSON.stringify({ targets: next.map((t, i) => ({ ...t, month: i + 1 })) }) });
+      showToast('Targets recalculated & saved ✓');
+    } catch (e) { showToast((e && e.message) || 'Recalculate failed', 'error'); }
+    setRecalcing(false);
+  };
+
   const field = (key, label) => (
     <div className="form-group" key={key}>
       <label className="form-label">{label}</label>
@@ -82,7 +110,11 @@ export default function Targets() {
         <select value={year} onChange={e => setYear(parseInt(e.target.value))} style={{ width: 'auto' }}>
           {[2025, 2026, 2027].map(y => <option key={y}>{y}</option>)}
         </select>
-        <button className="primary" onClick={saveTargets} disabled={saving} style={{ marginLeft: 'auto' }}>
+        <button onClick={recalcTargets} disabled={recalcing || saving} style={{ marginLeft: 'auto' }}
+          title="If completed months missed target, bump the remaining months so the year still hits its annual target">
+          {recalcing ? 'Recalculating…' : '↻ Recalculate to yearly'}
+        </button>
+        <button className="primary" onClick={saveTargets} disabled={saving || recalcing}>
           {saving ? 'Saving...' : saved ? 'Saved ✓' : 'Save all targets'}
         </button>
       </div>
