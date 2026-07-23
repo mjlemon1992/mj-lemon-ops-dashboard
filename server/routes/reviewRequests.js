@@ -123,9 +123,31 @@ module.exports = (pool) => {
         (customerName(cust) || o.generatedCustomerName || '').slice(0, 255) || null,
         phoneLast4 || null, status, (detail || '').slice(0, 1000) || null]);
 
-  // One order end-to-end: opt-out check -> phone -> render -> send (or dry-run
-  // log). Shared by the auto batch and the pickup Send button.
+  // Atomic double-send guard: claim the order row before any work. The claim
+  // succeeds only when the RO has never been asked or its row is re-decidable
+  // (skipped/failed/dry_run). A 'sent' row — or a fresh in-flight 'sending'
+  // claim from a concurrent request — refuses, so two racing Sends (double-tap
+  // at the counter, or scheduler + manual on the same RO) can never text the
+  // customer twice. A crashed send leaves 'sending'; reclaimable after 10 min.
+  const claimOrder = async (locId, o) => {
+    const { rowCount } = await pool.query(`INSERT INTO review_request_log
+        (location_id, order_id, order_number, customer_id, customer_name, status, detail)
+      VALUES ($1,$2,$3,$4,$5,'sending','claimed')
+      ON CONFLICT (location_id, order_id) DO UPDATE SET
+        status='sending', detail='claimed', created_at=NOW()
+      WHERE review_request_log.status NOT IN ('sent')
+        AND NOT (review_request_log.status = 'sending'
+                 AND review_request_log.created_at > NOW() - INTERVAL '10 minutes')`,
+      [locId, o.id, o.number != null ? String(o.number) : null, o.customerId || null,
+        (o.generatedCustomerName || '').slice(0, 255) || null]);
+    return rowCount === 1;
+  };
+
+  // One order end-to-end: claim -> opt-out check -> phone -> render -> send
+  // (or dry-run log). Shared by the auto batch and the pickup Send button.
   const askOrder = async (locId, loc, o, link) => {
+    if (!(await claimOrder(locId, o)))
+      return { status: 'skipped', reason: 'already handled by a concurrent request' };
     const cust = await fetchCustomer(o.customerId);
     if (customerOptedOut(cust)) {
       await logRow(locId, o, cust, 'skipped', 'customer opted out');
@@ -212,7 +234,7 @@ module.exports = (pool) => {
         return res.json({ queue: [] });
       const orders = await fetchRecentInvoicedOrders(apiKey(), loc.shopmonkey_location_id, 100);
       const { rows: logged } = await pool.query(
-        'SELECT order_id FROM review_request_log WHERE location_id=$1', [id]);
+        "SELECT order_id FROM review_request_log WHERE location_id=$1 AND status <> 'failed'", [id]);  // failed sends stay retryable
       const { rows: recentCust } = await pool.query(
         `SELECT DISTINCT customer_id FROM review_request_log
          WHERE location_id=$1 AND status IN ('sent','dry_run')
@@ -270,7 +292,14 @@ module.exports = (pool) => {
           return res.status(409).json({ error: 'This customer was already asked in the last 90 days', cooldown: true });
       }
 
-      const out = await askOrder(id, loc, o, link);
+      let out;
+      try { out = await askOrder(id, loc, o, link); }
+      catch (e) {
+        // Record the failure so the log shows it — the RO stays retryable
+        // (failed rows are excluded from alreadyLogged).
+        await logRow(id, o, null, 'failed', String(e.message || e));
+        return res.status(502).json({ error: `Send failed: ${String(e.message || e).slice(0, 200)}` });
+      }
       res.json({ ok: true, live: LIVE, ...out });
     } catch (e) { fail(res, e); }
   });
@@ -352,7 +381,7 @@ module.exports = (pool) => {
       const orders = await fetchRecentInvoicedOrders(apiKey(), loc.shopmonkey_location_id, 100);
 
       const { rows: logged } = await pool.query(
-        'SELECT order_id FROM review_request_log WHERE location_id=$1', [id]);
+        "SELECT order_id FROM review_request_log WHERE location_id=$1 AND status <> 'failed'", [id]);  // failed sends stay retryable
       const alreadyLogged = new Set(logged.map((r) => r.order_id));
       const { rows: recentCust } = await pool.query(
         `SELECT DISTINCT customer_id FROM review_request_log

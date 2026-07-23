@@ -33,7 +33,7 @@ function Gauge({ label, value, sub, tone, rail, onClick, soon }) {
         opacity: soon ? 0.6 : 1, cursor: clickable ? 'pointer' : 'default',
       }}>
       <div style={{ fontSize: '10px', letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text3)', fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: '26px', fontWeight: 600, lineHeight: 1.1, marginTop: '7px', color: tone || 'var(--text)' }}>{value}</div>
+      <div style={{ fontFamily: 'var(--font-disp)', fontVariantNumeric: 'tabular-nums', fontSize: '26px', fontWeight: 600, lineHeight: 1.1, marginTop: '7px', color: tone || 'var(--text)' }}>{value}</div>
       <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '5px' }}>{soon ? 'soon' : sub}</div>
     </div>
   );

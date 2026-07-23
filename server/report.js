@@ -303,8 +303,10 @@ function buildPdf(rows, now, frac, locationName) {
 
 function auth(req, res, next) {
   const token = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
-  if (!process.env.REPORT_TOKEN || token !== process.env.REPORT_TOKEN) {
-    return res.status(401).json({ error: 'unauthorized' });
-  }
+  const expected = process.env.REPORT_TOKEN || '';
+  // Constant-time compare, matching the MCP/display token checks.
+  const A = Buffer.from(token), B = Buffer.from(expected);
+  const ok = expected && A.length === B.length && require('crypto').timingSafeEqual(A, B);
+  if (!ok) return res.status(401).json({ error: 'unauthorized' });
   next();
 }

@@ -369,6 +369,18 @@ export default function Home() {
         );
       })()}
 
+      {/* Reviews are independent of the time clock: if the clock deck-row
+          didn't render (no clock data / clock API down), the pickup decks
+          still get their own row. Cards self-hide where the feature is off. */}
+      {Object.keys(clockByLoc).length === 0 && (
+        <div className="deck-row">
+          {activeLocations.map(l => (
+            <ReviewRequestsCard key={l.id} locId={l.id} deck
+              locName={activeLocations.length > 1 ? l.name : null} />
+          ))}
+        </div>
+      )}
+
       {/* Advisor: cars + efficiency only — the allowed operational metrics.
           Fallback like the owner cards: the hero band covers these when a
           revenue target exists. */}

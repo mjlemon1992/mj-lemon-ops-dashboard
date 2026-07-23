@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 // Review request texts — the pickup Send/Skip queue. The counter workflow: ask
@@ -41,16 +41,23 @@ export default function ReviewRequestsCard({ locId, deck = false, locName = null
   const [editLink, setEditLink] = useState(false);
   const [linkDraft, setLinkDraft] = useState('');
 
+  // Sequence guard: a slow response from the PREVIOUS location must never
+  // paint over the current one — showing shop A's queue under shop B's header
+  // could send the wrong shop's review link. Only the latest request wins.
+  const seq = useRef(0);
   const load = useCallback(() => {
     if (!locId) return;
+    const my = ++seq.current;
     api(`/marketing/review-requests/${locId}`)
       .then((d) => {
+        if (seq.current !== my) return;
         setData(d); setLinkDraft(d.custom_link || '');
         if (d.enabled) api(`/marketing/review-requests/${locId}/queue`)
-          .then((q) => setQueue((q && q.queue) || [])).catch(() => setQueue([]));
+          .then((q) => { if (seq.current === my) setQueue((q && q.queue) || []); })
+          .catch(() => { if (seq.current === my) setQueue([]); });
         else setQueue([]);
       })
-      .catch(() => setHidden(true));
+      .catch(() => { if (seq.current === my) setHidden(true); });
   }, [locId, api]);
 
   useEffect(() => { setData(null); setQueue([]); setHidden(false); setMsg(null); setEditLink(false); load(); }, [load]);
@@ -108,11 +115,12 @@ export default function ReviewRequestsCard({ locId, deck = false, locName = null
         </div>
       </div>
       <button className="primary" disabled={busy != null || !data.link} onClick={() => sendOrder(row)}
-        style={{ fontSize: '11.5px', padding: '4px 11px', flexShrink: 0 }}>
+        style={{ fontSize: '12px', padding: '9px 16px', flexShrink: 0 }}>
         {busy === row.order_id ? '…' : 'Send'}
       </button>
       <button disabled={busy != null} onClick={() => skipOrder(row)} title="Don't ask for this RO"
-        style={{ fontSize: '11.5px', padding: '4px 8px', flexShrink: 0, color: 'var(--text3)' }}>
+        aria-label="Skip — don't ask for this RO"
+        style={{ fontSize: '13px', padding: '9px 12px', flexShrink: 0, color: 'var(--text3)' }}>
         ✕
       </button>
     </div>
@@ -132,6 +140,11 @@ export default function ReviewRequestsCard({ locId, deck = false, locName = null
             {data.live ? 'ask at pickup' : 'dry run'}
           </span>
         </div>
+        {!data.link && (
+          <div style={{ fontSize: '11.5px', color: 'var(--danger)', marginBottom: '7px' }}>
+            No review link — set the Google place ID or a custom link on the Marketing page.
+          </div>
+        )}
         {queue.length === 0 && <div className="deck-empty">Queue clear — invoiced ROs show up here to ask at pickup.</div>}
         {queue.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

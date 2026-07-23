@@ -17,11 +17,31 @@ const MONO = "ui-monospace, 'SF Mono', Menlo, monospace";
 const Stars = ({ rating, size = 14 }) => {
   const full = Math.round(rating || 0);
   return (
-    <span style={{ color: 'var(--accent)', fontSize: size, letterSpacing: '2px' }}>
+    <span role="img" aria-label={`${rating ?? 0} of 5 stars`}
+      style={{ color: 'var(--accent)', fontSize: size, letterSpacing: '2px' }}>
       {'★★★★★'.slice(0, full)}<span style={{ opacity: 0.25 }}>{'★★★★★'.slice(full)}</span>
     </span>
   );
 };
+
+// Copy that never lies: clipboard API first, execCommand fallback for
+// non-secure/older mobile contexts, and the promise REJECTS on failure so the
+// button can say so instead of showing a false "Copied ✓".
+const copyText = (t) => new Promise((resolve, reject) => {
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      ok ? resolve() : reject(new Error('copy blocked'));
+    } catch (e) { reject(e); }
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(t).then(resolve, fallback);
+  } else fallback();
+});
 
 // Per-review reply flow. `stored` is the watcher's row for this review
 // (auto-draft + lifecycle status), when one exists.
@@ -32,6 +52,15 @@ function ReplyDraft({ locId, review, stored }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [err, setErr] = useState(null);
+
+  // The watcher's auto-draft can arrive AFTER first paint (data refresh without
+  // a remount) — adopt it only where the user hasn't typed or decided anything,
+  // so a stored draft never clobbers an in-progress edit.
+  useEffect(() => {
+    if (!stored) return;
+    setStatus((s) => s || stored.status || null);
+    setDraft((d) => (d == null && stored.status !== 'dismissed' ? stored.draft : d));
+  }, [stored]);
 
   const generate = () => {
     setBusy(true); setErr(null);
@@ -48,8 +77,9 @@ function ReplyDraft({ locId, review, stored }) {
   };
 
   const copy = () => {
-    if (navigator.clipboard) navigator.clipboard.writeText(draft || '');
-    setCopied(true); setTimeout(() => setCopied(false), 1600);
+    copyText(draft || '')
+      .then(() => { setErr(null); setCopied(true); setTimeout(() => setCopied(false), 1600); })
+      .catch(() => setErr("Couldn't copy — select the text and copy manually."));
   };
 
   const markPosted = () => {

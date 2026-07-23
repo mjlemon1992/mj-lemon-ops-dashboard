@@ -510,7 +510,15 @@ module.exports = (pool) => {
         `INSERT INTO cos_brief (brief_date, kind, payload, markdown) VALUES ($1,$2,$3,$4)`,
         [new Date().toISOString().slice(0, 10), a.action_type, payload, markdown]
       );
-      await pool.query(`UPDATE cos_automations SET last_run_date = CURRENT_DATE WHERE id = $1`, [a.id]);
+      // Stamp the MOUNTAIN date, not CURRENT_DATE (UTC). The scheduler compares
+      // last_run_date against the Mountain "today"; an evening automation
+      // (>= ~18:00 MDT) runs after UTC midnight, so CURRENT_DATE stamped
+      // tomorrow's date and the ran-today guard never matched — the automation
+      // re-fired every 60s tick until Mountain midnight.
+      const mtToday = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Edmonton', year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date());
+      await pool.query(`UPDATE cos_automations SET last_run_date = $2 WHERE id = $1`, [a.id, mtToday]);
       res.json({ ok: true, action_type: a.action_type });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

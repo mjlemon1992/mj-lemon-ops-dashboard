@@ -1,4 +1,13 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+
+// Constant-time secret comparison (length-guarded). The machine sync key acts
+// as OWNER — it deserves the same timingSafeEqual treatment the MCP/display
+// tokens already get, not a short-circuiting ===.
+function safeEqual(a, b) {
+  const A = Buffer.from(String(a || '')), B = Buffer.from(String(b || ''));
+  return A.length === B.length && A.length > 0 && crypto.timingSafeEqual(A, B);
+}
 
 // Fail closed: never fall back to a committed secret. If JWT_SECRET is missing,
 // the app must refuse to start rather than silently sign tokens with a known
@@ -94,7 +103,7 @@ async function authenticateToken(req, res, next) {
 function syncAuth(req, res, next) {
   const secret = process.env.SYNC_SECRET;
   const provided = req.get('X-Sync-Key');
-  if (secret && provided && provided === secret) {
+  if (secret && provided && safeEqual(provided, secret)) {
     req.user = { role: 'owner', via: 'sync-key' };
     return next();
   }

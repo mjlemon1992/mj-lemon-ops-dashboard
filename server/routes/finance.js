@@ -70,10 +70,14 @@ module.exports = (pool) => {
 
   const fail = (res, e) => res.status(e.status || 500).json({ error: String(e.message || e) });
 
-  // Default date window: YTD (Jan 1 -> today).
+  // Default date window: YTD (Jan 1 -> today). Params are interpolated into
+  // the QBO connector URL, so anything that isn't a bare YYYY-MM-DD is
+  // discarded (blocks query-string injection into the internal connector call).
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
   const window = (q) => {
-    const end = q.end || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
-    const start = q.start || `${end.slice(0, 4)}-01-01`;
+    const end = DATE_RE.test(q.end || '') ? q.end
+      : new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
+    const start = DATE_RE.test(q.start || '') ? q.start : `${end.slice(0, 4)}-01-01`;
     return { start, end };
   };
 
