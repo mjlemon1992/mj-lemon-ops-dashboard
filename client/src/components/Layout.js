@@ -302,11 +302,11 @@ export default function Layout() {
                       {[
                         ...d.timeoff.map(r => ({ key: `to-${r.id}`, icon: '🏖', text: `${r.person_name} — holiday request`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
                         ...d.edits.map(r => ({ key: `ed-${r.id}`, icon: '✎', text: `${r.person_name} — punch change`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
-                        ...d.fuel.map(r => ({ key: `fu-${r.location_id}`, icon: '⛽', text: `${r.n} unassigned fuel purchase${r.n === 1 ? '' : 's'}`, loc: r.location_id, locName: r.location_name, path: '/fuel-card' })),
+                        ...d.fuel.map(r => ({ key: `fu-${r.location_id}`, icon: '⛽', text: `${r.n} unassigned fuel purchase${r.n === 1 ? '' : 's'}`, loc: r.location_id, locName: r.location_name, path: '/fuel-card', dismissKey: `fuel-${r.location_id}-${r.n}-${r.total}` })),
                         ...d.reorders.map(r => ({ key: `ro-${r.id}`, icon: '📦', text: `Re-order: ${r.item}`, loc: r.location_id, locName: r.location_name, path: user?.role === 'advisor' ? '/reorders' : '/time-clock' })),
                         ...d.clockq.map(r => ({ key: `cq-${r.id}`, icon: '⏱', text: `${r.person_name} — ${r.kind === 'overtime' ? 'overtime' : 'missed break'}`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
-                        ...d.bonus.map(b => ({ key: `bo-${b.location_id}`, icon: '◆', text: `Bonus — ${b.status === 'draft' ? 'draft awaiting lock' : 'month open'}`, loc: b.location_id, locName: b.location_name, path: '/bonus' })),
-                        ...d.parts.map(r => ({ key: `pt-${r.id}`, icon: '🔧', text: r.text, loc: r.location_id, locName: r.location_name, path: `/parts?tab=${r.kind === 'statement' ? 'statements' : r.kind === 'warranty' ? 'warranty' : 'invoices'}` })),
+                        ...d.bonus.map(b => ({ key: `bo-${b.location_id}`, icon: '◆', text: `Bonus — ${b.status === 'draft' ? 'draft awaiting lock' : 'month open'}`, loc: b.location_id, locName: b.location_name, path: '/bonus', dismissKey: `bonus-${b.location_id}-${b.month}` })),
+                        ...d.parts.map(r => ({ key: `pt-${r.id}`, icon: '🔧', text: r.text, loc: r.location_id, locName: r.location_name, path: `/parts?tab=${r.kind === 'statement' ? 'statements' : r.kind === 'warranty' ? 'warranty' : 'invoices'}`, dismissKey: `parts-${r.id}` })),
                       ].map((it) => (
                         <div key={it.key}
                           onClick={() => { setAttnOpen(false); select(it.loc); navigate(it.path); }}
@@ -316,6 +316,11 @@ export default function Layout() {
                           <span style={{ fontSize: '14px' }}>{it.icon}</span>
                           <span style={{ flex: 1 }}>{it.text}</span>
                           <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{it.locName}</span>
+                          {it.dismissKey && (
+                            <button title="Dismiss this notification — the item itself stays on its page"
+                              onClick={(e) => { e.stopPropagation(); dismissCard(it.dismissKey); }}
+                              style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '13px', padding: '0 2px', lineHeight: 1 }}>✕</button>
+                          )}
                         </div>
                       ))}
                     </div>
