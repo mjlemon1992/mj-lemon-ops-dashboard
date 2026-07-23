@@ -128,7 +128,10 @@ export default function Layout() {
     parts: _raw.parts || [],
   };
   const railCount = d.timeoff.length + d.edits.length + d.fuel.length + d.reorders.length + d.clockq.length + d.bonus.length + d.parts.length;
-  const showRail = !isMobile && railOpen && railCount > 0;
+  // Full rail only on Home — elsewhere the ⏳ pill opens the same dropdown popover
+  // (below) so content pages keep their full width instead of a persistent column.
+  const onHome = location.pathname === '/';
+  const showRail = !isMobile && railOpen && railCount > 0 && onHome;
   const toggleRail = () => {
     setUnseen(false);   // queue opened — stop the shake + title flash
     if (isMobile) { setAttnOpen(o => !o); return; }
@@ -285,10 +288,11 @@ export default function Layout() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, position: 'relative' }}>
             {railCount > 0 && (
               <>
-                <div className={`badge warning${unseen ? ' pill-shake' : ''}`} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={toggleRail}>
-                  ⏳ {railCount}{isMobile ? '' : ' waiting on you'}
+                <div className={`badge warning${unseen ? ' pill-shake' : ''}`} style={{ cursor: 'pointer', userSelect: 'none', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                  onClick={() => ((!isMobile && onHome) ? toggleRail() : setAttnOpen(o => !o))}>
+                  <Icon name="hourglass" size={12} /> {railCount}{isMobile ? '' : ' waiting on you'}
                 </div>
-                {isMobile && attnOpen && (
+                {attnOpen && (
                   <>
                     <div onClick={() => setAttnOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
                     <div style={{ position: 'absolute', top: '40px', right: 0, zIndex: 61, minWidth: 260, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '10px', boxShadow: '0 8px 28px rgba(0,0,0,0.35)', padding: '6px', maxHeight: '60vh', overflowY: 'auto' }}>
@@ -319,9 +323,9 @@ export default function Layout() {
                 )}
               </>
             )}
-            {alertCount > 0 && (
-              <div className="badge danger" style={{ cursor: 'pointer' }} onClick={() => navigate('/alerts')}>
-                ⚠ {alertCount}{isMobile ? '' : ' active alerts'}
+            {alertCount > 0 && !onHome && (
+              <div className="badge danger" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }} onClick={() => navigate('/alerts')}>
+                <Icon name="alertTriangle" size={12} /> {alertCount}{isMobile ? '' : ' active alerts'}
               </div>
             )}
             {canQueue && pushSupported() && (
@@ -331,14 +335,14 @@ export default function Layout() {
                   : 'Get pinged on this device when something lands in your queue — even with the app closed'}
                 aria-label="Toggle notifications"
                 style={{ background: 'var(--bg3)', border: `1px solid ${pushOn === 'on' ? 'var(--accent)' : 'var(--border)'}`, borderRadius: '8px', padding: '4px 10px', fontSize: '14px', cursor: 'pointer', lineHeight: 1.3, opacity: pushOn === 'denied' ? 0.5 : 1 }}>
-                {pushOn === 'on' ? '🔔' : '🔕'}
+                <Icon name={pushOn === 'on' ? 'bell' : 'bellOff'} size={15} style={{ verticalAlign: 'middle' }} />
               </button>
             )}
             <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               aria-label="Toggle light/dark mode"
               style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '8px', padding: '4px 10px', fontSize: '14px', cursor: 'pointer', lineHeight: 1.3 }}>
-              {theme === 'dark' ? '☀️' : '🌙'}
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} style={{ verticalAlign: 'middle' }} />
             </button>
           </div>
         </div>

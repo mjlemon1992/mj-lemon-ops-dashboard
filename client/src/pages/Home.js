@@ -255,7 +255,7 @@ export default function Home() {
                   <div className="hero-bar-fill" style={{ width: `${pctFill}%` }} />
                   <div className="hero-bar-marker" style={{ left: `${Math.min(frac * 100, 100)}%` }} title="Where pace says you should be" />
                 </div>
-                <div className="hero-bar-cap">{daysLeft} working day{daysLeft === 1 ? '' : 's'} left</div>
+                <div className="hero-bar-cap">revenue pace · {daysLeft} working day{daysLeft === 1 ? '' : 's'} left</div>
               </div>
             </div>
             <div className="glance-tach"><PaceTach pct={targetPct(groupRevenue, gRevTarget)} /></div>

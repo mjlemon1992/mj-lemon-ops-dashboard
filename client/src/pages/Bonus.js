@@ -365,6 +365,8 @@ function BonusView({ locId }) {
       )}
 
       {pace && (
+        <>
+        <div className="section-label" style={{ marginTop: '4px', marginBottom: '6px' }}>Current month — how {monthLabel(pace.month)} is tracking (separate from the {monthLabel(month)} calculation above)</div>
         <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', marginBottom: '14px', background: 'var(--bg2)' }}>
           <span style={{ fontSize: '13px' }}>📈 <b>{monthLabel(pace.month)} pace:</b> {money0(pace.mtd)} MTD</span>
           <div style={{ position: 'relative', flex: 1, maxWidth: '360px', minWidth: '160px', height: '9px', background: 'var(--bg3)', borderRadius: '4px' }}>
@@ -379,6 +381,7 @@ function BonusView({ locId }) {
           </span>
           <span style={{ fontSize: '11px', color: 'var(--text3)' }}>pace, not promise</span>
         </div>
+        </>
       )}
 
       {run && (

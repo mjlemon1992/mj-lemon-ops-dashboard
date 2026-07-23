@@ -148,7 +148,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
           <div className="wr-card-title">{monthLabel(b.month)} bonus{multiLoc ? ` — ${b.location_name}` : ''}
             <button className="wr-x" title="Dismiss until next month" onClick={() => dismiss(`bonus-${b.location_id}-${b.month}`)}>✕</button></div>
           <div className="wr-card-body">{ownerish
-            ? (b.status === 'draft' ? 'Draft is calculated — review and lock it' : 'Net profit is one number from calculating')
+            ? (b.status === 'draft' ? 'Draft is calculated — review and lock it' : "You're one number away — enter net profit to calculate")
             : (b.status === 'draft' ? 'Draft calculated — waiting on the owner to lock it' : 'Waiting on the owner for net profit from month-end close')}</div>
           <div className="wr-actions"><button onClick={() => goTo(b.location_id, '/bonus')}>{ownerish ? (b.status === 'draft' ? 'Review →' : 'Enter net →') : 'View →'}</button></div>
         </div>

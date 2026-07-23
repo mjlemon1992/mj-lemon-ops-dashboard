@@ -412,7 +412,12 @@ function InvoicesView({ locId }) {
               style={{ maxWidth: '95vw', maxHeight: '85vh', objectFit: 'contain', background: '#fff', borderRadius: 8, cursor: 'default' }} />
           </div>
         )}
-        Nothing is flagged until the work order is <b>complete/invoiced</b>. Then each invoice is checked line by line — every part on it must be attached to the WO at the right cost (matched by part number, or by cost where the WO line is generic like <i>npn</i>/<i>MISC</i>). <b>Possible unbilled</b> = the job's invoices total more than the parts cost on the WO. An invoice is judged on <b>its own</b> parts: every line has to be on the work order at the right cost. A job carrying more parts than the invoices in hand is <b>not</b> held against it — the rest simply aren't captured yet, and shelf stock never will be. The <b>Statements</b> tab is what proves an invoice is genuinely missing. <b>Job open</b> = still collecting invoices. Anything under <b>$5</b> is ignored (shipping &amp; handling, eco/handling fees). The scan is kept only while an invoice needs attention — once it matches and reconciles clean, the image is dropped (Hubdoc/QBO keeps the document), so <b>🔍 View</b> only appears on the ones worth looking at.
+        <details>
+          <summary style={{ cursor: 'pointer', color: 'var(--text2)', userSelect: 'none' }}>How reconciliation works</summary>
+          <div style={{ marginTop: '8px', lineHeight: 1.5 }}>
+            Nothing is flagged until the work order is <b>complete/invoiced</b>. Then each invoice is checked line by line — every part on it must be attached to the WO at the right cost (matched by part number, or by cost where the WO line is generic like <i>npn</i>/<i>MISC</i>). <b>Possible unbilled</b> = the job's invoices total more than the parts cost on the WO. An invoice is judged on <b>its own</b> parts: every line has to be on the work order at the right cost. A job carrying more parts than the invoices in hand is <b>not</b> held against it — the rest simply aren't captured yet, and shelf stock never will be. The <b>Statements</b> tab is what proves an invoice is genuinely missing. <b>Job open</b> = still collecting invoices. Anything under <b>$5</b> is ignored (shipping &amp; handling, eco/handling fees). The scan is kept only while an invoice needs attention — once it matches and reconciles clean, the image is dropped (Hubdoc/QBO keeps the document), so <b>🔍 View</b> only appears on the ones worth looking at.
+          </div>
+        </details>
       </div>
     </div>
   );
