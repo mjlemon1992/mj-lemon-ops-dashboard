@@ -194,3 +194,24 @@ CREATE TABLE IF NOT EXISTS marketing_reviews_snapshot (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (location_id, year, month)
 );
+
+-- Marketing: post-service Google review request texts (in-house replacement for
+-- the Shopmonkey CRM add-on's one used feature). One row per considered order;
+-- the UNIQUE is the never-text-twice-per-RO guarantee. status: sent | dry_run |
+-- skipped | failed. Full phone numbers are deliberately not stored (last4 only).
+-- Config lives on locations: review_req_enabled / review_req_auto (manual
+-- pickup queue vs scheduler auto-send) / review_req_link / review_req_template
+-- / timezone (added idempotently by routes/reviewRequests.js).
+CREATE TABLE IF NOT EXISTS review_request_log (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id UUID NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+  order_id VARCHAR(64) NOT NULL,
+  order_number VARCHAR(32),
+  customer_id VARCHAR(64),
+  customer_name VARCHAR(255),
+  phone_last4 VARCHAR(8),
+  status VARCHAR(16) NOT NULL,
+  detail TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (location_id, order_id)
+);

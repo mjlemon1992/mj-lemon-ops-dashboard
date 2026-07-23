@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLocations } from '../context/LocationContext';
 import { parseAlerts } from '../utils/alerts';
 import PaceTach from '../components/PaceTach';
+import ReviewRequestsCard from '../components/ReviewRequestsCard';
 import { Skeleton } from '../components/Feedback';
 import { fmtShortDate as fmtD2, money0 } from '../utils/format';
 import { crewPaidHours } from '../utils/pay';
@@ -357,6 +358,13 @@ export default function Home() {
                 {nextStat ? ` · next stat: ${nextStat.label}` : ''}
               </div>
             </div>
+            {/* Review asks at pickup — one deck per enabled location; the
+                component self-hides where the feature is off (and for advisors,
+                whose role the server rejects). Full controls stay on Marketing. */}
+            {activeLocations.map(l => (
+              <ReviewRequestsCard key={l.id} locId={l.id} deck
+                locName={activeLocations.length > 1 ? l.name : null} />
+            ))}
           </div>
         );
       })()}
