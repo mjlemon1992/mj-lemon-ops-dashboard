@@ -125,7 +125,7 @@ export default function Layout() {
     reorders: _raw.reorders || [],
     clockq: _raw.clockq || [],
     bonus: (_raw.bonus || []).filter(b => !dismissed.has(`bonus-${b.location_id}-${b.month}`)),
-    parts: _raw.parts || [],
+    parts: (_raw.parts || []).filter(p => !dismissed.has(`parts-${p.id}`)),
   };
   const railCount = d.timeoff.length + d.edits.length + d.fuel.length + d.reorders.length + d.clockq.length + d.bonus.length + d.parts.length;
   // Full rail only on Home — elsewhere the ⏳ pill opens the same dropdown popover

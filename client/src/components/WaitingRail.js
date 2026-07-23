@@ -158,6 +158,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
         <div key={`parts-${p.id}`} className="wr-card">
           <div className="wr-card-title">
             {p.kind === 'statement' ? 'Supplier statement' : p.kind === 'warranty' ? 'Warranty credit' : 'Parts invoice'}{multiLoc ? ` — ${p.location_name}` : ''}
+            <button className="wr-x" title="Dismiss this notification — the document itself stays on the Parts page" onClick={() => dismiss(`parts-${p.id}`)}>✕</button>
           </div>
           <div className="wr-card-body">{p.text}</div>
           <div className="wr-actions"><button onClick={() => goTo(p.location_id, `/parts?tab=${p.kind === 'statement' ? 'statements' : p.kind === 'warranty' ? 'warranty' : 'invoices'}`)}>Review →</button></div>
