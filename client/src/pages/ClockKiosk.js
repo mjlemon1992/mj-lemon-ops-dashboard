@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
+import Icon from '../components/Icon';
 
 // Public shop-floor time clock — runs on a shared tablet in the bay. Opened once
 // with the location PIN (same one the display boards use), then each tech taps
@@ -92,15 +93,25 @@ export default function ClockKiosk() {
   const [sheet, setSheet] = useState(null);         // my-timesheet payload (keeps person+pin for requests)
   const [rfid, setRfid] = useState(null);           // { tag, person, queue } — active fob card
   const [rfidEnabled, setRfidEnabled] = useState(false);   // OctaCard tap-to-clock on for this location?
-  // Kiosk theme comes from the URL, not the in-app toggle (no Layout here):
-  //   /clock/<id>             → dark (default, matches the display board)
-  //   /clock/<id>?theme=light → light, for brightly-lit counters
-  // Point Fully Kiosk's start URL at whichever reads best in the shop.
+  // Kiosk light/dark: ☀/🌙 toggle, remembered per kiosk device
+  // (clock_theme_<locationId>). ?theme=light in a Fully Kiosk start URL still
+  // works as the first-run default; after that a tap on the toggle wins.
+  const themeKey = `clock_theme_${locationId}`;
+  const [kioskTheme, setKioskTheme] = useState(() =>
+    localStorage.getItem(themeKey)
+    || (new URLSearchParams(window.location.search).get('theme') === 'light' ? 'light' : 'dark'));
   useEffect(() => {
-    const t = new URLSearchParams(window.location.search).get('theme');
-    if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
-    return () => { if (t === 'light') document.documentElement.removeAttribute('data-theme'); };
-  }, []);
+    document.documentElement.dataset.theme = kioskTheme;
+    localStorage.setItem(themeKey, kioskTheme);
+  }, [kioskTheme, themeKey]);
+  const themeToggle = (
+    <button onClick={() => setKioskTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+      title={kioskTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      aria-label="Toggle light/dark mode"
+      style={{ position: 'fixed', top: '16px', right: '16px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', lineHeight: 1.3, zIndex: 5 }}>
+      <Icon name={kioskTheme === 'dark' ? 'sun' : 'moon'} size={16} style={{ verticalAlign: 'middle' }} />
+    </button>
+  );
   const [fuHours, setFuHours] = useState('');       // follow-up answer inputs
   const [fuMins, setFuMins] = useState('');
   const [fuTook, setFuTook] = useState(null);
@@ -397,6 +408,7 @@ export default function ClockKiosk() {
   if (!entered) {
     return (
       <div style={wrap}>
+        {themeToggle}
         <div style={{ ...eyebrow, marginBottom: '8px' }}>OPS · Shop floor</div>
         <div style={{ ...kh, fontSize: '30px', marginBottom: '18px' }}>Shop Time Clock</div>
         <form onSubmit={(e) => { e.preventDefault(); setLocPin(entryPin); loadRoster(entryPin); }} style={{ textAlign: 'center' }}>
@@ -768,6 +780,7 @@ export default function ClockKiosk() {
     );
     return (
       <div style={{ ...wrap, justifyContent: 'flex-start', paddingTop: '40px' }}>
+        {themeToggle}
         <div style={{ ...eyebrow, marginBottom: '6px' }}>OPS · Shop floor</div>
         <div style={{ ...kh, fontSize: '30px', marginBottom: '24px' }}>Shop hub</div>
         {flash && <div style={{ ...pill, background: 'rgba(52,199,89,0.16)', color: 'var(--success)', marginBottom: '16px' }}>✓ {flash}</div>}
