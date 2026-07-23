@@ -450,6 +450,14 @@ function WarrantyView({ locId }) {
   const reopen = async (c) => {
     try { await api(`/parts/warranty/${c.id}`, { method: 'PUT', body: JSON.stringify({ status: 'awaiting' }) }); load(); } catch (e) { showToast(e.message, 'error'); }
   };
+  // Hard-remove a claim that was raised by MISTAKE (a mis-read CREDIT stamp, a core
+  // line that wasn't really a deposit). Different from "Stop watching" — that keeps
+  // the row as CLOSED; this deletes it so the tab isn't cluttered with false ones.
+  const remove = async (c) => {
+    if (!await askConfirm({ title: 'Remove this claim?', body: `Delete the ${money(c.expected)} ${c.kind === 'core' ? 'core' : 'warranty'} claim from ${c.vendor || 'this supplier'} entirely? Use this only if it was raised by mistake — it can't be undone.`, confirmLabel: 'Remove', danger: true })) return;
+    try { await api(`/parts/warranty/${c.id}`, { method: 'DELETE' }); showToast('Claim removed'); load(); }
+    catch (e) { showToast(e.message, 'error'); }
+  };
 
   if (err && !data) return <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>;
   if (!data) return <Skeleton rows={5} height={18} />;
@@ -461,7 +469,13 @@ function WarrantyView({ locId }) {
     <div>
       <div style={{ display: 'flex', gap: '10px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ fontSize: '12px', color: 'var(--text3)', flex: '1 1 260px' }}>
-          Money suppliers owe you back. <b>Core charges</b> are picked up automatically from the invoice line and clear when the old unit goes back. <b>Warranty</b> claims come from a <b>W in front of the PO</b> you give the supplier (W0508) — which prints on their invoice however it reaches you — or a <b>CREDIT stamp</b> on the scan, <b>“WARRANTY”</b> in a forwarded subject, or the <b>🛡</b> button. Both clear themselves when a matching credit lands on a statement or a later invoice.
+          Money suppliers owe you back — core deposits and warranty credits, cleared when a matching credit lands.
+          <details style={{ marginTop: '4px' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text2)', userSelect: 'none' }}>How credits are tracked</summary>
+            <div style={{ marginTop: '6px', lineHeight: 1.5 }}>
+              <b>Core charges</b> are picked up automatically from the invoice line and clear when the old unit goes back. <b>Warranty</b> claims come from a <b>W in front of the PO</b> you give the supplier (W0508) — which prints on their invoice however it reaches you — or a <b>CREDIT stamp</b> on the scan, <b>“WARRANTY”</b> in a forwarded subject, or the 🛡 button. Both clear themselves when a matching credit lands on a statement or a later invoice. Raised one by mistake? Use 🗑 to remove it.
+            </div>
+          </details>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className="spec-label">Awaiting credit</div>
@@ -485,7 +499,7 @@ function WarrantyView({ locId }) {
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
                 {c.part_number ? `${c.part_number} · ` : ''}{c.invoice_date || '—'}{c.matched_order_number ? ` · RO ${c.matched_order_number}` : ''} · opened {c.age_days}d ago
-                {c.note ? ` · ${c.note}` : ''}
+                {c.note && c.note !== c.part_number ? ` · ${c.note}` : ''}
               </div>
             </div>
             <div style={{ textAlign: 'right', minWidth: 90 }}>
@@ -503,9 +517,10 @@ function WarrantyView({ locId }) {
               {c.status === 'awaiting'
                 ? <>
                   <button onClick={() => settle(c)} style={{ fontSize: '11px', padding: '4px 10px' }}>Credit received</button>
-                  <button onClick={() => writeOff(c)} title="Stop watching" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>✕</button>
+                  <button onClick={() => writeOff(c)} title="Stop watching — keeps it as closed, still shows here" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>Stop</button>
                 </>
                 : <button onClick={() => reopen(c)} style={{ fontSize: '11px', padding: '4px 10px' }}>Re-open</button>}
+              <button onClick={() => remove(c)} title="Raised by mistake? Remove it entirely" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)', border: 0, background: 'none' }}>🗑</button>
             </div>
           </div>
         );
