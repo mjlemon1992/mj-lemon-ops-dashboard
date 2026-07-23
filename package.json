@@ -21,6 +21,7 @@
     "jsonwebtoken": "^9.0.2",
     "node-ical": "^0.26.1",
     "nodemailer": "^9.0.1",
+    "pdf-lib": "^1.17.1",
     "pdfkit": "^0.19.1",
     "pg": "^8.11.3",
     "web-push": "^3.6.7",

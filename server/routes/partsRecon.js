@@ -2,7 +2,7 @@ const express = require('express');
 const { authenticateToken, requireRole, canAccessLocation, syncAuth } = require('../middleware/auth');
 const { monthStartFor, fetchInvoicedOrdersForLocation, fetchOrderService } = require('../lib/shopmonkey');
 const { ensurePartsReconTables } = require('../lib/partsReconSchema');
-const { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCheck, reconcileJob, matchInvoiceToRo, digits } = require('../lib/invoiceRecon');
+const { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCheck, reconcileJob, matchInvoiceToRo, digits, splitPdfDocuments } = require('../lib/invoiceRecon');
 const { fetchOrderByNumber } = require('../lib/shopmonkey');
 const { fetchInvoiceEmails, markSeen, peekInbox } = require('../lib/invoiceInbox');
 const { ingestCallsPdf, looksLikeCallReport } = require('../lib/callsIngest');
@@ -283,8 +283,9 @@ module.exports = (pool) => {
       const apiKey = process.env.SHOPMONKEY_API_KEY;
       const b = req.body || {};
       if (b.file) {
-        // Auto-routes invoice vs statement (is_statement flag from the extractor).
-        const out = await ingestFile(req.params.locationId, smLoc, apiKey, b.file, b.media_type || 'image/jpeg', 'upload');
+        // Auto-routes invoice vs statement (is_statement flag from the extractor);
+        // a PDF holding several stacked documents is split and filed one by one.
+        const out = await ingestFileMulti(req.params.locationId, smLoc, apiKey, b.file, b.media_type || 'image/jpeg', 'upload');
         return res.json({ ok: true, ...out });
       }
       const ex = {
@@ -411,11 +412,16 @@ module.exports = (pool) => {
           // their own mail titled "Credit Note …", which would open a bogus
           // claim on every one. The typed subject stays the unambiguous word.
           const warrantySubject = /\bwarranty\b/i.test(msg.subject || '');
-          const out = await ingestFile(locationId, smLoc, apiKey, att.base64, att.mediaType, 'email', warrantySubject);
-          if (out.type === 'statement') results.push({ from: msg.from, file: att.filename, type: 'statement', vendor: out.vendor, line_count: out.line_count, missing: out.missing });
-          else if (out.type === 'skipped') results.push({ from: msg.from, file: att.filename, type: 'skipped', reason: out.reason });
-          else results.push({ from: msg.from, file: att.filename, type: 'invoice', vendor: out.vendor, ro_ref: out.ro_ref, match_status: out.match_status, recon_status: out.recon_status });
-          anyOk = true;
+          const res0 = await ingestFileMulti(locationId, smLoc, apiKey, att.base64, att.mediaType, 'email', warrantySubject);
+          const outs = res0.type === 'multi' ? res0.results : [res0];
+          for (const out of outs) {
+            const label = res0.type === 'multi' ? `${att.filename} (${out.pages})` : att.filename;
+            if (out.type === 'error') { anyFail = true; results.push({ from: msg.from, file: label, error: out.error }); continue; }
+            if (out.type === 'statement') results.push({ from: msg.from, file: label, type: 'statement', vendor: out.vendor, line_count: out.line_count, missing: out.missing });
+            else if (out.type === 'skipped') results.push({ from: msg.from, file: label, type: 'skipped', reason: out.reason });
+            else results.push({ from: msg.from, file: label, type: 'invoice', vendor: out.vendor, ro_ref: out.ro_ref, match_status: out.match_status, recon_status: out.recon_status });
+            anyOk = true;
+          }
         } catch (e) { anyFail = true; results.push({ from: msg.from, file: att.filename, error: String(e.message || e) }); }
       }
       // Mark read only when EVERY attachment filed. If any sibling failed (e.g. the
@@ -727,6 +733,29 @@ module.exports = (pool) => {
       try { await handleCoreLines(locationId, out.id, ex); } catch (e) { /* core watch is best-effort */ }
     }
     return { type: 'invoice', warranty, extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out };
+  };
+
+  // A stack of SEPARATE invoices scanned in one job arrives as one PDF, and
+  // extracting it whole records only the first document. Split first, ingest
+  // each document on its own; a genuine multi-page invoice stays together.
+  // Detection failure or a single-document PDF falls straight through to the
+  // whole-file path, so this can add documents but never lose one.
+  const ingestFileMulti = async (locationId, smLoc, apiKey, fileBase64, mediaType, source, warrantyHint = false, forceParts = false) => {
+    if (/pdf/i.test(String(mediaType || ''))) {
+      let parts = null;
+      try { parts = await splitPdfDocuments(fileBase64); }
+      catch (e) { console.error('[parts-split] boundary detection failed, ingesting whole PDF:', e.message); }
+      if (parts && parts.length > 1) {
+        console.log(`[parts-split] ${parts.length} documents found in one scan — ingesting individually`);
+        const outs = [];
+        for (const p of parts) {
+          try { outs.push({ pages: p.pages, ...(await ingestFile(locationId, smLoc, apiKey, p.base64, 'application/pdf', source, warrantyHint, forceParts)) }); }
+          catch (e) { outs.push({ pages: p.pages, type: 'error', error: String(e.message || e) }); }
+        }
+        return { type: 'multi', count: outs.length, results: outs };
+      }
+    }
+    return ingestFile(locationId, smLoc, apiKey, fileBase64, mediaType, source, warrantyHint, forceParts);
   };
 
   // Upload/receive a statement (base64 file or pre-extracted). syncAuth so the

@@ -372,4 +372,77 @@ function reconcile(invoicePaidCents, roCostCents) {
   return { status: 'ok', note: `Invoice ${d(invoicePaidCents)} ≈ ${d(roCostCents)} captured on the RO.` };
 }
 
-module.exports = { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCheck, reconcileJob, matchInvoiceToRo, reconcile, digits };
+// A stack of SEPARATE invoices fed through the scanner in one job arrives as ONE
+// PDF — and extracting that whole silently drops every document after the first.
+// This detects the document boundaries so each can be ingested on its own. A
+// genuine multi-page invoice must stay together (same vendor + invoice number
+// continuing across pages). Returns null when the PDF is a single document, or
+// whenever the boundaries look at all suspect — the caller then ingests the whole
+// file exactly as before, so this can only ever add documents, never lose them.
+async function splitPdfDocuments(pdfBase64) {
+  const { PDFDocument } = require('pdf-lib');
+  const src = await PDFDocument.load(Buffer.from(pdfBase64, 'base64'), { ignoreEncryption: true });
+  const pages = src.getPageCount();
+  if (pages < 2) return null;
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return null;
+  const tool = {
+    name: 'mark_documents',
+    description: 'Report where each distinct document starts and ends in this scanned PDF.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        documents: {
+          type: 'array',
+          description: 'One entry per DISTINCT document, in page order, covering every page. Pages belong to the SAME document only when they clearly continue it: same vendor AND same invoice/statement number, "page 2 of 3", a running balance carried forward. A different invoice number, a different vendor, or an unrelated receipt starts a NEW document.',
+          items: {
+            type: 'object',
+            properties: {
+              start_page: { type: 'integer', description: 'First page of this document, 1-indexed' },
+              end_page: { type: 'integer', description: 'Last page of this document, 1-indexed inclusive' },
+            },
+            required: ['start_page', 'end_page'],
+          },
+        },
+      },
+      required: ['documents'],
+    },
+  };
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-beta': 'pdfs-2024-09-25' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6', max_tokens: 800,
+      tool_choice: { type: 'tool', name: 'mark_documents' }, tools: [tool],
+      messages: [{ role: 'user', content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+        { type: 'text', text: `This ${pages}-page PDF came off a shop scanner. It may be one multi-page document, or several separate supplier invoices/receipts scanned as a single stack. Mark each distinct document's page range.` },
+      ] }],
+    }),
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error(`doc split ${r.status}: ${t.slice(0, 200)}`); }
+  const j = await r.json();
+  const use = (j.content || []).find((c) => c.type === 'tool_use');
+  const docs = (use && use.input && Array.isArray(use.input.documents)) ? use.input.documents : [];
+  // Sanity: contiguous from page 1, in order, covering the whole PDF. Anything
+  // off → null (whole-file ingest, today's behaviour).
+  let prev = 0;
+  for (const d of docs) {
+    if (!Number.isInteger(d.start_page) || !Number.isInteger(d.end_page)) return null;
+    if (d.start_page !== prev + 1 || d.end_page < d.start_page || d.end_page > pages) return null;
+    prev = d.end_page;
+  }
+  if (prev !== pages || docs.length < 2) return null;
+  const out = [];
+  for (const d of docs) {
+    const dst = await PDFDocument.create();
+    const idx = [];
+    for (let p = d.start_page - 1; p <= d.end_page - 1; p++) idx.push(p);
+    const copied = await dst.copyPages(src, idx);
+    copied.forEach((pg) => dst.addPage(pg));
+    out.push({ pages: d.start_page === d.end_page ? `p${d.start_page}` : `p${d.start_page}-${d.end_page}`, base64: Buffer.from(await dst.save()).toString('base64') });
+  }
+  return out;
+}
+
+module.exports = { extractInvoice, extractStatement, roPartsCostCents, woParts, lineCheck, reconcileJob, matchInvoiceToRo, reconcile, digits, splitPdfDocuments };
