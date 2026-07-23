@@ -199,8 +199,9 @@ CREATE TABLE IF NOT EXISTS marketing_reviews_snapshot (
 -- the Shopmonkey CRM add-on's one used feature). One row per considered order;
 -- the UNIQUE is the never-text-twice-per-RO guarantee. status: sent | dry_run |
 -- skipped | failed. Full phone numbers are deliberately not stored (last4 only).
--- Config lives on locations: review_req_enabled / review_req_link /
--- review_req_template / timezone (added idempotently by routes/reviewRequests.js).
+-- Config lives on locations: review_req_enabled / review_req_auto (manual
+-- pickup queue vs scheduler auto-send) / review_req_link / review_req_template
+-- / timezone (added idempotently by routes/reviewRequests.js).
 CREATE TABLE IF NOT EXISTS review_request_log (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   location_id UUID NOT NULL REFERENCES locations(id) ON DELETE CASCADE,

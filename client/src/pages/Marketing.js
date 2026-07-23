@@ -213,9 +213,10 @@ function MarketingView({ locId }) {
           {/* Live Google review scorecard (self-hides until configured) */}
           <ReviewsScorecard locId={locId} />
 
-          {/* Post-service review request texts (owner/partner tool; server
-              gate matches, so the card self-hides for managers) */}
-          {!isManager && <ReviewRequestsCard locId={locId} />}
+          {/* Post-service review request texts: the pickup Send/Skip queue.
+              Managers get it too (front-counter workflow, their location);
+              owner-only controls live inside the card. */}
+          <ReviewRequestsCard locId={locId} />
         </div>
       </div>
 
