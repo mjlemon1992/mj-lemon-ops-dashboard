@@ -193,10 +193,13 @@ const qtyOf = (v) => { const q = Number(v); return Number.isFinite(q) && q > 0 ?
 // Transtar line ($1.25/unit read against a $16.57 WO line on a $17.82 invoice).
 // Unknown beats wrong: an untrusted line is simply never flagged.
 const lineExtCents = (li) => {
-  if (li.amount != null) return Math.round(Number(li.amount) * 100);
-  if (li.unit_cost != null && li.qty != null) return Math.round(Number(li.unit_cost) * 100 * qtyOf(li.qty));
-  if (li.unit_cost != null && Number(li.unit_cost) === 0) return 0;   // an explicit $0 line is still knowable
-  return null;
+  let v = null;
+  if (li.amount != null) v = Math.round(Number(li.amount) * 100);
+  else if (li.unit_cost != null && li.qty != null) v = Math.round(Number(li.unit_cost) * 100 * qtyOf(li.qty));
+  else if (li.unit_cost != null && Number(li.unit_cost) === 0) return 0;   // an explicit $0 line is still knowable
+  // Garbage from the AI ("amount":"unknown") must never survive as NaN — it would
+  // slip past every tolerance compare and file a false "not_accounted" finding.
+  return Number.isFinite(v) ? v : null;
 };
 const partExtCents = (p) => Math.round((Number(p.wholesaleCostCents) || 0) * qtyOf(p.quantity));
 const normPart = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');

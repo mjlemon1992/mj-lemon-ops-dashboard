@@ -15,6 +15,10 @@ const { fetchInvoiceEmails, markSeen, peekInbox } = require('../lib/invoiceInbox
 module.exports = (pool) => {
   const router = express.Router();
   const fail = (res, e, code = 500) => res.status(code).json({ error: String(e.message || e) });
+  // Dollars → integer cents, or null for anything that doesn't parse (Make/manual
+  // callers can post "n/a"/""); a raw NaN reaching an INTEGER column 500s the request.
+  const toCents = (v) => { if (v == null || v === '') return null; const n = Math.round(Number(v) * 100); return Number.isFinite(n) ? n : null; };
+  const scanningLocations = new Set();   // per-location inbox-scan mutex (manual + poller share it)
   const cache = new Map();
   const TTL = 10 * 60 * 1000;
   const MAX_ORDERS = 600;
@@ -215,9 +219,21 @@ module.exports = (pool) => {
           JSON.stringify(ex.line_items || []), source, JSON.stringify(ex.raw || ex), fileBuf, fileMime]);
       return { id: nr[0].id, vendor: ex.vendor, not_parts: true, match_status: 'skipped', recon_status: 'not_parts', line_findings: [] };
     }
-    const m = await matchInvoiceToRo(apiKey, smLoc, { ro_ref: ex.ro_ref, invoice_date: ex.invoice_date });
+    // If this exact invoice was already CONFIRMED to an RO by hand, a re-ingest
+    // (re-forward, markSeen retry, manual+poller overlap) must NOT let the auto
+    // matcher silently revert the owner's decision. Reuse the confirmed order.
+    const existing = (await pool.query(
+      `SELECT match_status, matched_order_id, matched_order_number FROM vendor_invoice
+        WHERE location_id=$1 AND COALESCE(vendor,'')=COALESCE($2,'') AND COALESCE(invoice_number,'')=COALESCE($3,'') AND COALESCE(total_cents,0)=COALESCE($4,0)`,
+      [locId, ex.vendor, ex.invoice_number, ex.total_cents])).rows[0];
+    let m;
+    if (existing && existing.match_status === 'confirmed' && existing.matched_order_id) {
+      m = { status: 'confirmed', order: { order_id: existing.matched_order_id, order_number: existing.matched_order_number, invoiced: null }, candidates: [] };
+    } else {
+      m = await matchInvoiceToRo(apiKey, smLoc, { ro_ref: ex.ro_ref, invoice_date: ex.invoice_date });
+    }
     let orderId = null, orderNum = null, orderInvoiced = null, wo = null;
-    if (m.status === 'matched' && m.order) {
+    if ((m.status === 'matched' || m.status === 'confirmed') && m.order) {
       orderId = m.order.order_id; orderNum = m.order.order_number; orderInvoiced = m.order.invoiced;
       try { wo = await woParts(apiKey, orderId); } catch { /* leave null */ }
     }
@@ -273,13 +289,20 @@ module.exports = (pool) => {
       const ex = {
         vendor: b.vendor || null, invoice_number: b.invoice_number || null,
         invoice_date: /^\d{4}-\d{2}-\d{2}$/.test(b.invoice_date || '') ? b.invoice_date : null,
-        subtotal_cents: b.subtotal != null ? Math.round(Number(b.subtotal) * 100) : null,
-        total_cents: b.total != null ? Math.round(Number(b.total) * 100) : null,
+        subtotal_cents: toCents(b.subtotal),
+        total_cents: toCents(b.total),
         ro_ref: (b.ro_ref || '').toString().trim() || null,
         line_items: Array.isArray(b.line_items) ? b.line_items : [], raw: b,
       };
       if (ex.total_cents == null && ex.subtotal_cents == null) return fail(res, 'Provide a file, or vendor + total (+ ro_ref)', 400);
       const out = await processInvoice(req.params.locationId, smLoc, apiKey, ex, b.source || 'make');
+      // Open warranty/core claims the same way ingestFile does — a W-prefixed PO or
+      // core lines arriving via Make were silently dropped before.
+      if (out.id && !ex.not_parts) {
+        const poFlag = /^\s*w/i.test(String(ex.ro_ref || ''));
+        if (poFlag) { const expected = ex.subtotal_cents != null ? ex.subtotal_cents : ex.total_cents; await openClaim(req.params.locationId, out.id, ex, { kind: 'warranty', expectedCents: expected, source: 'po' }); }
+        try { await handleCoreLines(req.params.locationId, out.id, ex); } catch (e) { /* best-effort */ }
+      }
       res.json({ ok: true, type: 'invoice', extracted: { vendor: ex.vendor, invoice_date: ex.invoice_date, total: ex.total_cents != null ? ex.total_cents / 100 : null, ro_ref: ex.ro_ref }, ...out });
     } catch (e) { fail(res, e); }
   });
@@ -318,7 +341,14 @@ module.exports = (pool) => {
     return process.env.PARTS_INBOX_LOCATION ? [process.env.PARTS_INBOX_LOCATION] : [];
   };
 
+  // One scan per location at a time, shared between the manual "Scan inbox" button
+  // and the background poller. Without this they can fetch the SAME unseen UIDs
+  // concurrently (neither has marked \Seen yet) and double-ingest — two rows on OCR
+  // variance, a core credit settled twice. Skips (doesn't queue) an overlapping run.
   const scanInboxInto = async (locationId) => {
+    if (scanningLocations.has(locationId)) return { ok: true, scanned: 0, processed: 0, more: false, results: [], busy: true };
+    scanningLocations.add(locationId);
+    try {
     const { user, pass, tag, dedicated } = inboxConfigFor(locationId);
     if (!user || !pass) return { ok: false, error: 'Invoice inbox not configured for this location (set PARTS_INBOX_MAP, or PARTS_IMAP_USER/PASS)', processed: 0, results: [] };
     if (!dedicated && !tag) return { ok: false, error: 'Refusing to scan the shared inbox without a filter — set PARTS_INTAKE_SUBJECT_TAG, or use a dedicated mailbox (PARTS_INBOX_MAP / PARTS_IMAP_USER/PASS)', processed: 0, results: [] };
@@ -346,7 +376,7 @@ module.exports = (pool) => {
     for (const msg of inbox.messages) {
       if (!first) await sleep(PACE_MS);
       first = false;
-      let ok = false;
+      let anyOk = false, anyFail = false;
       for (const att of msg.attachments) {
         try {
           // "WARRANTY" in the forwarded subject = the digital twin of the stamp.
@@ -358,16 +388,21 @@ module.exports = (pool) => {
           if (out.type === 'statement') results.push({ from: msg.from, file: att.filename, type: 'statement', vendor: out.vendor, line_count: out.line_count, missing: out.missing });
           else if (out.type === 'skipped') results.push({ from: msg.from, file: att.filename, type: 'skipped', reason: out.reason });
           else results.push({ from: msg.from, file: att.filename, type: 'invoice', vendor: out.vendor, ro_ref: out.ro_ref, match_status: out.match_status, recon_status: out.recon_status });
-          ok = true;
-        } catch (e) { results.push({ from: msg.from, file: att.filename, error: String(e.message || e) }); }
+          anyOk = true;
+        } catch (e) { anyFail = true; results.push({ from: msg.from, file: att.filename, error: String(e.message || e) }); }
       }
-      if (ok) doneUids.push(msg.uid);   // only mark read if at least one attachment filed
+      // Mark read only when EVERY attachment filed. If any sibling failed (e.g. the
+      // invoice PDF threw while the signature-logo skipped), leave the message
+      // unread so the failed attachment is retried — don't lose it because a
+      // different attachment on the same email succeeded.
+      if (anyOk && !anyFail) doneUids.push(msg.uid);
     }
     if (doneUids.length) { try { await markSeen({ user, pass, uids: doneUids }); } catch (e) { /* leave unread to retry */ } }
     // Hitting the cap means more is very likely waiting — say so rather than
     // letting a partial pass look like "the inbox is empty now".
     const more = inbox.messages.length >= MAX_PER_RUN;
     return { ok: true, scanned: inbox.messages.length, processed: results.filter((r) => !r.error).length, more, results };
+    } finally { scanningLocations.delete(locationId); }
   };
 
   // Manual "Scan inbox now" (owner/partner via JWT, or the automation's X-Sync-Key).
@@ -417,8 +452,8 @@ module.exports = (pool) => {
         return res.json({ ok: true, removed: true });
       }
       const lines = Array.isArray(b.lines) ? b.lines : [];
-      const expected = b.expected != null ? Math.round(Number(b.expected) * 100)
-        : (lines.length ? lines.reduce((a, l) => a + (Math.round(Number(l.amount || 0) * 100)), 0)
+      const expected = toCents(b.expected)
+        ?? (lines.length ? lines.reduce((a, l) => a + (toCents(l.amount) || 0), 0)
           : (inv.subtotal_cents != null ? inv.subtotal_cents : inv.total_cents));
       await pool.query(
         `INSERT INTO warranty_claim (location_id, invoice_id, vendor, invoice_number, invoice_date, expected_cents, lines, kind, source, note, created_by)
@@ -447,7 +482,7 @@ module.exports = (pool) => {
       const st = b.status === 'closed' ? 'closed' : 'credited';
       await pool.query(
         `UPDATE warranty_claim SET status=$2, credited_cents=$3, credited_number=$4, credited_at=now(), note=COALESCE($5, note) WHERE id=$1`,
-        [req.params.id, st, b.credited != null ? Math.round(Number(b.credited) * 100) : null, b.credited_number || null, b.note || null]);
+        [req.params.id, st, toCents(b.credited), b.credited_number || null, b.note || null]);
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
@@ -469,10 +504,23 @@ module.exports = (pool) => {
   // the invoices we captured (vendor_invoice) and surface the ones we're MISSING
   // — never received/entered — the likeliest hiding spot for an unbilled part.
   const normNum = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  // Two vendor names refer to the same supplier if the shorter folded name is a
+  // prefix of the longer ("NAPA" ↔ "NAPA AUTO PARTS"). Empty on either side = no
+  // opinion (don't over-restrict). Shared by statement matching + credit settling.
+  const sameVendorName = (a, b) => {
+    const x = normNum(a), y = normNum(b);
+    if (!x || !y) return true;
+    return x.length <= y.length ? y.startsWith(x) : x.startsWith(y);
+  };
   const reconcileStatement = async (locationId, ex) => {
-    const { rows: captured } = await pool.query(
-      `SELECT id, invoice_number, total_cents, invoice_date::text AS invoice_date, matched_order_number, match_status
+    const { rows: all } = await pool.query(
+      `SELECT id, vendor, invoice_number, total_cents, invoice_date::text AS invoice_date, matched_order_number, match_status
          FROM vendor_invoice WHERE location_id=$1`, [locationId]);
+    // SCOPE to the statement's supplier. Without this, a NAPA statement line
+    // matches a Transtar invoice of the same number/amount and reports it "have",
+    // hiding the genuinely-missing NAPA invoice — the exact unbilled part this
+    // check exists to catch.
+    const captured = all.filter((c) => sameVendorName(c.vendor, ex.vendor));
     const byNum = new Map(), byDig = new Map();
     for (const c of captured) {
       const n = normNum(c.invoice_number); if (n && !byNum.has(n)) byNum.set(n, c);
@@ -482,6 +530,7 @@ module.exports = (pool) => {
     const lines = (ex.invoices || []).map((li) => {
       const n = normNum(li.invoice_number), d = digits(li.invoice_number);
       let c = (n && byNum.get(n)) || (d && byDig.get(d)) || null;
+      if (c && claimed.has(c.id)) c = null;   // a captured invoice can satisfy only ONE statement line
       // Number didn't match — try an exact-amount match not already claimed.
       // Compare magnitudes: a credit is negative here but may be captured either way.
       if (!c && li.amount_cents != null) c = captured.find((x) => !claimed.has(x.id) && x.total_cents != null && Math.abs(Math.abs(x.total_cents) - Math.abs(li.amount_cents)) <= 50) || null;
@@ -514,32 +563,36 @@ module.exports = (pool) => {
        RETURNING id`,
       [locationId, sx.vendor, sx.statement_date, sx.period, sx.total_cents, sx.invoices.length,
         rec.found_count, rec.missing_count, rec.mismatch_count, JSON.stringify(rec.lines), JSON.stringify(sx.raw || sx), source, linesSum]);
-    // A credit on the statement is what closes a warranty claim — match each
-    // credit line to an outstanding claim for the same vendor by amount.
-    try {
-      const credits = (sx.invoices || []).filter((i) => i.type === 'credit' && i.amount_cents != null);
+    // Tie-out FIRST: the lines we read must add up to the statement's printed
+    // total. If they don't, the read is unreliable (a charge misread as a credit,
+    // rows missed) — the "missing" list isn't fact AND we must NOT settle claims
+    // off it (there's no unwind once a claim is closed).
+    const ties = sx.total_cents == null || Math.abs(linesSum - sx.total_cents) <= Math.max(5000, Math.round(sx.total_cents * 0.02));
+    // A credit on the statement closes a warranty/core claim — match each credit
+    // line to an outstanding same-vendor claim by amount. Idempotent: a credit
+    // NOTE NUMBER already applied never settles a second claim on re-upload.
+    if (ties) try {
+      const credits = (sx.invoices || []).filter((i) => i.type === 'credit' && i.amount_cents != null && i.invoice_number);
       if (credits.length) {
         const { rows: open } = await pool.query(
           "SELECT id, vendor, expected_cents FROM warranty_claim WHERE location_id=$1 AND status='awaiting' AND expected_cents IS NOT NULL", [locationId]);
+        const { rows: applied } = await pool.query(
+          "SELECT credited_number FROM warranty_claim WHERE location_id=$1 AND credited_number IS NOT NULL", [locationId]);
+        const usedNums = new Set(applied.map((r) => normNum(r.credited_number)).filter(Boolean));
         const taken = new Set();
-        const sameVendor = (a, b) => normNum(a).slice(0, 6) === normNum(b).slice(0, 6);
         for (const c of credits) {
+          if (usedNums.has(normNum(c.invoice_number))) continue;   // this credit note already settled a claim
           const amt = Math.abs(c.amount_cents);
-          const hit = open.find((w) => !taken.has(w.id) && sameVendor(w.vendor || '', sx.vendor || '')
+          const hit = open.find((w) => !taken.has(w.id) && sameVendorName(w.vendor || '', sx.vendor || '')
             && Math.abs(w.expected_cents - amt) <= Math.max(200, Math.round(amt * 0.05)));
           if (!hit) continue;
           taken.add(hit.id);
           await pool.query(
             `UPDATE warranty_claim SET status='credited', credited_cents=$2, credited_number=$3, credited_statement_id=$4, credited_at=now() WHERE id=$1`,
-            [hit.id, amt, c.invoice_number || null, rows[0].id]);
+            [hit.id, amt, c.invoice_number, rows[0].id]);
         }
       }
     } catch (e) { /* settling is best-effort — never fail the statement upload */ }
-
-    // Tie-out: the lines we read must add up to the statement's printed total. If
-    // they don't, the read is unreliable (credits counted as charges, rows missed)
-    // and the "missing" list must NOT be presented as fact.
-    const ties = sx.total_cents == null || Math.abs(linesSum - sx.total_cents) <= Math.max(5000, Math.round(sx.total_cents * 0.02));
     return { id: rows[0].id, vendor: sx.vendor, statement_date: sx.statement_date, period: sx.period,
       line_count: sx.invoices.length, found: rec.found_count, missing: rec.missing_count, mismatch: rec.mismatch_count,
       lines_sum: linesSum / 100, total: sx.total_cents != null ? sx.total_cents / 100 : null, ties_out: ties,
@@ -575,16 +628,25 @@ module.exports = (pool) => {
       if (amt > 0) {
         await openClaim(locId, invoiceId, ex, { kind: 'core', expectedCents: amt, partNumber: part, source: 'auto', note: li.description || 'Core charge' });
       } else {
-        // A core coming back — close the matching open claim for this supplier.
+        // A core coming back — close the matching open claim for this SUPPLIER.
+        // Idempotent: if this credit invoice number already settled a core claim,
+        // a re-ingest must not close a second one (silent loss of a real deposit).
+        if (ex.invoice_number) {
+          const { rows: apc } = await pool.query(
+            "SELECT credited_number FROM warranty_claim WHERE location_id=$1 AND kind='core' AND credited_number IS NOT NULL", [locId]);
+          const usedCore = new Set(apc.map((r) => normNum(r.credited_number)).filter(Boolean));
+          if (usedCore.has(normNum(ex.invoice_number))) continue;
+        }
         const { rows } = await pool.query(
-          `SELECT id FROM warranty_claim
+          `SELECT id, vendor FROM warranty_claim
             WHERE location_id=$1 AND kind='core' AND status='awaiting' AND expected_cents IS NOT NULL
               AND abs(expected_cents - $2) <= GREATEST(200, (expected_cents * 5) / 100)
-            ORDER BY created_at LIMIT 1`, [locId, Math.abs(amt)]);
-        if (rows.length) {
+            ORDER BY created_at`, [locId, Math.abs(amt)]);
+        const hit = rows.find((r) => sameVendorName(r.vendor || '', ex.vendor || ''));
+        if (hit) {
           await pool.query(
             `UPDATE warranty_claim SET status='credited', credited_cents=$2, credited_number=$3, credited_at=now() WHERE id=$1`,
-            [rows[0].id, Math.abs(amt), ex.invoice_number || null]);
+            [hit.id, Math.abs(amt), ex.invoice_number || null]);
         }
       }
     }
@@ -593,8 +655,12 @@ module.exports = (pool) => {
   // Ingest one attachment/file, auto-routing invoice vs statement. The invoice
   // extractor flags is_statement (content-based, no reliance on subject/filename)
   // so you can email either kind to the same mailbox and it files correctly.
-  const ingestFile = async (locationId, smLoc, apiKey, fileBase64, mediaType, source, warrantyHint = false) => {
+  const ingestFile = async (locationId, smLoc, apiKey, fileBase64, mediaType, source, warrantyHint = false, forceParts = false) => {
     const ex = await extractInvoice(fileBase64, mediaType);
+    // "This IS parts" re-read: the classifier will deterministically re-flag the
+    // same scan not_parts, so honour the owner's override and push it through matching.
+    if (forceParts) ex.not_parts = false;
+    if (ex.is_statement && forceParts) ex.is_statement = false;
     if (ex.is_statement) {
       const sx = await extractStatement(fileBase64, mediaType);
       if (sx.invoices && sx.invoices.length) {
@@ -818,7 +884,7 @@ module.exports = (pool) => {
       if (!smLoc) return fail(res, 'Location not connected to Shopmonkey', 400);
       if (inv.file_data) {
         const mime = inv.file_mime || 'application/pdf';
-        const out = await ingestFile(inv.location_id, smLoc, process.env.SHOPMONKEY_API_KEY, inv.file_data.toString('base64'), mime, inv.source || 'upload');
+        const out = await ingestFile(inv.location_id, smLoc, process.env.SHOPMONKEY_API_KEY, inv.file_data.toString('base64'), mime, inv.source || 'upload', false, true);
         // The re-read supersedes the parked row unless it landed on the same one.
         if (out.id && out.id !== inv.id) { console.warn(`[parts-delete] INVOICE ${inv.id} superseded by re-read ${out.id} (is-parts) by ${req.user && req.user.email}`); await pool.query('DELETE FROM vendor_invoice WHERE id=$1', [inv.id]); }
         else await pool.query('UPDATE vendor_invoice SET not_parts=false WHERE id=$1', [inv.id]);
