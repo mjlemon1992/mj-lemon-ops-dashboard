@@ -140,12 +140,16 @@ module.exports = (pool) => {
       } catch (e) { bonusGate = null; }
 
       // Best full month this year — the record line on the revenue bar. Derived
-      // from stored snapshots (MAX of revenue_mtd per shop-tz month bucket; the
-      // metric is monotonic within a month so MAX = month-end), no ShopMonkey call.
+      // from stored snapshots: the LAST snapshot of each shop-tz month bucket is
+      // the month-end figure. Deliberately NOT MAX() — snapshots written during
+      // the flaky-pagination era were sometimes inflated (June showed 206k at
+      // peak vs the penny-exact 190,627.08 final), and the final snapshot is the
+      // one written after fetch-until-complete settled. No ShopMonkey call.
       let record = null;
       try {
         const rc = await pool.query(
-          `SELECT to_char(created_at AT TIME ZONE 'America/Edmonton', 'YYYY-MM') AS ym, MAX(revenue_mtd) AS rev
+          `SELECT to_char(created_at AT TIME ZONE 'America/Edmonton', 'YYYY-MM') AS ym,
+                  (ARRAY_AGG(revenue_mtd ORDER BY created_at DESC))[1] AS rev
              FROM metrics_cache
             WHERE location_id = $1 AND revenue_mtd IS NOT NULL
               AND to_char(created_at AT TIME ZONE 'America/Edmonton', 'YYYY') = $2
