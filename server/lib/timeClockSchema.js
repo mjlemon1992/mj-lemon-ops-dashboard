@@ -131,6 +131,10 @@ function ensureTimeClockTables(pool) {
     // per location.
     await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS rfid_tag VARCHAR(64)');
     await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_person_rfid ON bonus_person (location_id, rfid_tag) WHERE rfid_tag IS NOT NULL");
+    // OctaCard tap-to-clock is OFF until the owner switches it on per location —
+    // enroll fobs first, flip this on when ready, and only then does the kiosk
+    // listen for taps and the /rfid endpoints accept them.
+    await pool.query('ALTER TABLE locations ADD COLUMN IF NOT EXISTS rfid_enabled BOOLEAN NOT NULL DEFAULT false');
     // Break tracking can be turned OFF per person (e.g. the service advisor who
     // rarely breaks) — no break button, no missed-break question, no deduction.
     await pool.query('ALTER TABLE bonus_person ADD COLUMN IF NOT EXISTS track_break BOOLEAN DEFAULT true');

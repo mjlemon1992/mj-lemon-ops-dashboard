@@ -131,6 +131,23 @@ function ClockAdmin({ locId }) {
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
+
+  // Flip OctaCard tap-to-clock on/off for this location — sends the current shift
+  // values alongside so saving the toggle never wipes the shift times.
+  const toggleRfid = async () => {
+    const next = !(shift && shift.rfid_enabled);
+    if (next && !(shift && shift.rfid_enrolled > 0)) {
+      const go = await askConfirm({ title: 'Turn on OctaCard?', body: 'No technician has a card linked yet, so nobody can tap in until you enroll one (💳 Fob on a person). Turn it on anyway?', confirmLabel: 'Turn on' });
+      if (!go) return;
+    }
+    setBusy(true); setErr(null);
+    try {
+      const out = await api(`/clock/${locId}/shift-settings`, { method: 'PUT', body: JSON.stringify({ shift_start: shiftForm.shift_start.trim(), shift_end: shiftForm.shift_end.trim(), break_minutes: shiftForm.break_minutes.trim(), rfid_enabled: next }) });
+      setShift((s) => ({ ...(s || {}), ...out }));
+      showToast(next ? 'OctaCard tap-to-clock is ON' : 'OctaCard tap-to-clock turned off');
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
   // Approve (apply to the entry's pay) or dismiss a tech's overtime / break answer.
   const decideFollowup = async (f, action) => {
     if (action === 'approve') {
@@ -563,6 +580,21 @@ function ClockAdmin({ locId }) {
           <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text3)' }}>Standard break (min)
             <input type="number" min="0" max="480" value={shiftForm.break_minutes} placeholder="30" onChange={(e) => setShiftForm((s) => ({ ...s, break_minutes: e.target.value }))} style={{ fontSize: '15px', width: '110px' }} /></label>
           <button className="primary" disabled={busy} onClick={saveShift} style={{ fontSize: '13px', padding: '8px 18px' }}>Save shift rules</button>
+        </div>
+        <div style={{ borderTop: '0.5px solid var(--border)', marginTop: '16px', paddingTop: '14px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 auto', minWidth: '220px' }}>
+            <div style={{ fontWeight: 600 }}>OctaCard tap-to-clock 💳</div>
+            <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '2px' }}>
+              {shift && shift.rfid_enabled
+                ? `On — techs tap their card at the kiosk to punch. ${shift.rfid_enrolled || 0} card${(shift.rfid_enrolled || 0) === 1 ? '' : 's'} enrolled.`
+                : `Off — the kiosk runs PIN-only. Link cards with 💳 Fob on each tech, then switch this on.${shift && shift.rfid_enrolled ? ` ${shift.rfid_enrolled} already enrolled.` : ''}`}
+            </div>
+          </div>
+          <button disabled={busy} onClick={toggleRfid}
+            className={shift && shift.rfid_enabled ? 'primary' : ''}
+            style={{ fontSize: '13px', padding: '8px 18px', whiteSpace: 'nowrap' }}>
+            {shift && shift.rfid_enabled ? 'Turn off' : 'Turn on OctaCard'}
+          </button>
         </div>
       </div>
       )}

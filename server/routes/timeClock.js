@@ -186,7 +186,9 @@ module.exports = (pool) => {
         'SELECT person_id, clock_in, break_started_at FROM time_clock_entry WHERE location_id=$1 AND clock_out IS NULL',
         [req.params.locationId]);
       const byId = {}; for (const o of open) byId[o.person_id] = o;
+      const { rows: locRow } = await pool.query('SELECT rfid_enabled FROM locations WHERE id=$1', [req.params.locationId]);
       res.json({
+        rfid_enabled: !!(locRow[0] && locRow[0].rfid_enabled),
         people: people.map((p) => ({
           id: p.id, name: p.name, role: p.role, has_pin: p.has_pin, has_tag: p.has_tag, track_break: p.track_break !== false,
           color: p.color || null, photo: photoUri(p),
@@ -1097,6 +1099,8 @@ module.exports = (pool) => {
     try {
       await ensure();
       if (!(await checkLocPin(req, res))) return;
+      const { rows: locEn } = await pool.query('SELECT rfid_enabled FROM locations WHERE id=$1', [req.params.locationId]);
+      if (!(locEn[0] && locEn[0].rfid_enabled)) return fail(res, 'OctaCard tap-to-clock is turned off for this location.', 403);
       const tag = (req.body || {}).tag;
       const action = (req.body || {}).action;
       if (!tag || !String(tag).trim()) return fail(res, 'No fob read', 400);
@@ -1165,6 +1169,8 @@ module.exports = (pool) => {
       const { tag } = req.body || {};
       let person;
       if (tag) {
+        const { rows: locEn } = await pool.query('SELECT rfid_enabled FROM locations WHERE id=$1', [req.params.locationId]);
+        if (!(locEn[0] && locEn[0].rfid_enabled)) return fail(res, 'OctaCard tap-to-clock is turned off for this location.', 403);
         const { rows } = await pool.query('SELECT id, name FROM bonus_person WHERE location_id=$1 AND rfid_tag=$2 AND active=true', [req.params.locationId, String(tag).trim().slice(0, 64)]);
         if (!rows.length) return fail(res, 'Unknown fob', 404);
         person = rows[0];
@@ -1222,9 +1228,10 @@ module.exports = (pool) => {
   router.get('/:locationId/shift-settings', ...authed, scoped, async (req, res) => {
     try {
       await ensure();
-      const { rows: lr } = await pool.query("SELECT to_char(shift_start,'HH24:MI') AS shift_start, to_char(shift_end,'HH24:MI') AS shift_end, break_minutes FROM locations WHERE id=$1", [req.params.locationId]);
+      const { rows: lr } = await pool.query("SELECT to_char(shift_start,'HH24:MI') AS shift_start, to_char(shift_end,'HH24:MI') AS shift_end, break_minutes, rfid_enabled FROM locations WHERE id=$1", [req.params.locationId]);
       const { rows: pr } = await pool.query('SELECT id, name, role, track_break, (rfid_tag IS NOT NULL) AS has_tag FROM bonus_person WHERE location_id=$1 AND active=true ORDER BY role, name', [req.params.locationId]);
-      res.json({ ...(lr[0] || { shift_start: null, shift_end: null, break_minutes: null }), people: pr.map((p) => ({ ...p, track_break: p.track_break !== false })) });
+      const enrolled = pr.filter((p) => p.has_tag).length;
+      res.json({ ...(lr[0] || { shift_start: null, shift_end: null, break_minutes: null, rfid_enabled: false }), rfid_enabled: !!(lr[0] && lr[0].rfid_enabled), rfid_enrolled: enrolled, people: pr.map((p) => ({ ...p, track_break: p.track_break !== false })) });
     } catch (e) { fail(res, e); }
   });
 
@@ -1239,7 +1246,13 @@ module.exports = (pool) => {
       let brk = b.break_minutes;
       brk = (brk == null || brk === '') ? null : Math.round(Number(brk));
       if (brk !== null && (!Number.isFinite(brk) || brk < 0 || brk > 480)) return fail(res, 'Break minutes must be 0–480', 400);
-      const { rows } = await pool.query('UPDATE locations SET shift_start=$2, shift_end=$3, break_minutes=$4 WHERE id=$1 RETURNING to_char(shift_start,\'HH24:MI\') AS shift_start, to_char(shift_end,\'HH24:MI\') AS shift_end, break_minutes', [req.params.locationId, start, end, brk]);
+      // rfid_enabled: only touched when the key is present, so saving shift times
+      // never flips the OctaCard toggle by omission.
+      const rfid = b.rfid_enabled === undefined ? undefined : !!b.rfid_enabled;
+      const { rows } = await pool.query(
+        `UPDATE locations SET shift_start=$2, shift_end=$3, break_minutes=$4${rfid === undefined ? '' : ', rfid_enabled=$5'} WHERE id=$1
+         RETURNING to_char(shift_start,'HH24:MI') AS shift_start, to_char(shift_end,'HH24:MI') AS shift_end, break_minutes, rfid_enabled`,
+        rfid === undefined ? [req.params.locationId, start, end, brk] : [req.params.locationId, start, end, brk, rfid]);
       if (!rows.length) return fail(res, 'Location not found', 404);
       res.json({ ok: true, ...rows[0] });
     } catch (e) { fail(res, e); }

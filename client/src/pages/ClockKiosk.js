@@ -91,6 +91,7 @@ export default function ClockKiosk() {
   const [reqForm, setReqForm] = useState({ person: null, start: '', end: '', type: 'vacation', pin: '', paid: true });
   const [sheet, setSheet] = useState(null);         // my-timesheet payload (keeps person+pin for requests)
   const [rfid, setRfid] = useState(null);           // { tag, person, queue } — active fob card
+  const [rfidEnabled, setRfidEnabled] = useState(false);   // OctaCard tap-to-clock on for this location?
   // Kiosk theme comes from the URL, not the in-app toggle (no Layout here):
   //   /clock/<id>             → dark (default, matches the display board)
   //   /clock/<id>?theme=light → light, for brightly-lit counters
@@ -113,7 +114,7 @@ export default function ClockKiosk() {
       if (res.status === 401) { setError('Incorrect PIN'); setEntered(false); sessionStorage.removeItem(pinKey); return; }
       if (!res.ok) { setError(body.error || `Error ${res.status}`); return; }
       sessionStorage.setItem(pinKey, lp);
-      setPeople(body.people || []); setEntered(true); setError('');
+      setPeople(body.people || []); setRfidEnabled(!!body.rfid_enabled); setEntered(true); setError('');
     } catch { setError('Network error'); }
   }, [locationId, pinKey]);
 
@@ -375,7 +376,9 @@ export default function ClockKiosk() {
   // Keyboard-wedge capture: a fast burst of chars ending in Enter = a fob scan.
   // Slow (human) typing resets the buffer; keystrokes inside inputs are ignored.
   useEffect(() => {
-    if (!entered) return undefined;
+    // Only listen for OctaCard taps when the owner has switched the feature on
+    // for this location — otherwise the shop runs PIN-only.
+    if (!entered || !rfidEnabled) return undefined;
     let buf = '', last = 0;
     const onKey = (e) => {
       const el = e.target;
@@ -388,7 +391,7 @@ export default function ClockKiosk() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [entered, onScan]);
+  }, [entered, rfidEnabled, onScan]);
 
   // ── Location PIN gate ──
   if (!entered) {
