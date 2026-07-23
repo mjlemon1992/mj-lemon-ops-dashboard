@@ -1,6 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
-const { workingPaceFrac, efficiencyPct } = require('../lib/workdays');
+const { workingPaceFrac, efficiencyPct, workingDaysElapsed, workingDaysInMonth } = require('../lib/workdays');
 
 // In-memory PIN brute-force throttle. The display route is public (no JWT), so
 // without this a short numeric PIN is guessable. Per IP+location: after MAX_FAILS
@@ -83,15 +83,15 @@ module.exports = (pool) => {
 
       // Latest metrics snapshot (revenue MTD + freshness).
       const mRes = await pool.query(
-        'SELECT revenue_mtd, parts_margin, created_at FROM metrics_cache WHERE location_id = $1 ORDER BY created_at DESC LIMIT 1',
+        'SELECT revenue_mtd, car_count_mtd, parts_margin, created_at FROM metrics_cache WHERE location_id = $1 ORDER BY created_at DESC LIMIT 1',
         [req.params.locationId]
       );
       const m = mRes.rows[0] || {};
       const revenue = num(m.revenue_mtd) || 0;
 
-      // Monthly revenue target.
+      // Monthly revenue + car-count targets.
       const tRes = await pool.query(
-        'SELECT revenue FROM targets WHERE location_id = $1 AND year = $2 AND month = $3',
+        'SELECT revenue, car_count FROM targets WHERE location_id = $1 AND year = $2 AND month = $3',
         [req.params.locationId, year, month]
       );
       const target = tRes.rows[0] && tRes.rows[0].revenue != null ? Number(tRes.rows[0].revenue) : null;
@@ -99,6 +99,66 @@ module.exports = (pool) => {
       const pacePct = (target && target > 0 && frac && frac > 0) ? Math.round((revenue / (target * frac)) * 100) : null;
       const gap = target != null ? Math.round((target - revenue) * 100) / 100 : null;
       const pctToTarget = (target && target > 0) ? Math.round((revenue / target) * 100) : null;
+
+      // Car count — one of the four board-legal numbers, same treatment as revenue.
+      const carsActual = num(m.car_count_mtd);
+      const carTarget = tRes.rows[0] && tRes.rows[0].car_count != null ? Number(tRes.rows[0].car_count) : null;
+      const cars = carsActual != null ? {
+        actual: carsActual,
+        target: carTarget,
+        pct_to_target: (carTarget && carTarget > 0) ? Math.round((carsActual / carTarget) * 100) : null,
+        pace_pct: (carTarget && carTarget > 0 && frac && frac > 0) ? Math.round((carsActual / (carTarget * frac)) * 100) : null,
+      } : null;
+
+      // "What does today need": working-day position + $/working-day still needed.
+      // Pure revenue math — board-legal.
+      const wdElapsed = workingDaysElapsed(province, nowShop);
+      const wdTotal = workingDaysInMonth(province, nowShop);
+      const wdLeft = Math.max(1, wdTotal - wdElapsed + 1);   // include today's remaining capacity
+      const days = {
+        working_elapsed: wdElapsed,
+        working_total: wdTotal,
+        per_day_needed: (gap != null && gap > 0) ? Math.round(gap / wdLeft) : null,
+      };
+
+      // Bonus gate — VISIBILITY ONLY. The gate is sales-vs-target, which is already
+      // on this board; pool %, net profit, and dollar amounts never appear here.
+      // Shown only where a bonus program actually exists (crew + this month's
+      // sales target seeded).
+      let bonusGate = null;
+      try {
+        const bg = await pool.query(
+          `SELECT (SELECT COUNT(*) FROM bonus_person WHERE location_id=$1 AND active=true) AS crew,
+                  (SELECT COUNT(*) FROM sales_target WHERE location_id=$1 AND month=$2) AS tgt,
+                  (SELECT MAX(stretch_threshold) FROM formula_version WHERE location_id=$1) AS stretch`,
+          [req.params.locationId, `${year}-${String(month).padStart(2, '0')}`]
+        );
+        const r = bg.rows[0];
+        if (Number(r.crew) > 0 && Number(r.tgt) > 0 && pctToTarget != null) {
+          bonusGate = { pct: pctToTarget, stretch_pct: r.stretch != null ? Math.round(Number(r.stretch) * 100) : null };
+        }
+      } catch (e) { bonusGate = null; }
+
+      // Best full month this year — the record line on the revenue bar. Derived
+      // from stored snapshots (MAX of revenue_mtd per shop-tz month bucket; the
+      // metric is monotonic within a month so MAX = month-end), no ShopMonkey call.
+      let record = null;
+      try {
+        const rc = await pool.query(
+          `SELECT to_char(created_at AT TIME ZONE 'America/Edmonton', 'YYYY-MM') AS ym, MAX(revenue_mtd) AS rev
+             FROM metrics_cache
+            WHERE location_id = $1 AND revenue_mtd IS NOT NULL
+              AND to_char(created_at AT TIME ZONE 'America/Edmonton', 'YYYY') = $2
+            GROUP BY 1`,
+          [req.params.locationId, String(year)]
+        );
+        const curYm = `${year}-${String(month).padStart(2, '0')}`;
+        const past = rc.rows.filter(r => r.ym !== curYm && Number(r.rev) > 0);
+        if (past.length) {
+          const best = past.reduce((a, b) => (Number(b.rev) > Number(a.rev) ? b : a));
+          record = { month: best.ym, revenue: Math.round(Number(best.rev)) };
+        }
+      } catch (e) { record = null; }
 
       // Latest MTD tech snapshot.
       try { await pool.query("ALTER TABLE tech_efficiency ADD COLUMN IF NOT EXISTS period_type VARCHAR(8)"); } catch (e) {}
@@ -120,6 +180,21 @@ module.exports = (pool) => {
         for (const r of hr.rows) hidden.add(r.tech_id);
       } catch (e) {}
 
+      // Hours sold THIS WEEK per tech (Mon–today, shop-tz) from the per-RO detail
+      // the sync persists. Keeps the leaderboard moving day-to-day mid-month.
+      let weekByTech = {};
+      try {
+        const dow = (nowShop.getUTCDay() + 6) % 7;   // Mon=0 on the shop-tz anchor
+        const weekStart = new Date(nowShop); weekStart.setUTCDate(weekStart.getUTCDate() - dow);
+        const ws = weekStart.toISOString().slice(0, 10);
+        const wk = await pool.query(
+          `SELECT tech_id, SUM(hours_sold)::float AS h FROM tech_work_detail
+            WHERE location_id = $1 AND invoiced_date >= $2 GROUP BY tech_id`,
+          [req.params.locationId, ws]
+        );
+        for (const r of wk.rows) weekByTech[r.tech_id] = Math.round(Number(r.h) * 10) / 10;
+      } catch (e) { weekByTech = {}; }
+
       let techs = [];
       if (snapDate) {
         const teRes = await pool.query(
@@ -135,6 +210,7 @@ module.exports = (pool) => {
               tech_id: r.tech_id,
               tech_name: r.tech_name,
               hours_sold: sold,
+              hours_sold_week: weekByTech[r.tech_id] != null ? weekByTech[r.tech_id] : null,
               hours_billed: num(r.hours_billed),
               hours_per_week: hpw,
               efficiency: efficiencyPct(sold, province, hpw, now)
@@ -257,6 +333,10 @@ module.exports = (pool) => {
         gap,
         pace_pct: pacePct,
         pct_to_target: pctToTarget,
+        cars,
+        days,
+        bonus_gate: bonusGate,
+        record,
         // parts_margin deliberately NOT emitted — this board is PIN-only (no JWT),
         // and owner-level finance (margin/profit/pph/costs) must never reach the
         // shop floor, not even latent in the payload. Revenue-vs-target is board-legal.

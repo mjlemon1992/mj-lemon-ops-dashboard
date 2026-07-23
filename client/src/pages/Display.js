@@ -39,6 +39,11 @@ export default function Display() {
   const [noticeIdx, setNoticeIdx] = useState(0);
   const [posterIdx, setPosterIdx] = useState(0);
   const [showPoster, setShowPoster] = useState(false);
+  const [stale, setStale] = useState(false);       // refresh failing — keep last numbers, say so
+  const [shift, setShift] = useState(0);           // burn-in guard: tiny layout nudge
+  const [nowTick, setNowTick] = useState(() => Date.now());  // clock for night mode
+  const [celebrate, setCelebrate] = useState(false);         // one-time target-hit takeover
+  const [reviewBump, setReviewBump] = useState(false);       // "+1 review today" pulse
   const timer = useRef(null);
 
   const load = useCallback(async (thePin) => {
@@ -47,14 +52,68 @@ export default function Display() {
       const res = await fetch(`/api/display/${locationId}?pin=${encodeURIComponent(thePin)}`, { headers: { Accept: 'application/json' } });
       const body = await res.json().catch(() => ({}));
       if (res.status === 401) { setError('Incorrect PIN'); setEntered(false); sessionStorage.removeItem(pinKey); setLoading(false); return; }
-      if (!res.ok) { setError(body.error || `Error ${res.status}`); setLoading(false); return; }
+      // Server errors and network blips both keep the last good numbers on the
+      // wall — the board goes "stale", never blank.
+      if (!res.ok) { setError(body.error || `Error ${res.status}`); setStale(true); setLoading(false); return; }
       sessionStorage.setItem(pinKey, thePin);
-      setData(body); setEntered(true); setUpdatedAt(new Date());
+      setData(body); setEntered(true); setUpdatedAt(new Date()); setStale(false);
     } catch (e) {
       setError('Network error — retrying on next refresh');
+      setStale(true);
     }
     setLoading(false);
   }, [locationId, pinKey]);
+
+  // Minute clock (drives night mode + the stale "last updated" readout).
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Burn-in guard: nudge the whole layout by a couple of pixels every 5 minutes.
+  // Imperceptible from across the bay, enough to keep a static TV honest.
+  useEffect(() => {
+    const t = setInterval(() => setShift(s => (s + 1) % 4), 5 * 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+  const SHIFTS = [[0, 0], [1, 1], [0, 2], [2, 0]];
+  const nudge = { transform: `translate(${SHIFTS[shift][0]}px, ${SHIFTS[shift][1]}px)` };
+
+  // After close (9pm–6am local): rest screen instead of numbers glowing at an
+  // empty shop all night. Data keeps refreshing quietly behind it.
+  const hourNow = new Date(nowTick).getHours();
+  const night = hourNow >= 21 || hourNow < 6;
+
+  // One-time celebration the moment the month crosses target — full-screen for
+  // 30s, then never again that month (per board, via localStorage).
+  useEffect(() => {
+    if (!data || data.pct_to_target == null || data.pct_to_target < 100) return;
+    const ym = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' }).slice(0, 7);
+    const key = `ops_celebrated_${locationId}_${ym}`;
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, '1');
+    setCelebrate(true);
+    const t = setTimeout(() => setCelebrate(false), 30 * 1000);
+    return () => clearTimeout(t);
+  }, [data, locationId]);
+
+  // "+1 ★★★★★ today" pulse: light up for the rest of the day when the
+  // new-reviews-this-month count ticks up.
+  useEffect(() => {
+    if (!data || !data.reviews) return;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' });
+    const key = `ops_rvd_${locationId}`;
+    let prev = null;
+    try { prev = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { prev = null; }
+    const delta = Number(data.reviews.delta) || 0;
+    if (prev && delta > Number(prev.delta || 0)) {
+      localStorage.setItem(key, JSON.stringify({ delta, day: today }));
+      setReviewBump(true);
+    } else {
+      if (!prev || Number(prev.delta || 0) !== delta) localStorage.setItem(key, JSON.stringify({ delta, day: prev && prev.day === today ? today : '' }));
+      setReviewBump(!!(prev && prev.day === today && delta > 0));
+    }
+  }, [data, locationId]);
 
   // Initial load + auto-refresh while unlocked.
   useEffect(() => {
@@ -149,6 +208,46 @@ export default function Display() {
   const nStyle = notice ? (NOTICE_STYLE[notice.kind] || NOTICE_STYLE.notice) : null;
   const poster = posters.length ? posters[posterIdx % posters.length] : null;
 
+  // After-hours rest screen — logo, clock, lights out on the numbers.
+  if (night && !celebrate) {
+    return (
+      <div style={{ ...wrap, justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', ...nudge }}>
+          <div style={{ fontSize: '34px', fontWeight: 800, color: 'var(--accent)', letterSpacing: '-1px' }}>OPS</div>
+          <div style={{ fontFamily: 'var(--font-disp)', fontSize: '26px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text2)', marginTop: '6px' }}>{data.location.name}</div>
+          <div style={{ fontFamily: 'var(--font-disp)', fontSize: '84px', fontWeight: 700, color: 'var(--text)', marginTop: '30px', fontVariantNumeric: 'tabular-nums' }}>
+            {new Date(nowTick).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })}
+          </div>
+          <div style={{ fontSize: '17px', color: 'var(--text3)', marginTop: '14px' }}>
+            {new Date(nowTick).toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' })} · see you tomorrow
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // One-time target-hit takeover (30s, once per month per board).
+  if (celebrate) {
+    return (
+      <div style={{ ...wrap, justifyContent: 'center', overflow: 'hidden' }}>
+        <style>{`
+          @keyframes ops-pop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(1); } }
+          @keyframes ops-drift { 0% { transform: translateY(-8vh) rotate(0deg); opacity: 0; } 12% { opacity: 1; } 100% { transform: translateY(108vh) rotate(320deg); opacity: 0.9; } }
+        `}</style>
+        {['🎉','🏁','⭐','🎉','🔧','🎉','⭐','🏁','🎉','⭐','🎉','🔧'].map((e, i) => (
+          <span key={i} style={{ position: 'fixed', top: 0, left: `${(i * 8.3 + 4) % 100}%`, fontSize: `${26 + (i % 3) * 12}px`, animation: `ops-drift ${5 + (i % 4)}s linear ${(i % 5) * 0.9}s infinite` }}>{e}</span>
+        ))}
+        <div style={{ textAlign: 'center', animation: 'ops-pop 0.8s ease' }}>
+          <div style={{ fontSize: '30px', fontWeight: 800, letterSpacing: '0.2em', color: 'var(--success)', textTransform: 'uppercase' }}>Target hit</div>
+          <div style={{ fontFamily: 'var(--font-disp)', fontSize: '110px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.05, fontVariantNumeric: 'tabular-nums' }}>{money(data.revenue)}</div>
+          <div style={{ fontSize: '24px', color: 'var(--text2)', marginTop: '10px' }}>
+            {data.location.name} just cleared this month's {money(target)} target. That's everyone. 🍻
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Full-screen poster page — flips back to the board automatically.
   if (showPoster && poster) {
     return (
@@ -171,16 +270,24 @@ export default function Display() {
   }
 
   return (
-    <div style={{ ...wrap, alignItems: 'stretch', justifyContent: 'flex-start', padding: '32px 40px' }}>
+    <div style={{ ...wrap, alignItems: 'stretch', justifyContent: 'flex-start', padding: '32px 40px', ...nudge }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '24px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px' }}>
           <span style={{ fontSize: '26px', fontWeight: 800, color: 'var(--accent)', letterSpacing: '-1px' }}>OPS</span>
           <span style={{ fontFamily: 'var(--font-disp)', fontSize: '26px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: 'var(--text)' }}>{data.location.name}</span>
         </div>
-        <div style={{ fontSize: '13px', color: 'var(--text3)' }}>
-          {loading ? 'Refreshing…' : `Updated ${updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : ''}`} · auto-refresh 1 min
-        </div>
+        {/* Honest freshness: if refresh is failing, the numbers stay up but the
+            header says so — old data must never impersonate live data. */}
+        {stale ? (
+          <div style={{ fontSize: '13px', color: 'var(--warning)', fontWeight: 700 }}>
+            ⚠ Last updated {updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : '—'} — reconnecting…
+          </div>
+        ) : (
+          <div style={{ fontSize: '13px', color: 'var(--text3)' }}>
+            {loading ? 'Refreshing…' : `Updated ${updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : ''}`} · auto-refresh 1 min
+          </div>
+        )}
       </div>
 
       {/* Text notices — slim banner above the numbers; posters get their own
@@ -213,6 +320,11 @@ export default function Display() {
 
         <div style={{ height: '34px', background: 'var(--bg3)', borderRadius: '17px', overflow: 'hidden', position: 'relative' }}>
           <div style={{ width: `${barPct}%`, height: '100%', background: barColor, borderRadius: '17px', transition: 'width 0.6s ease' }} />
+          {/* Best-month-this-year record line — beat your own best, not just the target. */}
+          {data.record && target > 0 && data.record.revenue > 0 && (() => {
+            const rp = Math.min(100, Math.round((data.record.revenue / target) * 100));
+            return rp >= 5 ? <div title="Best month this year" style={{ position: 'absolute', top: 0, bottom: 0, left: `${rp}%`, width: '3px', background: 'var(--text)', opacity: 0.55 }} /> : null;
+          })()}
           {pct != null && (
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>
               {pct}% of target
@@ -220,15 +332,54 @@ export default function Display() {
           )}
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '14px', fontSize: '18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '14px', marginTop: '14px', fontSize: '18px', flexWrap: 'wrap' }}>
           <div style={{ color: barColor, fontWeight: 700 }}>
             {target == null ? 'Set a monthly target' : over ? `${money(data.revenue - target)} over target 🎉` : `${money(data.gap)} to go`}
           </div>
-          {data.pace_pct != null && (
-            <div style={{ color: 'var(--text3)' }}>{data.pace_pct}% of pace</div>
+          {/* What today needs — the month bar made actionable. */}
+          {data.days && data.days.per_day_needed != null && !over && (
+            <div style={{ color: 'var(--text2)' }}>
+              Day {data.days.working_elapsed} of {data.days.working_total} · <b>{money(data.days.per_day_needed)}/working day</b> to hit target
+            </div>
           )}
+          <div style={{ display: 'flex', gap: '18px', color: 'var(--text3)' }}>
+            {data.record && data.record.revenue > 0 && (
+              <span>▍best month {money(data.record.revenue)}{data.revenue > data.record.revenue ? ' — new record! 🏆' : ''}</span>
+            )}
+            {data.pace_pct != null && <span>{data.pace_pct}% of pace</span>}
+          </div>
         </div>
       </div>
+
+      {/* Cars this month — board-legal, same treatment as revenue. */}
+      {data.cars && data.cars.actual != null && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '18px 32px', marginBottom: '28px' }}>
+          <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em', width: '170px' }}>Cars this month</div>
+          <div style={{ fontFamily: 'var(--font-disp)', fontSize: '40px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+            {data.cars.actual}{data.cars.target ? <span style={{ fontSize: '22px', color: 'var(--text3)', fontWeight: 600 }}> / {data.cars.target}</span> : null}
+          </div>
+          {data.cars.target > 0 && (
+            <div style={{ flex: 1, height: '18px', background: 'var(--bg3)', borderRadius: '9px', overflow: 'hidden' }}>
+              <div style={{ width: `${Math.max(2, Math.min(100, data.cars.pct_to_target || 0))}%`, height: '100%', borderRadius: '9px', transition: 'width 0.6s ease', background: (data.cars.pace_pct == null || data.cars.pace_pct >= 100) ? 'var(--success)' : (data.cars.pace_pct >= 90 ? 'var(--warning)' : 'var(--danger)') }} />
+            </div>
+          )}
+          {data.cars.pace_pct != null && <div style={{ fontSize: '16px', color: 'var(--text3)', whiteSpace: 'nowrap' }}>{data.cars.pace_pct}% of pace</div>}
+        </div>
+      )}
+
+      {/* Bonus gate — visibility only: sales-vs-target, which is already on this
+          board. Pool %, net profit, and dollar amounts never appear here. */}
+      {data.bonus_gate && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', background: 'var(--bg2)', border: `1px solid ${data.bonus_gate.pct >= 100 ? 'var(--success)' : 'var(--border)'}`, borderRadius: '14px', padding: '14px 28px', marginBottom: '28px', fontSize: '19px', fontWeight: 600 }}>
+          {data.bonus_gate.pct >= (data.bonus_gate.stretch_pct || 110) ? (
+            <span style={{ color: 'var(--success)' }}>🚀 Stretch tier reached — team bonus at its top rate this month.</span>
+          ) : data.bonus_gate.pct >= 100 ? (
+            <span style={{ color: 'var(--success)' }}>✅ Team bonus unlocked{data.bonus_gate.stretch_pct ? ` — stretch tier at ${data.bonus_gate.stretch_pct}% of target` : ''}.</span>
+          ) : (
+            <span style={{ color: 'var(--text2)' }}>🎯 Team bonus unlocks at 100% of target — currently <b style={{ color: 'var(--text)' }}>{data.bonus_gate.pct}%</b>.</span>
+          )}
+        </div>
+      )}
 
       {/* Google reviews — rating + new reviews this month */}
       {data.reviews && data.reviews.rating != null && (
@@ -245,8 +396,15 @@ export default function Display() {
           </div>
           <div style={{ flex: 1, background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '24px 32px' }}>
             <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>New reviews this month</div>
-            <div style={{ fontFamily: 'var(--font-disp)', fontSize: '60px', fontWeight: 700, lineHeight: 1, marginTop: '8px', color: data.reviews.delta > 0 ? 'var(--success)' : 'var(--text)' }}>
-              {data.reviews.delta > 0 ? `+${data.reviews.delta}` : (data.reviews.delta || 0)}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px' }}>
+              <div style={{ fontFamily: 'var(--font-disp)', fontSize: '60px', fontWeight: 700, lineHeight: 1, marginTop: '8px', color: data.reviews.delta > 0 ? 'var(--success)' : 'var(--text)' }}>
+                {data.reviews.delta > 0 ? `+${data.reviews.delta}` : (data.reviews.delta || 0)}
+              </div>
+              {reviewBump && (
+                <span style={{ fontSize: '17px', fontWeight: 800, color: 'var(--success)', background: 'rgba(80,200,120,0.14)', border: '1px solid var(--success)', borderRadius: '12px', padding: '5px 14px', whiteSpace: 'nowrap' }}>
+                  +1 ★★★★★ today
+                </span>
+              )}
             </div>
             <div style={{ fontSize: '16px', color: 'var(--text3)', marginTop: '10px' }}>month to date</div>
           </div>
@@ -264,8 +422,9 @@ export default function Display() {
         </div>
       </div>
       <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', overflow: 'hidden', opacity: fade ? 1 : 0, transition: 'opacity 0.4s ease' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1.2fr', padding: '12px 24px', borderBottom: '0.5px solid var(--border)', fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: showYtd ? '2fr 1fr 1fr 1.2fr' : '2fr 0.9fr 1fr 1fr 1.2fr', padding: '12px 24px', borderBottom: '0.5px solid var(--border)', fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
           <div>Technician</div>
+          {!showYtd && <div style={{ textAlign: 'right' }}>This week</div>}
           <div style={{ textAlign: 'right' }}>Billed</div>
           <div style={{ textAlign: 'right' }}>Sold</div>
           <div style={{ textAlign: 'right' }}>Efficiency</div>
@@ -287,12 +446,13 @@ export default function Display() {
             : c.status === 'break' ? { txt: `🟡 Break · ${tmin(c.break_started_at)} min`, col: 'var(--warning)' }
             : { txt: '⚫ Clocked out', col: 'var(--text3)' };
           return (
-            <div key={t.tech_id || t.tech_name} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1.2fr', padding: '16px 24px', borderBottom: '0.5px solid var(--border)', alignItems: 'center' }}>
+            <div key={t.tech_id || t.tech_name} style={{ display: 'grid', gridTemplateColumns: showYtd ? '2fr 1fr 1fr 1.2fr' : '2fr 0.9fr 1fr 1fr 1.2fr', padding: '16px 24px', borderBottom: '0.5px solid var(--border)', alignItems: 'center' }}>
               <div style={{ fontSize: '22px', fontWeight: 600, color: (c && c.color) || 'var(--text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 {c && c.photo && <img src={c.photo} alt="" style={{ width: '34px', height: '34px', borderRadius: '50%', objectFit: 'cover', border: c.color ? `2px solid ${c.color}` : 'none' }} />}
                 {t.tech_name}
                 {chip && <span style={{ fontSize: '13px', fontWeight: 600, color: chip.col, whiteSpace: 'nowrap' }}>{chip.txt}</span>}
               </div>
+              {!showYtd && <div style={{ textAlign: 'right', fontFamily: 'var(--font-disp)', fontSize: '24px', fontWeight: 700, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{hrs(t.hours_sold_week)}</div>}
               <div style={{ textAlign: 'right', fontFamily: 'var(--font-disp)', fontSize: '24px', fontWeight: 700, color: 'var(--text2)', fontVariantNumeric: 'tabular-nums' }}>{hrs(t.hours_billed)}</div>
               <div style={{ textAlign: 'right', fontFamily: 'var(--font-disp)', fontSize: '24px', fontWeight: 700, color: 'var(--text2)', fontVariantNumeric: 'tabular-nums' }}>{hrs(t.hours_sold)}</div>
               <div style={{ textAlign: 'right', fontFamily: 'var(--font-disp)', fontSize: '27px', fontWeight: 700, color: effColor, fontVariantNumeric: 'tabular-nums' }}>{eff == null ? '—' : `${eff}%`}</div>
