@@ -296,3 +296,16 @@ table { font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) {
   .pill-shake { animation: none; }
 }
+
+/* Keyboard/switch users previously got no focus indication at all — buttons and
+   the many role="button" tiles had no ring, and inputs replaced the outline with
+   a near-invisible 0.5px border tint. One visible accent ring, everywhere. */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

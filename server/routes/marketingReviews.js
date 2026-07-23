@@ -109,7 +109,11 @@ module.exports = (pool) => {
 
   // Snapshot {total,rating} once per calendar month; delta = current total - this month's snapshot.
   const monthDelta = async (locId, total, rating) => {
-    const now = new Date(), year = now.getUTCFullYear(), month = now.getUTCMonth() + 1;
+    // Month key in the shop's timezone (matching every other monthly bucket in
+    // the app) — UTC would roll the "this month" delta ~6h early on month-end.
+    const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Edmonton', year: 'numeric', month: 'numeric' })
+      .formatToParts(new Date());
+    const year = +p.find(x => x.type === 'year').value, month = +p.find(x => x.type === 'month').value;
     const { rows } = await pool.query('SELECT total FROM marketing_reviews_snapshot WHERE location_id=$1 AND year=$2 AND month=$3', [locId, year, month]);
     if (!rows.length) {
       await pool.query(`INSERT INTO marketing_reviews_snapshot (location_id, year, month, total, rating)
@@ -229,8 +233,12 @@ module.exports = (pool) => {
           try { draft = await draftReply(lr[0].name, { author, rating: rv.rating, text: rv.text }); }
           catch (e) { console.error('[reviews] auto-draft failed:', e.message); }
         }
-        await pool.query(`INSERT INTO review_reply_drafts (location_id, review_time, author, rating, review_text, draft, status)
+        // The INSERT is the notification gate: with two overlapping watch runs
+        // (scheduler + manual force), only the one whose insert lands fires the
+        // push/Slack — ON CONFLICT collapses the loser to rowCount 0.
+        const { rowCount } = await pool.query(`INSERT INTO review_reply_drafts (location_id, review_time, author, rating, review_text, draft, status)
           VALUES ($1,$2,$3,$4,$5,$6,'new') ON CONFLICT DO NOTHING`, [id, rv.time, author, rv.rating, rv.text || null, draft]);
+        if (!rowCount) continue;
         fresh++;
         const stars = '★'.repeat(Math.max(1, Math.min(5, Math.round(rv.rating || 0))));
         notifyRoles(pool, {
