@@ -150,6 +150,36 @@ async function actualRevenueByMonth(apiKey, smLocationId, startYm, endYmExclusiv
   return out;
 }
 
+// Same sweep as actualRevenueByMonth but returns { 'YYYY-MM': { revenue, cars } }
+// — cars = invoiced order count, the dashboard's car-count definition. One sweep
+// covers any span (e.g. last year + this year for the Goals board), so callers
+// batch the whole range rather than sweeping per month.
+async function actualsByMonth(apiKey, smLocationId, startYm, endYmExclusive, tz = 'America/Edmonton') {
+  const start = monthStartUtcFor(startYm, tz);
+  const end = monthStartUtcFor(endYmExclusive, tz);
+  const { orders } = await sweepOrders(apiKey, { where: { invoicedDate: { gte: start.toISOString() } }, locationId: smLocationId });
+  const monthKey = (d) => {
+    const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit' }).formatToParts(d);
+    return `${p.find((x) => x.type === 'year').value}-${p.find((x) => x.type === 'month').value}`;
+  };
+  const agg = {};
+  for (const o of orders) {
+    if (o.deleted || !o.invoicedDate || o.invoicedDate === 'empty') continue;
+    if (o.locationId && o.locationId !== smLocationId) continue;
+    const inv = new Date(o.invoicedDate);
+    if (isNaN(inv) || inv < start || inv >= end) continue;
+    const sub = _subtotalCents(o);
+    if (sub === 0) continue;
+    const k = monthKey(inv);
+    if (!agg[k]) agg[k] = { cents: 0, cars: 0 };
+    agg[k].cents += sub;
+    agg[k].cars += 1;
+  }
+  const out = {};
+  for (const k of Object.keys(agg)) out[k] = { revenue: Math.round(agg[k].cents) / 100, cars: agg[k].cars };
+  return out;
+}
+
 // One order's service lines (each carries labors[] + parts[]). limit 100.
 async function fetchOrderService(apiKey, orderId) {
   const res = await fetch(`${SM}/order/${orderId}/service?limit=100`, {
@@ -160,4 +190,4 @@ async function fetchOrderService(apiKey, orderId) {
   return (j && j.data && j.data.data) ? j.data.data : (j.data || []);
 }
 
-module.exports = { parseShopmonkeyDate, centsToDollars, monthStartFor, monthStartUtcFor, actualRevenueByMonth, sweepOrders, fetchInvoicedOrdersForLocation, fetchOrderService, fetchOrderByNumber, fetchRecentInvoicedOrders, fetchRecentOrders };
+module.exports = { parseShopmonkeyDate, centsToDollars, monthStartFor, monthStartUtcFor, actualRevenueByMonth, actualsByMonth, sweepOrders, fetchInvoicedOrdersForLocation, fetchOrderService, fetchOrderByNumber, fetchRecentInvoicedOrders, fetchRecentOrders };

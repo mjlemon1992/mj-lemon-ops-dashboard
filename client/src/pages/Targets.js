@@ -96,6 +96,52 @@ export default function Targets() {
     setRecalcing(false);
   };
 
+  // ── Build-from-curve: one annual number → 12 seasonal monthly targets ──
+  const [annual, setAnnual] = useState('');
+  const [building, setBuilding] = useState(false);
+  const buildFromCurve = async () => {
+    const total = Math.round(Number(annual));
+    if (!selectedLoc || !Number.isFinite(total) || total <= 0) { showToast('Enter the annual revenue target first', 'error'); return; }
+    setBuilding(true);
+    try {
+      const r = await api(`/targets/${selectedLoc}/${year}/build-from-curve`, { method: 'POST', body: JSON.stringify({ total_revenue: total }) });
+      const k = (n) => '$' + Math.round(n).toLocaleString('en-CA');
+      const lines = r.proposed.map((p) => `${SHORT[p.month - 1]}:  ${k(p.revenue)}  (${p.weight_pct}% · ${p.car_count} cars)`).join('\n');
+      const ok = await askConfirm({
+        title: `Build ${year} from ${r.basis_year}'s curve`,
+        body: `${r.basis_year} did ${k(r.basis_total)}; this shapes ${k(r.total)} (${r.growth_pct >= 0 ? '+' : ''}${r.growth_pct}%) the same way:\n\n${lines}\n\nThis OVERWRITES the revenue, car count and avg-RO targets for all 12 months of ${year} (other fields keep their values).`,
+        confirmLabel: 'Apply & save',
+      });
+      if (!ok) { setBuilding(false); return; }
+      const byMonth = Object.fromEntries(r.proposed.map((p) => [p.month, p]));
+      const next = targets.map((t, i) => {
+        const p = byMonth[i + 1];
+        return p ? { ...t, revenue: p.revenue, car_count: p.car_count, avg_ro_value: p.avg_ro_value ?? t.avg_ro_value } : t;
+      });
+      setTargets(next);
+      await api(`/targets/${selectedLoc}/${year}/bulk`, { method: 'POST', body: JSON.stringify({ targets: next.map((t, i) => ({ ...t, month: i + 1 })) }) });
+      showToast(`${year} targets built from ${r.basis_year}'s curve ✓`);
+      setGoalsTick((n) => n + 1);
+    } catch (e) { showToast((e && e.message) || 'Could not build from curve', 'error'); }
+    setBuilding(false);
+  };
+
+  // ── Goals board data (Actual / Goal / Last Year per month) ──
+  const [goals, setGoals] = useState(null);
+  const [goalsErr, setGoalsErr] = useState('');
+  const [goalsLoading, setGoalsLoading] = useState(false);
+  const [goalsTick, setGoalsTick] = useState(0);
+  useEffect(() => {
+    if (!selectedLoc) return;
+    let cancelled = false;
+    setGoalsLoading(true); setGoalsErr(''); setGoals(null);
+    api(`/targets/${selectedLoc}/${year}/goals`)
+      .then((g) => { if (!cancelled) setGoals(g); })
+      .catch((e) => { if (!cancelled) setGoalsErr((e && e.message) || 'Could not load actuals'); })
+      .finally(() => { if (!cancelled) setGoalsLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedLoc, year, goalsTick]);
+
   const field = (key, label) => (
     <div className="form-group" key={key}>
       <label className="form-label">{label}</label>
@@ -119,6 +165,109 @@ export default function Targets() {
         </button>
         <button className="primary" onClick={saveTargets} disabled={saving || recalcing}>
           {saving ? 'Saving...' : saved ? 'Saved ✓' : 'Save all targets'}
+        </button>
+      </div>
+
+      {/* ── Going for the Goals — the wall chart, live ── */}
+      <div className="card" style={{ marginBottom: '16px', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', marginBottom: '4px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Going for the goals — {year}</div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Actual & last year from ShopMonkey · goal from this page</div>
+          <button onClick={() => setGoalsTick(n => n + 1)} disabled={goalsLoading} style={{ marginLeft: 'auto', fontSize: '12px' }}>↻ Refresh</button>
+        </div>
+        {goalsLoading && <div style={{ color: 'var(--text3)', fontSize: '12px', padding: '18px 0' }}>Pulling ShopMonkey history — first load takes ~20 seconds…</div>}
+        {goalsErr && !goalsLoading && <div style={{ color: 'var(--warning)', fontSize: '12px', padding: '12px 0' }}>{goalsErr}</div>}
+        {goals && !goalsLoading && (() => {
+          const money0 = (n) => (n == null ? '—' : '$' + Math.round(n).toLocaleString('en-CA'));
+          const moneyK = (n) => (n == null ? '—' : '$' + Math.round(n / 1000) + 'k');
+          const series = goals.months;
+          const vals = [];
+          series.forEach((m) => { ['actual', 'goal', 'last_year'].forEach((k) => { if (m[k] && m[k].revenue > 0) vals.push(m[k].revenue); }); });
+          const maxV = Math.max(...vals, 1);
+          const X = (i) => 30 + i * (660 / 11);
+          const Y = (v) => 150 - (v / maxV) * 130;
+          const line = (key) => series.map((m, i) => (m[key] && m[key].revenue > 0 ? `${X(i)},${Y(m[key].revenue)}` : null)).filter(Boolean).join(' ');
+          const rowDefs = [
+            ['actual', 'ACTUAL', 'var(--text)'],
+            ['goal', 'GOAL', 'var(--accent)'],
+            ['last_year', 'LAST YEAR', 'var(--text3)'],
+          ];
+          return (
+            <>
+              <svg viewBox="0 0 720 165" style={{ width: '100%', height: 'auto', display: 'block', margin: '6px 0 10px' }} role="img" aria-label="Monthly revenue: actual vs goal vs last year">
+                {[0.25, 0.5, 0.75, 1].map((f) => (
+                  <g key={f}>
+                    <line x1="30" x2="690" y1={Y(maxV * f)} y2={Y(maxV * f)} stroke="var(--border)" strokeWidth="0.5" />
+                    <text x="2" y={Y(maxV * f) + 3} fontSize="8" fill="var(--text3)">{moneyK(maxV * f)}</text>
+                  </g>
+                ))}
+                {SHORT.map((m, i) => <text key={m} x={X(i)} y="162" fontSize="8" fill="var(--text3)" textAnchor="middle">{m}</text>)}
+                <polyline points={line('last_year')} fill="none" stroke="var(--text3)" strokeWidth="1.4" strokeDasharray="1.5 2.5" />
+                <polyline points={line('goal')} fill="none" stroke="var(--accent)" strokeWidth="1.4" strokeDasharray="5 3" opacity="0.85" />
+                <polyline points={line('actual')} fill="none" stroke="var(--text)" strokeWidth="2.2" />
+                {series.map((m, i) => (m.actual && m.actual.revenue > 0 ? <circle key={i} cx={X(i)} cy={Y(m.actual.revenue)} r="2.6" fill="var(--text)" /> : null))}
+              </svg>
+              <div style={{ display: 'flex', gap: '16px', fontSize: '10px', color: 'var(--text3)', marginBottom: '10px' }}>
+                <span><span style={{ display: 'inline-block', width: 18, borderTop: '2.2px solid var(--text)', verticalAlign: 'middle', marginRight: 5 }} />Actual</span>
+                <span><span style={{ display: 'inline-block', width: 18, borderTop: '2px dashed var(--accent)', verticalAlign: 'middle', marginRight: 5 }} />Goal</span>
+                <span><span style={{ display: 'inline-block', width: 18, borderTop: '2px dotted var(--text3)', verticalAlign: 'middle', marginRight: 5 }} />Last year</span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '860px', fontSize: '11px', fontVariantNumeric: 'tabular-nums' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '4px 6px', color: 'var(--text3)', fontWeight: 500 }}></th>
+                      {SHORT.map((m) => <th key={m} style={{ padding: '4px 6px', color: 'var(--text3)', fontWeight: 600 }}>{m.toUpperCase()}</th>)}
+                      <th style={{ padding: '4px 6px', color: 'var(--text)', fontWeight: 700 }}>TOTAL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rowDefs.map(([key, label, color]) => (
+                      <React.Fragment key={key}>
+                        <tr style={{ borderTop: '0.5px solid var(--border)' }}>
+                          <td style={{ padding: '4px 6px', color, fontWeight: 700, whiteSpace: 'nowrap' }}>{label} · sales</td>
+                          {series.map((m, i) => <td key={i} style={{ padding: '4px 6px', textAlign: 'center', color: 'var(--text2)' }}>{m[key] && m[key].revenue ? moneyK(m[key].revenue) : '—'}</td>)}
+                          <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: 'var(--text)' }}>{money0(goals.totals[key] && goals.totals[key].revenue)}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: '2px 6px', color: 'var(--text3)', whiteSpace: 'nowrap' }}>avg work order</td>
+                          {series.map((m, i) => <td key={i} style={{ padding: '2px 6px', textAlign: 'center', color: 'var(--text3)' }}>{m[key] && m[key].awo ? money0(m[key].awo) : '—'}</td>)}
+                          <td />
+                        </tr>
+                        <tr>
+                          <td style={{ padding: '2px 6px 6px', color: 'var(--text3)', whiteSpace: 'nowrap' }}>cars</td>
+                          {series.map((m, i) => <td key={i} style={{ padding: '2px 6px 6px', textAlign: 'center', color: 'var(--text3)' }}>{m[key] && m[key].cars ? m[key].cars : '—'}</td>)}
+                          <td style={{ padding: '2px 6px 6px', textAlign: 'center', color: 'var(--text3)', fontWeight: 600 }}>{(goals.totals[key] && goals.totals[key].cars) || '—'}</td>
+                        </tr>
+                      </React.Fragment>
+                    ))}
+                    <tr style={{ borderTop: '0.5px solid var(--border)' }}>
+                      <td style={{ padding: '4px 6px', color: 'var(--text3)', fontWeight: 600 }}>% of goal</td>
+                      {series.map((m, i) => {
+                        const pct = m.actual && m.goal && m.goal.revenue > 0 && m.actual.revenue > 0 ? Math.round((m.actual.revenue / m.goal.revenue) * 100) : null;
+                        return <td key={i} style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: pct == null ? 'var(--text3)' : pct >= 100 ? 'var(--success)' : pct >= 90 ? 'var(--warning)' : 'var(--danger)' }}>{pct == null ? '—' : pct + '%'}</td>;
+                      })}
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: 'var(--text)' }}>
+                        {goals.totals.goal.revenue > 0 && goals.totals.actual.revenue > 0 ? Math.round((goals.totals.actual.revenue / goals.totals.goal.revenue) * 100) + '%' : '—'}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </>
+          );
+        })()}
+      </div>
+
+      {/* ── Build the year from last year's curve ── */}
+      <div className="card" style={{ marginBottom: '16px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text2)', flex: '1 1 260px' }}>
+          <strong style={{ color: 'var(--text)' }}>Build {year} from last year's curve.</strong> Enter the annual revenue target — it splits across the months the way {year - 1} actually flowed (slow months stay realistic, big months carry more), summing exactly to your number.
+        </div>
+        <input type="number" placeholder={`Annual revenue for ${year}`} value={annual} onChange={(e) => setAnnual(e.target.value)}
+          style={{ width: '190px' }} />
+        <button onClick={buildFromCurve} disabled={building || saving || recalcing}>
+          {building ? 'Building…' : '📈 Build monthly targets'}
         </button>
       </div>
 

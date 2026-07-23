@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticateToken, requireRole, canAccessLocation } = require('../middleware/auth');
-const { actualRevenueByMonth } = require('../lib/shopmonkey');
+const { actualRevenueByMonth, actualsByMonth } = require('../lib/shopmonkey');
 
 module.exports = (pool) => {
   const router = express.Router();
@@ -197,6 +197,113 @@ module.exports = (pool) => {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ── Goals board + curve builder ────────────────────────────────────────────
+  // One sweep serves both: monthly actuals (revenue + cars) for the requested
+  // year AND the year before. Cached in-memory for 6h per location/year — the
+  // sweep is the expensive part, and the board is a glance page.
+  const goalsCache = new Map();   // key -> { data, ts }
+  const GOALS_TTL_MS = 6 * 60 * 60 * 1000;
+  const pullActualsSpan = async (locationId, year, refresh) => {
+    const key = `${locationId}:${year}`;
+    const hit = goalsCache.get(key);
+    if (!refresh && hit && Date.now() - hit.ts < GOALS_TTL_MS) return hit.data;
+    const { rows: lr } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [locationId]);
+    const smLoc = lr[0] && lr[0].shopmonkey_location_id;
+    if (!smLoc) return null;
+    const apiKey = process.env.SHOPMONKEY_API_KEY;
+    if (!apiKey) return null;
+    // Span: Jan 1 of last year through Jan 1 of year+1 (the sweep filter is
+    // gte-only anyway; the helper buckets and bounds by month key).
+    let data = null; let lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { data = await actualsByMonth(apiKey, smLoc, `${year - 1}-01`, `${year + 1}-01`); break; }
+      catch (e) { lastErr = e; if (attempt < 1) await new Promise((r) => setTimeout(r, 3000)); }
+    }
+    if (!data) throw new Error(`Shopmonkey sweep failed (${(lastErr && lastErr.message) || 'throttled'})`);
+    goalsCache.set(key, { data, ts: Date.now() });
+    return data;
+  };
+
+  // Grid data for the "Going for the Goals" board: per month — actual, goal,
+  // last year (sales / cars / avg WO). Advisors never see this route (role gate).
+  router.get('/:locationId/:year/goals', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+    if (!assertLoc(req, res)) return;
+    const year = Number(req.params.year);
+    try {
+      const actuals = await pullActualsSpan(req.params.locationId, year, req.query.refresh === '1');
+      if (!actuals) return res.status(400).json({ error: 'This location is not connected to Shopmonkey yet, so there are no actuals to chart.' });
+      const { rows } = await pool.query('SELECT month, revenue, car_count, avg_ro_value FROM targets WHERE location_id=$1 AND year=$2', [req.params.locationId, year]);
+      const goalBy = Object.fromEntries(rows.map((r) => [Number(r.month), r]));
+      const cell = (src) => src ? { revenue: src.revenue, cars: src.cars, awo: src.cars > 0 ? Math.round(src.revenue / src.cars) : null } : null;
+      const months = [];
+      for (let m = 1; m <= 12; m++) {
+        const k = (y) => `${y}-${String(m).padStart(2, '0')}`;
+        const g = goalBy[m];
+        months.push({
+          month: m,
+          actual: cell(actuals[k(year)]),
+          last_year: cell(actuals[k(year - 1)]),
+          goal: g ? { revenue: Number(g.revenue) || 0, cars: Number(g.car_count) || 0, awo: Number(g.avg_ro_value) || null } : null,
+        });
+      }
+      const sum = (list, f) => list.reduce((a, x) => a + (f(x) || 0), 0);
+      res.json({
+        year, months,
+        totals: {
+          actual: { revenue: Math.round(sum(months, (x) => x.actual && x.actual.revenue)), cars: sum(months, (x) => x.actual && x.actual.cars) },
+          goal: { revenue: Math.round(sum(months, (x) => x.goal && x.goal.revenue)), cars: sum(months, (x) => x.goal && x.goal.cars) },
+          last_year: { revenue: Math.round(sum(months, (x) => x.last_year && x.last_year.revenue)), cars: sum(months, (x) => x.last_year && x.last_year.cars) },
+        },
+      });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Build a year's monthly targets from a single annual number, shaped by LAST
+  // YEAR's actual seasonality (Shopmonkey revenue — the same yardstick the
+  // targets are graded against). Whole-dollar allocation sums EXACTLY to the
+  // annual figure. Returns a preview; the client applies via the bulk save so
+  // the existing save path (and its sales_target/bonus-gate mirror) stays the
+  // single writer.
+  router.post('/:locationId/:year/build-from-curve', authenticateToken, requireRole('owner', 'partner', 'manager'), async (req, res) => {
+    if (!assertLoc(req, res)) return;
+    const year = Number(req.params.year);
+    const total = Math.round(Number((req.body || {}).total_revenue));
+    if (!Number.isFinite(total) || total <= 0) return res.status(400).json({ error: 'Give me the annual revenue target as a positive number.' });
+    try {
+      const actuals = await pullActualsSpan(req.params.locationId, year, false);
+      if (!actuals) return res.status(400).json({ error: 'This location is not connected to Shopmonkey yet — no history to shape the curve from.' });
+      const ly = [];
+      for (let m = 1; m <= 12; m++) ly.push(actuals[`${year - 1}-${String(m).padStart(2, '0')}`] || null);
+      const withData = ly.filter((x) => x && x.revenue > 0).length;
+      if (withData < 6) return res.status(400).json({ error: `Only ${withData} month(s) of ${year - 1} history in Shopmonkey — not enough to shape a seasonal curve. Use even amounts instead.` });
+      // Months with no history get the average weight of the months that have
+      // it, so a data gap doesn't zero out a target month.
+      const lyTotal = ly.reduce((a, x) => a + (x ? x.revenue : 0), 0);
+      const avgRev = lyTotal / withData;
+      const weights = ly.map((x) => (x && x.revenue > 0 ? x.revenue : avgRev));
+      const wTotal = weights.reduce((a, b) => a + b, 0);
+      // Whole-dollar allocation, drift corrected on the largest month.
+      const raw = weights.map((w) => (total * w) / wTotal);
+      const alloc = raw.map((r) => Math.floor(r));
+      let left = total - alloc.reduce((a, b) => a + b, 0);
+      const order = raw.map((r, i) => [r - Math.floor(r), i]).sort((a, b) => b[0] - a[0]);
+      for (const [, i] of order) { if (left <= 0) break; alloc[i] += 1; left -= 1; }
+      const lyCars = ly.reduce((a, x) => a + (x ? x.cars : 0), 0);
+      const growth = lyTotal > 0 ? total / lyTotal : 1;
+      const proposed = alloc.map((rev, i) => {
+        const carsLy = ly[i] ? ly[i].cars : (lyCars && withData ? Math.round(lyCars / withData) : 0);
+        const cars = Math.max(0, Math.round(carsLy * growth));
+        return {
+          month: i + 1, revenue: rev, car_count: cars,
+          avg_ro_value: cars > 0 ? Math.round(rev / cars) : null,
+          last_year_revenue: ly[i] ? Math.round(ly[i].revenue) : null,
+          weight_pct: Math.round((weights[i] / wTotal) * 1000) / 10,
+        };
+      });
+      res.json({ year, total, basis_year: year - 1, basis_total: Math.round(lyTotal), months_with_history: withData, growth_pct: Math.round((growth - 1) * 1000) / 10, proposed });
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   return router;
