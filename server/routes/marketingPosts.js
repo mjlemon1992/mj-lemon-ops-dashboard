@@ -421,8 +421,12 @@ module.exports = (pool) => {
   const setStatus = (status) => async (req, res) => {
     try {
       await ensureTables();
+      // Moving a post out of "approved" (skip / back-to-draft) drops any pending
+      // schedule so a stale scheduled_for can never re-arm the release worker on a
+      // later re-approve. published_at is left intact — it's the record that the
+      // post already went out, and unapprove deliberately does not retract that.
       const { rows } = await pool.query(
-        `UPDATE marketing_post SET status=$1, actioned_at=NOW() WHERE id=$2 AND deleted_at IS NULL RETURNING id, location_id`,
+        `UPDATE marketing_post SET status=$1, actioned_at=NOW(), scheduled_for=NULL WHERE id=$2 AND deleted_at IS NULL RETURNING id, location_id`,
         [status, req.params.postId]
       );
       if (!rows.length) return res.status(404).json({ error: 'Post not found' });
