@@ -345,6 +345,11 @@ module.exports = (pool) => {
   // retries on the next ingest of the same document.
   const forwardToHubdoc = async (locationId, table, rowId, fileBase64, mediaType, label) => {
     try {
+      // Relay mode: Railway's SMTP egress proved unreliable (most sends time
+      // out), so when a relay key is configured the server does NOT send —
+      // rows simply stay pending (hubdoc_sent_at NULL) and the shop Mac's
+      // relay drains the queue via /hubdoc-next + /hubdoc-mark every minute.
+      if (process.env.HUBDOC_RELAY_KEY) return;
       if (!rowId || !fileBase64) return;
       const hit = parseInboxMap().find((m) => m && m.location === locationId);
       if (!hit || !hit.hubdoc || !hit.user || !hit.pass) return;
@@ -481,6 +486,53 @@ module.exports = (pool) => {
     return { ok: true, scanned: inbox.messages.length, processed: results.filter((r) => !r.error).length, more, results };
     } finally { scanningLocations.delete(locationId); }
   };
+
+  // ── Hubdoc relay (shop-Mac courier) ────────────────────────────────────────
+  // Railway can't reliably reach Gmail SMTP, so the shop Mac drains the queue:
+  // GET /hubdoc-next hands it ONE pending document as raw bytes (metadata in
+  // response headers — no JSON parsing needed in bash), the Mac emails it to
+  // Hubdoc from the parts mailbox, then POST /hubdoc-mark/:id claims it sent.
+  // Auth: scoped X-Relay-Key (HUBDOC_RELAY_KEY env) — can only read filed
+  // invoice PDFs and flip their sent flag, nothing else.
+  const relayAuth = (req, res, next) => {
+    const want = process.env.HUBDOC_RELAY_KEY;
+    if (!want) return res.status(503).json({ error: 'Relay not configured (HUBDOC_RELAY_KEY unset)' });
+    const got = String(req.headers['x-relay-key'] || '');
+    const crypto = require('crypto');
+    const a = crypto.createHash('sha256').update(got).digest();
+    const b = crypto.createHash('sha256').update(want).digest();
+    if (!crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: 'Bad relay key' });
+    next();
+  };
+  const asciiLabel = (s) => String(s || 'document').replace(/[^\x20-\x7e]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'document';
+  router.get('/:locationId/hubdoc-next', relayAuth, async (req, res) => {
+    try {
+      await ensurePartsReconTables(pool);
+      const hit = parseInboxMap().find((m) => m && m.location === req.params.locationId);
+      if (!hit || !hit.hubdoc) return res.status(204).end();
+      const { rows } = await pool.query(
+        `SELECT id, vendor, invoice_number, file_data, file_mime FROM vendor_invoice
+          WHERE location_id=$1 AND hubdoc_sent_at IS NULL AND file_data IS NOT NULL
+          ORDER BY created_at LIMIT 1`, [req.params.locationId]);
+      if (!rows.length) return res.status(204).end();
+      const r = rows[0];
+      res.set('X-Doc-Id', r.id);
+      res.set('X-Doc-Label', asciiLabel(`${r.vendor || 'Invoice'} ${r.invoice_number || ''}`));
+      res.set('X-Hubdoc-To', hit.hubdoc);
+      res.set('Content-Type', r.file_mime || 'application/pdf');
+      res.send(r.file_data);
+    } catch (e) { fail(res, e); }
+  });
+  router.post('/:locationId/hubdoc-mark/:id', relayAuth, async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        'UPDATE vendor_invoice SET hubdoc_sent_at=NOW() WHERE id=$1 AND location_id=$2 RETURNING id',
+        [req.params.id, req.params.locationId]);
+      if (!rows.length) return res.status(404).json({ error: 'Not found' });
+      console.log(`[hubdoc] relay delivered ${rows[0].id}`);
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
 
   // Retry Hubdoc forwarding for anything filed but not yet sent (send failures
   // release the hubdoc_sent_at claim). Works off the stored file bytes, so no
