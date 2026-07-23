@@ -609,10 +609,14 @@ module.exports = (pool) => {
     // riding along on a forwarded message, NOT an invoice. Skip it rather than
     // filing a blank row (and, before dollarsToCents was hardened, a NaN total
     // here 500'd the whole scan). Nothing to view, nothing to chase.
-    const hasContent = ex.vendor || ex.invoice_number || ex.total_cents != null
+    // Deliberately NOT counting a vendor name as content: Claude will read
+    // "Mister Transmission" (or any supplier logo) off an email-signature graphic
+    // and hand back a vendor with nothing else. A real invoice ALWAYS carries a
+    // number or a money total — require one of those before we file a row.
+    const hasContent = ex.invoice_number || ex.total_cents != null
       || ex.subtotal_cents != null || (Array.isArray(ex.line_items) && ex.line_items.length);
     if (!hasContent) {
-      return { type: 'skipped', reason: 'unreadable', vendor: null, match_status: 'skipped' };
+      return { type: 'skipped', reason: 'unreadable', vendor: ex.vendor || null, match_status: 'skipped' };
     }
     const out = await processInvoice(locationId, smLoc, apiKey, ex, source, fileBase64, mediaType);
     // Warranty can be declared three ways, in order of reliability:
