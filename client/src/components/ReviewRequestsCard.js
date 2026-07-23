@@ -1,14 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-// Review request texts — Marketing rail card. Centre of the card is the PICKUP
-// QUEUE: recent invoiced ROs, each with Send / Skip. The counter workflow: ask
+// Review request texts — the pickup Send/Skip queue. The counter workflow: ask
 // the customer how the visit went; good answer → Send (they get the Google
 // review link by text, right there); anything else → Skip (that RO is never
-// asked). Owner/partner + managers (their location). Owner-only controls:
-// enable, auto-send mode, link override. Live sending additionally needs env
-// REVIEW_REQUESTS_LIVE=1 — until then Send logs a dry-run row, nothing texts.
-// Self-hides on error (e.g. advisor role) like ReviewsScorecard.
+// asked). Owner/partner + managers (their location).
+//
+// Two renderings:
+//   default — full Marketing-rail card: queue + burn-in banners + 30d tally +
+//     recent decisions + owner-only controls (enable, auto mode, link).
+//   deck — compact Home-screen deck (sits in the deck-row next to Two weeks):
+//     queue + tally foot only, self-hides entirely until the location's flag
+//     is on. Config stays on the Marketing card.
+// Live sending additionally needs env REVIEW_REQUESTS_LIVE=1 — until then Send
+// logs a dry-run row, nothing texts. Self-hides on error (e.g. advisor role).
 const MONO = "ui-monospace, 'SF Mono', Menlo, monospace";
 
 const STATUS_TONE = {
@@ -25,7 +30,7 @@ const ago = (d) => {
   return `${Math.round(mins / (60 * 24))}d ago`;
 };
 
-export default function ReviewRequestsCard({ locId }) {
+export default function ReviewRequestsCard({ locId, deck = false, locName = null }) {
   const { api, user } = useAuth();
   const isOwner = user?.role === 'owner';
   const [data, setData] = useState(null);
@@ -51,6 +56,7 @@ export default function ReviewRequestsCard({ locId }) {
   useEffect(() => { setData(null); setQueue([]); setHidden(false); setMsg(null); setEditLink(false); load(); }, [load]);
 
   if (hidden || !data) return null;
+  if (deck && !data.enabled) return null;   // Home deck earns its space only when live-ish
 
   const mode = !data.enabled ? 'off' : (data.live ? 'live' : 'dry run');
   const dot = mode === 'live' ? 'var(--success)' : mode === 'dry run' ? 'var(--warning)' : 'var(--text3)';
@@ -91,6 +97,57 @@ export default function ReviewRequestsCard({ locId }) {
     () => api(`/marketing/review-requests/${locId}/config`, { method: 'PUT', body: JSON.stringify({ link: linkDraft }) }),
     () => { setEditLink(false); return 'Review link saved.'; });
 
+  const queueRows = (limit) => queue.slice(0, limit).map((row) => (
+    <div key={row.order_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', background: 'var(--bg3)', borderRadius: '8px' }}>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: '12.5px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {row.customer_name || 'Customer'}
+        </div>
+        <div style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.05em', color: 'var(--text3)' }}>
+          {row.number ? `RO ${row.number}` : ''}{row.invoiced_at ? ` · invoiced ${ago(row.invoiced_at)}` : ''}
+        </div>
+      </div>
+      <button className="primary" disabled={busy != null || !data.link} onClick={() => sendOrder(row)}
+        style={{ fontSize: '11.5px', padding: '4px 11px', flexShrink: 0 }}>
+        {busy === row.order_id ? '…' : 'Send'}
+      </button>
+      <button disabled={busy != null} onClick={() => skipOrder(row)} title="Don't ask for this RO"
+        style={{ fontSize: '11.5px', padding: '4px 8px', flexShrink: 0, color: 'var(--text3)' }}>
+        ✕
+      </button>
+    </div>
+  ));
+
+  const tallyN = data.live ? data.stats.sent30 : data.stats.dry30;
+  const tallyLabel = data.live ? 'sent' : 'dry';
+
+  // ---- Home-screen deck: the ask-at-pickup queue, nothing else ----
+  if (deck) {
+    return (
+      <div className="card deck">
+        <div className="deck-head">
+          <span className="deck-title">Reviews{locName ? ` · ${locName}` : ''}</span>
+          <span className="section-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: dot, display: 'inline-block' }} />
+            {data.live ? 'ask at pickup' : 'dry run'}
+          </span>
+        </div>
+        {queue.length === 0 && <div className="deck-empty">Queue clear — invoiced ROs show up here to ask at pickup.</div>}
+        {queue.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {queueRows(4)}
+            {queue.length > 4 && (
+              <div style={{ fontSize: '10.5px', color: 'var(--text3)' }}>+{queue.length - 4} more on the Marketing page</div>
+            )}
+          </div>
+        )}
+        {msg && <div style={{ marginTop: '8px', fontSize: '11.5px', color: 'var(--text2)' }}>{msg}</div>}
+        <div className="deck-foot">{tallyN} {tallyLabel} · 30d{data.stats.failed30 > 0 ? ` · ${data.stats.failed30} failed` : ''}</div>
+      </div>
+    );
+  }
+
+  // ---- Full Marketing-rail card ----
   return (
     <div className="card" style={{ borderLeft: '3px solid var(--accent)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '10px' }}>
@@ -123,26 +180,7 @@ export default function ReviewRequestsCard({ locId }) {
           <div style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text3)' }}>
             Ready to ask · {queue.length}
           </div>
-          {queue.slice(0, 6).map((row) => (
-            <div key={row.order_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', background: 'var(--bg3)', borderRadius: '8px' }}>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: '12.5px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {row.customer_name || 'Customer'}
-                </div>
-                <div style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.05em', color: 'var(--text3)' }}>
-                  {row.number ? `RO ${row.number}` : ''}{row.invoiced_at ? ` · invoiced ${ago(row.invoiced_at)}` : ''}
-                </div>
-              </div>
-              <button className="primary" disabled={busy != null || !data.link} onClick={() => sendOrder(row)}
-                style={{ fontSize: '11.5px', padding: '4px 11px', flexShrink: 0 }}>
-                {busy === row.order_id ? '…' : 'Send'}
-              </button>
-              <button disabled={busy != null} onClick={() => skipOrder(row)} title="Don't ask for this RO"
-                style={{ fontSize: '11.5px', padding: '4px 8px', flexShrink: 0, color: 'var(--text3)' }}>
-                ✕
-              </button>
-            </div>
-          ))}
+          {queueRows(6)}
           {queue.length > 6 && (
             <div style={{ fontSize: '10.5px', color: 'var(--text3)' }}>+{queue.length - 6} more in the queue</div>
           )}
@@ -158,7 +196,7 @@ export default function ReviewRequestsCard({ locId }) {
 
       {/* 30d tally + recent decisions */}
       <div style={{ marginTop: '10px', paddingTop: '9px', borderTop: '0.5px solid var(--border)', display: 'flex', alignItems: 'baseline', gap: '10px', fontFamily: MONO, fontSize: '10.5px', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
-        <span><b style={{ color: 'var(--text)', fontSize: '13px' }}>{data.live ? data.stats.sent30 : data.stats.dry30}</b> {data.live ? 'sent' : 'dry'} · 30d</span>
+        <span><b style={{ color: 'var(--text)', fontSize: '13px' }}>{tallyN}</b> {tallyLabel} · 30d</span>
         {data.stats.failed30 > 0 && <span style={{ color: 'var(--danger)' }}>{data.stats.failed30} failed</span>}
         {data.stats.last_at && <span style={{ marginLeft: 'auto' }}>last {ago(data.stats.last_at)}</span>}
       </div>
