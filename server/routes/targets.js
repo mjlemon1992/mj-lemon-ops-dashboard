@@ -12,6 +12,27 @@ module.exports = (pool) => {
     return false;
   };
 
+  // Keep the bonus module's sales_target (the payout GATE) in lockstep with the
+  // revenue targets edited here — otherwise recalculate-to-yearly bumps a month
+  // in `targets` while the bonus gate still reads the stale `sales_target`, and
+  // the dashboard says "missed" while the crew gets paid. Skips months with an
+  // approved unsuperseded run (locked inputs). Best-effort: never fail a save.
+  const syncSalesTarget = async (locationId, year) => {
+    try {
+      await pool.query(
+        `INSERT INTO sales_target (location_id, month, target)
+         SELECT t.location_id, $2::text || '-' || LPAD(t.month::text, 2, '0'), t.revenue
+           FROM targets t
+          WHERE t.location_id = $1 AND t.year = $2 AND t.revenue > 0
+            AND NOT EXISTS (SELECT 1 FROM bonus_run r
+                              WHERE r.location_id = t.location_id
+                                AND r.month = $2::text || '-' || LPAD(t.month::text, 2, '0')
+                                AND r.status = 'approved' AND r.superseded_by IS NULL)
+         ON CONFLICT (location_id, month) DO UPDATE SET target = EXCLUDED.target`,
+        [locationId, Number(year)]);
+    } catch (e) { /* bonus schema may be absent; a target save must never fail on the mirror */ }
+  };
+
   router.get('/:locationId/:year', authenticateToken, async (req, res) => {
     try {
       if (['manager', 'advisor'].includes(req.user.role) && req.user.location_id !== req.params.locationId) {
@@ -48,6 +69,7 @@ module.exports = (pool) => {
          RETURNING *`,
         [req.params.locationId, req.params.year, req.params.month, revenue, car_count, parts_margin || 55, labour_margin || 70, labour_hours, efficiency || 80, avg_ro_value, pph]
       );
+      await syncSalesTarget(req.params.locationId, req.params.year);
       res.json(result.rows[0]);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -72,6 +94,7 @@ module.exports = (pool) => {
           );
         }
         await client.query('COMMIT');
+        await syncSalesTarget(req.params.locationId, req.params.year);
         res.json({ message: 'Targets saved', count: targets.length });
       } catch (err) {
         await client.query('ROLLBACK');

@@ -248,7 +248,9 @@ module.exports = (pool) => {
         gap,
         pace_pct: pacePct,
         pct_to_target: pctToTarget,
-        parts_margin: num(m.parts_margin),
+        // parts_margin deliberately NOT emitted — this board is PIN-only (no JWT),
+        // and owner-level finance (margin/profit/pph/costs) must never reach the
+        // shop floor, not even latent in the payload. Revenue-vs-target is board-legal.
         techs,
         techs_ytd: techsYtd,
         notices,

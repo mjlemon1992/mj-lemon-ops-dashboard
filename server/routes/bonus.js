@@ -188,9 +188,12 @@ module.exports = (pool) => {
       return rows.map((r) => normName(r.tech_name)).filter(Boolean);
     } catch (e) { return []; }
   };
+  // Match on a whole-word boundary, NOT a bare substring prefix: a roster "Joe"
+  // must match hidden "Joe Salerno", but active "Dan" must NOT match hidden
+  // "Daniel Cormier" (the old .startsWith("dan") did, silently zeroing Dan's pay).
   const makeIsHidden = (hiddenNames) => (personName) => {
-    const first = normName(personName).split(' ')[0];
-    return !!first && hiddenNames.some((h) => h.startsWith(first));
+    const p = normName(personName);
+    return !!p && hiddenNames.some((h) => h === p || h.startsWith(p + ' ') || p.startsWith(h + ' '));
   };
   // Bonus participants only — clock-only crew (in_bonus=false, e.g. probation
   // hires) AND anyone hidden on the Technicians page are excluded from every
@@ -388,6 +391,7 @@ module.exports = (pool) => {
       for (const e of entries) {
         const billed = Number(e.billed_hours), clocked = Number(e.clocked_hours);
         if (!(clocked > 0)) return fail(res, `Clocked hours must be > 0 (${e.person_id})`, 400);   // §6.5
+        if (!(billed >= 0)) return fail(res, `Billed hours can't be negative (${e.person_id})`, 400);
         if (billed / clocked > 1.5) return fail(res, `Efficiency over 150% — check the hours (${e.person_id})`, 400);
         await pool.query(
           `INSERT INTO efficiency_input (location_id, person_id, month, billed_hours, clocked_hours)
@@ -556,6 +560,7 @@ module.exports = (pool) => {
           // Ledger net effect must equal the NEW run (spec §3.1): post per-person deltas.
           const { rows: oldLines } = await client.query('SELECT person_id, paid FROM bonus_line WHERE bonus_run_id=$1', [run.supersedes]);
           const oldPaid = Object.fromEntries(oldLines.map((l) => [l.person_id, Number(l.paid)]));
+          const newIds = new Set(lines.map((l) => l.person_id));
           for (const l of lines) {
             const delta = round2(Number(l.paid) - (oldPaid[l.person_id] || 0));
             if (delta !== 0) {
@@ -565,7 +570,26 @@ module.exports = (pool) => {
                 [run.location_id, l.person_id, delta, today, run.id, `${run.month} bonus (supersede correction)`, who(req)]);
             }
           }
-          await client.query('UPDATE bonus_run SET superseded_by=$2 WHERE id=$1', [run.supersedes, run.id]);
+          // Claw back anyone in the OLD run but dropped from the NEW one (removed,
+          // in_bonus off, or hidden between runs). Without this their original
+          // credit stays on the ledger and they're overpaid — the net ledger
+          // effect must equal the NEW run (spec §3.1), not new + orphaned old.
+          for (const [pid, paid] of Object.entries(oldPaid)) {
+            if (!newIds.has(pid) && round2(paid) !== 0) {
+              await client.query(
+                `INSERT INTO fuel_ledger (location_id, person_id, type, amount, occurred_on, source, bonus_run_id, memo, created_by)
+                 VALUES ($1,$2,'bonus_credit',$3,$4,'bonus_run',$5,$6,$7)`,
+                [run.location_id, pid, round2(-paid), today, run.id, `${run.month} bonus (supersede clawback — removed from run)`, who(req)]);
+            }
+          }
+          // Atomic supersede: only if the target run hasn't ALREADY been superseded
+          // by a concurrent approval. rowCount 0 means another draft beat us — abort
+          // rather than double-post deltas against the same base run.
+          const sup = await client.query('UPDATE bonus_run SET superseded_by=$2 WHERE id=$1 AND superseded_by IS NULL', [run.supersedes, run.id]);
+          if (sup.rowCount === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return fail(res, 'The run this supersedes was already replaced by another approval — recalculate from the current approved run and try again.', 409);
+          }
         } else {
           for (const l of lines) {
             if (Number(l.paid) > 0) {
@@ -653,7 +677,7 @@ module.exports = (pool) => {
         res.set('Content-Disposition', `attachment; filename="${fname}.xlsx"`);
         return res.send(buf);
       }
-      const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const esc = (v) => { let s = String(v ?? ''); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return `"${s.replace(/"/g, '""')}"`; };
       const csv = [
         Object.keys(head).join(','), Object.values(head).map(esc).join(','), '',
         Object.keys(rows[0] || totals).join(','),

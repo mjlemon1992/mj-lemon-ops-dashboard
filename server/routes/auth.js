@@ -3,6 +3,10 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { authenticateToken, JWT_SECRET } = require('../middleware/auth');
 
+// A valid bcrypt hash of a random string — compared against when the email is
+// unknown so a failed login costs the same time whether or not the account exists.
+const DUMMY_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
+
 module.exports = (pool) => {
   const router = express.Router();
 
@@ -28,10 +32,12 @@ module.exports = (pool) => {
     };
     try {
       const result = await pool.query('SELECT * FROM users WHERE email = $1 AND active = true', [email.toLowerCase()]);
-      if (!result.rows.length) { bumpFail(); return res.status(401).json({ error: 'Invalid credentials' }); }
       const user = result.rows[0];
-      const valid = await bcrypt.compare(password, user.password_hash);
-      if (!valid) { bumpFail(); return res.status(401).json({ error: 'Invalid credentials' }); }
+      // Always run a bcrypt compare — against a dummy hash when the email is
+      // unknown — so response time doesn't reveal whether an account exists.
+      const hash = user ? user.password_hash : DUMMY_HASH;
+      const valid = await bcrypt.compare(password, hash);
+      if (!user || !valid) { bumpFail(); return res.status(401).json({ error: 'Invalid credentials' }); }
       loginFails.delete(lk);
       const token = jwt.sign(
         { id: user.id, email: user.email, role: user.role, name: user.name, location_id: user.location_id },

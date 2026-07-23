@@ -99,6 +99,9 @@ function ensureBonusFuelTables(pool) {
     // One bonus_credit row per (run, person): DB backstop against double-posting
     // if two approvals ever slip past the status guard.
     await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_fuel_bonus_once ON fuel_ledger (bonus_run_id, person_id) WHERE type='bonus_credit' AND bonus_run_id IS NOT NULL");
+    // At most ONE draft run per location+month — stops two concurrent Supersede
+    // clicks producing two drafts that both approve and double-post deltas.
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_run_one_draft ON bonus_run (location_id, month) WHERE status='draft'");
     await pool.query(`CREATE TABLE IF NOT EXISTS card_snapshot (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       location_id UUID NOT NULL,

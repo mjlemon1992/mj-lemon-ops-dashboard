@@ -32,21 +32,33 @@ module.exports = (pool) => {
       const { rows: snaps } = await pool.query('SELECT * FROM card_snapshot WHERE location_id=$1 ORDER BY statement_date DESC, created_at DESC LIMIT 1', [locationId]);
       const { rows: settings } = await pool.query('SELECT * FROM fuel_settings WHERE location_id=$1', [locationId]);
 
+      // Per-person credited/used and the whole-card sums are computed in SQL, NOT
+      // from the 200-row activity feed above. Two bugs lived here: occurred_on is a
+      // DATE (pg returns a JS Date, so String(d).slice(0,4) was "Sun " and the year
+      // filter never matched → every tile read $0), and the LIMIT 200 feed dropped
+      // older ledger rows so balances/variance drifted once a location passed 200
+      // entries. SUM(...) over the full table fixes both.
+      const year = new Date().getFullYear();
       const per = {};
       for (const p of people) per[p.id] = { person_id: p.id, name: p.name, role: p.role, active: p.active, credited: 0, used: 0 };
-      let unassignedUsed = 0, ledgerSum = 0;
-      const year = new Date().getFullYear();
-      for (const l of ledger) {
-        const amt = Number(l.amount);
-        ledgerSum = round2(ledgerSum + amt);
-        const inYear = String(l.occurred_on).slice(0, 4) === String(year);
-        if (l.person_id && per[l.person_id]) {
-          if (amt >= 0 && inYear) per[l.person_id].credited = round2(per[l.person_id].credited + amt);
-          if (amt < 0 && inYear) per[l.person_id].used = round2(per[l.person_id].used + Math.abs(amt));
-        } else if (!l.person_id && amt < 0) {
-          unassignedUsed = round2(unassignedUsed + Math.abs(amt));
-        }
-      }
+      const { rows: agg } = await pool.query(
+        // Classify by TYPE, not sign: 'used' is only fuel purchased; everything
+        // else (bonus_credit, topup, adjustment) nets into 'credited' so a negative
+        // supersede clawback correctly REDUCES credit instead of reading as fuel used.
+        `SELECT person_id,
+                COALESCE(SUM(amount) FILTER (WHERE type <> 'purchase'), 0)::numeric AS credited,
+                COALESCE(SUM(-amount) FILTER (WHERE type = 'purchase'), 0)::numeric AS used
+           FROM fuel_ledger
+          WHERE location_id = $1 AND person_id IS NOT NULL
+            AND EXTRACT(YEAR FROM occurred_on) = $2
+          GROUP BY person_id`, [locationId, year]);
+      for (const a of agg) if (per[a.person_id]) { per[a.person_id].credited = round2(Number(a.credited)); per[a.person_id].used = round2(Number(a.used)); }
+      const { rows: sums } = await pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS ledger_sum,
+                COALESCE(SUM(-amount) FILTER (WHERE person_id IS NULL AND amount < 0), 0)::numeric AS unassigned_used
+           FROM fuel_ledger WHERE location_id = $1`, [locationId]);
+      const ledgerSum = round2(Number(sums[0].ledger_sum));
+      const unassignedUsed = round2(Number(sums[0].unassigned_used));
       const perList = Object.values(per).map((p) => ({ ...p, remaining: round2(p.credited - p.used) }));
       const creditedYtd = round2(perList.reduce((s, p) => s + p.credited, 0));
       const usedYtd = round2(perList.reduce((s, p) => s + p.used, 0));
@@ -145,8 +157,8 @@ module.exports = (pool) => {
       const { rows: people } = await pool.query('SELECT id, name FROM bonus_person WHERE location_id=$1', [locationId]);
       const nameOf = Object.fromEntries(people.map((p) => [p.id, p.name]));
       const { rows: sums } = await pool.query(
-        `SELECT person_id, SUM(CASE WHEN amount>=0 THEN amount ELSE 0 END) AS credited,
-                SUM(CASE WHEN amount<0 THEN -amount ELSE 0 END) AS used, SUM(amount) AS remaining
+        `SELECT person_id, SUM(CASE WHEN type <> 'purchase' THEN amount ELSE 0 END) AS credited,
+                SUM(CASE WHEN type = 'purchase' THEN -amount ELSE 0 END) AS used, SUM(amount) AS remaining
            FROM fuel_ledger WHERE location_id=$1 GROUP BY person_id`, [locationId]);
       const summary = sums.map((s) => ({ person: s.person_id ? (nameOf[s.person_id] || s.person_id) : 'UNASSIGNED', credited: Number(s.credited), used: Number(s.used), remaining: Number(s.remaining) }));
       const { rows: snaps } = await pool.query('SELECT statement_date, actual_balance, created_by FROM card_snapshot WHERE location_id=$1 ORDER BY statement_date DESC LIMIT 1', [locationId]);
@@ -165,7 +177,9 @@ module.exports = (pool) => {
         res.set('Content-Disposition', `attachment; filename="${fname}.xlsx"`);
         return res.send(buf);
       }
-      const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      // Neutralize spreadsheet formula injection: a manager-entered memo like
+      // "=cmd|..." must not execute when the owner opens the CSV in Excel.
+      const esc = (v) => { let s = String(v ?? ''); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return `"${s.replace(/"/g, '""')}"`; };
       const section = (title, rows) => rows.length ? [title, Object.keys(rows[0]).join(','), ...rows.map((r) => Object.values(r).map(esc).join(','))] : [title, '(none)'];
       const csv = [...section('LEDGER', ledger), '', ...section('PER PERSON', summary), '', ...section('LATEST RECONCILIATION', snaps)].join('\n');
       res.set('Content-Type', 'text/csv');

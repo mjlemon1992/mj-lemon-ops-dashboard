@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken, syncAuth, canAccessLocation } = require('../middleware/auth');
+const { authenticateToken, syncAuth, requireRole, canAccessLocation } = require('../middleware/auth');
 
 module.exports = (pool) => {
   const router = express.Router();
@@ -9,7 +9,6 @@ module.exports = (pool) => {
   // query throws "invalid input syntax for type uuid".
   // syncAuth: the scheduled Chief-of-Staff agent reads these with X-Sync-Key.
   router.get('/group/summary', syncAuth, async (req, res) => {
-    if (req.user.role === 'manager') return res.status(403).json({ error: 'Access denied' });
     if (req.user.role === 'manager') return res.status(403).json({ error: 'Access denied' });
     try {
       const result = await pool.query(
@@ -54,7 +53,9 @@ module.exports = (pool) => {
     }
   });
 
-  router.post('/:locationId/update', authenticateToken, async (req, res) => {
+  // owner/partner or the sync machine key only — a manager must never write into
+  // the finance cache that drives every dashboard, the group summary and the CoS brief.
+  router.post('/:locationId/update', syncAuth, requireRole('owner', 'partner'), async (req, res) => {
     if (!canAccessLocation(req.user, req.params.locationId)) return res.status(403).json({ error: 'Access denied for this location' });
     const { revenue_mtd, car_count_mtd, parts_margin, labour_margin, avg_ro_value, labour_hours_sold, efficiency_avg, pph, total_profit, alerts } = req.body;
     try {
