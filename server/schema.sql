@@ -215,3 +215,27 @@ CREATE TABLE IF NOT EXISTS review_request_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (location_id, order_id)
 );
+
+-- Marketing: review watcher + AI reply drafts (routes/marketingReviews.js
+-- self-provisions these). One row per seen Google review; status carries the
+-- reply lifecycle: seed (pre-existing at first watch, never notified) -> new
+-- (auto-drafted, push-notified) -> posted | dismissed (human decision; a
+-- future Google Business Profile auto-post would stamp 'posted' itself).
+CREATE TABLE IF NOT EXISTS review_reply_drafts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id UUID NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+  review_time BIGINT NOT NULL,
+  author VARCHAR(255),
+  rating INTEGER,
+  review_text TEXT,
+  draft TEXT,
+  status VARCHAR(16) NOT NULL DEFAULT 'new',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (location_id, review_time, author)
+);
+
+CREATE TABLE IF NOT EXISTS review_watch_state (
+  location_id UUID PRIMARY KEY REFERENCES locations(id) ON DELETE CASCADE,
+  last_run TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

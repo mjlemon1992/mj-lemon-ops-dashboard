@@ -23,7 +23,9 @@ async function runOnce(pool, baseUrl, secret) {
   for (const loc of locs) {
     // review-requests: no-ops in seconds unless the location's flag is on AND
     // the local-daytime send window is open (the route gates both).
-    for (const path of [`/api/sync/${loc.id}/refresh`, `/api/sync/${loc.id}/refresh-tech`, `/api/marketing/review-requests/${loc.id}/run`]) {
+    // reviews/watch: self-throttles to every 6h (Places reviews field bills
+    // per call); new review → auto-draft reply + push notification.
+    for (const path of [`/api/sync/${loc.id}/refresh`, `/api/sync/${loc.id}/refresh-tech`, `/api/marketing/review-requests/${loc.id}/run`, `/api/marketing/reviews/${loc.id}/watch`]) {
       try {
         const res = await fetch(`${baseUrl}${path}`, {
           method: 'POST',
