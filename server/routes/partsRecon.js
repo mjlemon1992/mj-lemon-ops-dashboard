@@ -356,7 +356,10 @@ module.exports = (pool) => {
     const { rows } = await pool.query('SELECT shopmonkey_location_id FROM locations WHERE id=$1', [locationId]);
     if (!rows.length) return { ok: false, error: 'Location not found', processed: 0, results: [] };
     const smLoc = rows[0].shopmonkey_location_id;
-    if (!smLoc) return { ok: false, error: 'Location not connected to Shopmonkey', processed: 0, results: [] };
+    // No ShopMonkey link (e.g. Hwy 97) still scans: call reports don't need SM.
+    // Only INVOICE processing requires it — those messages are skipped (left
+    // unread, no AI spend) until the location is connected.
+    const canInvoices = !!smLoc;
     const apiKey = process.env.SHOPMONKEY_API_KEY;
 
     // PACING. Each document costs a Claude read plus 1-2 ShopMonkey lookups, and
@@ -393,6 +396,12 @@ module.exports = (pool) => {
           } catch (e) { anyFail = true; results.push({ from: msg.from, file: att.filename, error: `call report: ${String(e.message || e)}` }); }
         }
         if (anyOk && !anyFail) doneUids.push(msg.uid);
+        continue;
+      }
+      // Invoice pipeline needs ShopMonkey for RO matching. Not connected → leave
+      // the message unread (it processes once the location is wired up) and say so.
+      if (!canInvoices) {
+        results.push({ from: msg.from, file: (msg.attachments[0] || {}).filename, type: 'skipped', reason: 'invoice processing needs ShopMonkey — location not connected yet' });
         continue;
       }
       for (const att of msg.attachments) {
