@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
+import Icon from '../components/Icon';
 
 const REFRESH_MS = 60 * 1000;          // DB-only server-side — cheap to poll, and the
                                        // live clock chips need to track the bay closely
@@ -42,6 +43,15 @@ export default function Display() {
   const [stale, setStale] = useState(false);       // refresh failing — keep last numbers, say so
   const [shift, setShift] = useState(0);           // burn-in guard: tiny layout nudge
   const [nowTick, setNowTick] = useState(() => Date.now());  // clock for night mode
+  // Per-board light/dark. The board renders outside Layout, so it stamps the
+  // theme itself; its own localStorage key means the TV's choice never fights
+  // the dashboard's theme on the same device.
+  const themeKey = `display_theme_${locationId}`;
+  const [boardTheme, setBoardTheme] = useState(() => localStorage.getItem(themeKey) || 'dark');
+  useEffect(() => {
+    document.documentElement.dataset.theme = boardTheme;
+    localStorage.setItem(themeKey, boardTheme);
+  }, [boardTheme, themeKey]);
   const [celebrate, setCelebrate] = useState(false);         // one-time target-hit takeover
   const [reviewBump, setReviewBump] = useState(false);       // "+1 review today" pulse
   const timer = useRef(null);
@@ -175,10 +185,21 @@ export default function Display() {
     return () => { cancelled = true; clearTimeout(t); };
   }, [posters.length]);
 
+  // ☀/🌙 switch — big enough to hit on a TV touchscreen, quiet enough to ignore.
+  const themeToggle = (
+    <button onClick={() => setBoardTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+      title={boardTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      aria-label="Toggle light/dark mode"
+      style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', lineHeight: 1.3 }}>
+      <Icon name={boardTheme === 'dark' ? 'sun' : 'moon'} size={16} style={{ verticalAlign: 'middle' }} />
+    </button>
+  );
+
   // PIN entry screen
   if (!entered) {
     return (
       <div style={wrap}>
+        <div style={{ position: 'fixed', top: '18px', right: '18px' }}>{themeToggle}</div>
         <form onSubmit={e => { e.preventDefault(); if (pin) setEntered(true); }} style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--accent)', letterSpacing: '-1px', marginBottom: '6px' }}>OPS DISPLAY</div>
           <div style={{ color: 'var(--text3)', fontSize: '14px', marginBottom: '24px' }}>Enter the display PIN for this location</div>
@@ -217,6 +238,7 @@ export default function Display() {
   if (night && !celebrate) {
     return (
       <div style={{ ...wrap, justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: '18px', right: '18px' }}>{themeToggle}</div>
         <div style={{ textAlign: 'center', ...nudge }}>
           <div style={{ fontSize: '34px', fontWeight: 800, color: 'var(--accent)', letterSpacing: '-1px' }}>OPS</div>
           <div style={{ fontFamily: 'var(--font-disp)', fontSize: '26px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text2)', marginTop: '6px' }}>{data.location.name}</div>
@@ -284,15 +306,18 @@ export default function Display() {
         </div>
         {/* Honest freshness: if refresh is failing, the numbers stay up but the
             header says so — old data must never impersonate live data. */}
-        {stale ? (
-          <div style={{ fontSize: '13px', color: 'var(--warning)', fontWeight: 700 }}>
-            ⚠ Last updated {updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : '—'} — reconnecting…
-          </div>
-        ) : (
-          <div style={{ fontSize: '13px', color: 'var(--text3)' }}>
-            {loading ? 'Refreshing…' : `Updated ${updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : ''}`} · auto-refresh 1 min
-          </div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          {stale ? (
+            <div style={{ fontSize: '13px', color: 'var(--warning)', fontWeight: 700 }}>
+              ⚠ Last updated {updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : '—'} — reconnecting…
+            </div>
+          ) : (
+            <div style={{ fontSize: '13px', color: 'var(--text3)' }}>
+              {loading ? 'Refreshing…' : `Updated ${updatedAt ? updatedAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : ''}`} · auto-refresh 1 min
+            </div>
+          )}
+          {themeToggle}
+        </div>
       </div>
 
       {/* Text notices — slim banner above the numbers; posters get their own
