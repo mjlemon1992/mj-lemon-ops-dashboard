@@ -118,17 +118,24 @@ export default function Home() {
   const _pphVals = metricList.map(m => num(m.pph)).filter(v => v > 0);
   const groupPPH = _pphVals.length ? Math.round(_pphVals.reduce((a, b) => a + b, 0) / _pphVals.length) : 0;
   const _effList = activeLocations.map(l => teff[l.id]).filter(Boolean);
+  // Techs hidden on the Technicians page must drop off every efficiency surface,
+  // not just that page — same key (tech_id, else name) the Performance board uses.
+  const _visTechs = (d) => {
+    const h = new Set(((d && d.hidden) || []).map(x => x.tech_id || x.tech_name));
+    return ((d && d.technicians) || []).filter(t => !h.has(t.tech_id || t.tech_name));
+  };
   const _locEff = (lid) => {
-    const d = teff[lid];
-    if (!d || !d.technicians) return null;
-    const w = d.technicians.reduce((a, t) => a + num(t.hours_worked), 0);
-    const so = d.technicians.reduce((a, t) => a + num(t.hours_sold), 0);
+    const techs = _visTechs(teff[lid]);
+    if (!techs.length) return null;
+    const w = techs.reduce((a, t) => a + num(t.hours_worked), 0);
+    const so = techs.reduce((a, t) => a + num(t.hours_sold), 0);
     return w > 0 ? Math.round((so / w) * 100) : null;
   };
   const _effVals = _effList
     .map(d => {
-      const w = (d.technicians || []).reduce((a, t) => a + num(t.hours_worked), 0);
-      const so = (d.technicians || []).reduce((a, t) => a + num(t.hours_sold), 0);
+      const techs = _visTechs(d);
+      const w = techs.reduce((a, t) => a + num(t.hours_worked), 0);
+      const so = techs.reduce((a, t) => a + num(t.hours_sold), 0);
       return w > 0 ? (so / w) * 100 : null;
     })
     .filter(v => v != null);
@@ -271,7 +278,7 @@ export default function Home() {
         const onCount = crew.filter(p => p.status !== 'off' && !offToday.has(p.id)).length;
         const fmtSince = t => t ? new Date(t).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }).replace(/\s?[ap]\.?m\.?/i, '') : '';
         const breakMins = t => Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000));
-        const effRows = activeLocations.flatMap(l => ((teff[l.id] || {}).technicians || []))
+        const effRows = activeLocations.flatMap(l => _visTechs(teff[l.id]))
           .map(t => { const w = num(t.hours_worked), so = num(t.hours_sold); return w > 0 ? { name: t.tech_name, eff: Math.round((so / w) * 100) } : null; })
           .filter(Boolean);
         // Build the 14-day strip from the SHOP's calendar day (noon-UTC stepping
