@@ -48,15 +48,18 @@ function TechniciansView({ locId }) {
 
   useEffect(() => {
     if (!locId) return;
+    let cancelled = false;
     setLoading(true); setError(null);
     api(`/technicians/${locId}?period=${period}`).then(d => {
+        if (cancelled) return;
         setData(d);
         const w = {};
         (d.technicians || []).forEach(t => { if (t.hours_per_week != null) w[t.tech_id] = String(t.hours_per_week); });
         setWeekly(w);
         setLoading(false);
       })
-      .catch(err => { setError(err.message || 'Could not load technicians'); setLoading(false); });
+      .catch(err => { if (!cancelled) { setError(err.message || 'Could not load technicians'); setLoading(false); } });
+    return () => { cancelled = true; };
   }, [locId]); // eslint-disable-line
 
   const allTechs = (data && data.technicians) || [];

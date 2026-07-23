@@ -10,9 +10,14 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (token) {
       fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.ok ? r.json() : null)
+        .then(r => {
+          // Expired/invalid token → drop it so the app shows Login, not a
+          // logged-in shell with no data.
+          if (r.status === 401 || r.status === 403) { localStorage.removeItem('ops_token'); setToken(null); return null; }
+          return r.ok ? r.json() : null;
+        })
         .then(u => { setUser(u); setLoading(false); })
-        .catch(() => { setToken(null); localStorage.removeItem('ops_token'); setLoading(false); });
+        .catch(() => { setLoading(false); });
     } else {
       setLoading(false);
     }
@@ -43,8 +48,18 @@ export function AuthProvider({ children }) {
       ...options,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers }
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Request failed');
+    // Session expired mid-use → clear and force a clean re-login instead of
+    // every call failing behind a still-"logged-in" shell.
+    if (res.status === 401) {
+      localStorage.removeItem('ops_token'); setToken(null); setUser(null);
+      throw new Error('Your session expired — please sign in again.');
+    }
+    // Read the body once, tolerating an empty body (204) and non-JSON (a Railway
+    // 502/504 returns an HTML page — never surface "Unexpected token '<'").
+    const text = await res.text();
+    let data = null;
+    if (text) { try { data = JSON.parse(text); } catch (e) { data = null; } }
+    if (!res.ok) throw new Error((data && data.error) || (res.status >= 500 ? 'Service temporarily unavailable — try again in a moment.' : `Request failed (${res.status})`));
     return data;
   }, [token]);
 

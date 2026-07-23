@@ -20,17 +20,20 @@ function PerformanceView({ locId }) {
 
   useEffect(() => {
     if (!locId) return;
+    let cancelled = false;   // a slow response from the previous shop must not overwrite the new one
     setLoading(true);
     Promise.all([
       api(`/metrics/${locId}/summary`).catch(() => null),
       api(`/technicians/${locId}`).catch(() => null),
       api(`/targets/${locId}/${year}`).catch(() => []),
     ]).then(([m, t, tg]) => {
+      if (cancelled) return;
       setMetrics(m);
       setTechData(t);
       setTarget(Array.isArray(tg) ? (tg.find(r => r.month === month) || null) : null);
       setLoading(false);
     });
+    return () => { cancelled = true; };
   }, [locId]); // eslint-disable-line
 
   const loc = locations.find(l => l.id === locId);

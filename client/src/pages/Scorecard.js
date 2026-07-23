@@ -37,16 +37,19 @@ function ScorecardView({ locId }) {
     setLoading(true); setPnlErr(false);
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
     const end = new Date().toISOString().slice(0, 10);
+    let cancelled = false;
     Promise.all([
       api(`/metrics/${locId}/summary`).catch(() => null),
       api(`/targets/${locId}/${year}`).catch(() => []),
       api(`/finance/${locId}/pnl?start=${start}&end=${end}`).catch(() => { setPnlErr(true); return null; }),
     ]).then(([m, tg, p]) => {
+      if (cancelled) return;
       setMetrics(m);
       setTarget(Array.isArray(tg) ? (tg.find(r => r.month === month) || null) : null);
       setPnl(p);
       setLoading(false);
     });
+    return () => { cancelled = true; };
   }, [locId, api, year, month]);
 
   const loc = locations.find(l => l.id === locId);

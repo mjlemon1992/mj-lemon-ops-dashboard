@@ -62,7 +62,7 @@ export default function Targets() {
       await api(`/targets/${selectedLoc}/${year}/bulk`, { method: 'POST', body: JSON.stringify({ targets: targets.map((t, i) => ({ ...t, month: i + 1 })) }) });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch {}
+    } catch (e) { showToast((e && e.message) || 'Could not save targets', 'error'); }
     setSaving(false);
   };
 

@@ -49,10 +49,12 @@ function BonusView({ locId }) {
   const [pullNote, setPullNote] = useState(null);
   const [refreshed, setRefreshed] = useState(false);
 
+  const loadSeq = React.useRef(0);
   const load = useCallback((m) => {
+    const seq = ++loadSeq.current;   // ignore a stale response after switching shop/month
     api(`/bonus/${locId}/overview${m ? `?month=${m}` : ''}`)
-      .then((d) => { setData(d); setMonth(d.month); setErr(null); setNeedsConfirm(null); setMissing(null); })
-      .catch((e) => setErr(e.message));
+      .then((d) => { if (seq !== loadSeq.current) return; setData(d); setMonth(d.month); setErr(null); setNeedsConfirm(null); setMissing(null); })
+      .catch((e) => { if (seq === loadSeq.current) setErr(e.message); });
   }, [api, locId]);
   useEffect(() => { load(null); }, [load]);
 
@@ -201,7 +203,7 @@ function BonusView({ locId }) {
     catch (e) { setErr(e.message); }
   };
 
-  const fmtVersion = versions.find((v) => run && v.id === run.formula_version_id) || formula;
+  const fmtVersion = (versions || []).find((v) => run && v.id === run.formula_version_id) || formula;
 
   return (
     <div>
@@ -248,7 +250,7 @@ function BonusView({ locId }) {
               <div className="metric-label">Prior-month revenue · {run.revenue_source}</div>
               <div className="metric-value">{money0(run.revenue)}</div>
               <div className={`metric-sub ${run.tier !== 'none' ? 'good' : 'warn'}`}>
-                {run.tier !== 'none' ? '✓ Target met' : '✗ Target missed'} — {Math.round((run.revenue / run.target) * 1000) / 10}% of {money0(run.target)}
+                {run.tier !== 'none' ? '✓ Target met' : '✗ Target missed'} — {run.target > 0 ? Math.round((run.revenue / run.target) * 1000) / 10 : 0}% of {money0(run.target)}
               </div>
             </div>
             <div className="metric-card">

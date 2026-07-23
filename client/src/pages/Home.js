@@ -217,8 +217,9 @@ export default function Home() {
         </div>
       )}
 
-      {/* Foreman hero band — the demo layout on real data */}
-      {gRevTarget > 0 && (() => {
+      {/* Foreman hero band — the demo layout on real data. Not for advisors:
+          their nav has no money pages and the server strips finance fields. */}
+      {!isAdvisor && gRevTarget > 0 && (() => {
         const frac = workingPaceFrac(_groupProv) || 0;
         const delta = groupRevenue - gRevTarget * frac;
         const daysLeft = workingDaysLeftInMonth(_groupProv);
