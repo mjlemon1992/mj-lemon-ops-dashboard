@@ -5,6 +5,7 @@ import { useLocations } from '../context/LocationContext';
 import ApprovalQueue from '../components/ApprovalQueue';
 import ShotsList from '../components/ShotsList';
 import ReviewsScorecard from '../components/ReviewsScorecard';
+import ReviewRequestsCard from '../components/ReviewRequestsCard';
 
 const fmt = n => (n == null ? '—' : Number(n).toLocaleString('en-CA'));
 const monthLabel = (d) => {
@@ -211,6 +212,10 @@ function MarketingView({ locId }) {
 
           {/* Live Google review scorecard (self-hides until configured) */}
           <ReviewsScorecard locId={locId} />
+
+          {/* Post-service review request texts (owner/partner tool; server
+              gate matches, so the card self-hides for managers) */}
+          {!isManager && <ReviewRequestsCard locId={locId} />}
         </div>
       </div>
 

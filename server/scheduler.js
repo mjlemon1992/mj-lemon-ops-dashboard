@@ -21,7 +21,9 @@ async function runOnce(pool, baseUrl, secret) {
     return;
   }
   for (const loc of locs) {
-    for (const path of [`/api/sync/${loc.id}/refresh`, `/api/sync/${loc.id}/refresh-tech`]) {
+    // review-requests: no-ops in seconds unless the location's flag is on AND
+    // the local-daytime send window is open (the route gates both).
+    for (const path of [`/api/sync/${loc.id}/refresh`, `/api/sync/${loc.id}/refresh-tech`, `/api/marketing/review-requests/${loc.id}/run`]) {
       try {
         const res = await fetch(`${baseUrl}${path}`, {
           method: 'POST',
