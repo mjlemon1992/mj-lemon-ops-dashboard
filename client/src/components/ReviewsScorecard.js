@@ -3,11 +3,15 @@ import { useAuth } from '../context/AuthContext';
 
 // Live Google review scorecard, OPS-styled. Shows the honest aggregate
 // (rating, count, monthly delta), FEATURES only 4★+ quotes, and surfaces
-// recent sub-4★ reviews in a "Needs response" strip. Every review gets an
-// AI "Draft reply" (Claude, server-side): the draft lands in an editable
-// box with Copy + a Google link — pasting is deliberately the human's job,
-// nothing is ever posted from here (the in-house answer to Shopmonkey CRM's
-// auto-posted AI replies). Self-hides if the endpoint isn't configured.
+// recent sub-4★ reviews in a "Needs response" strip.
+//
+// Replies: the server-side watcher AUTO-DRAFTS a reply when a new review
+// lands (and pushes a notification), so watched reviews arrive here with
+// the draft already written — editable box + Copy + Google link + Mark
+// posted. Unwatched/older reviews keep the on-demand "Draft reply" button.
+// Pasting is deliberately the human's job — nothing is ever posted from
+// here (future Google Business API auto-post slots in at "Mark posted").
+// Self-hides if the endpoint isn't configured.
 const MONO = "ui-monospace, 'SF Mono', Menlo, monospace";
 
 const Stars = ({ rating, size = 14 }) => {
@@ -19,11 +23,12 @@ const Stars = ({ rating, size = 14 }) => {
   );
 };
 
-// Per-review reply drafter. Collapsed to a small action; expands to an
-// editable draft + Copy + open-Google once generated.
-function ReplyDraft({ locId, review }) {
+// Per-review reply flow. `stored` is the watcher's row for this review
+// (auto-draft + lifecycle status), when one exists.
+function ReplyDraft({ locId, review, stored }) {
   const { api } = useAuth();
-  const [draft, setDraft] = useState(null);
+  const [draft, setDraft] = useState(stored && stored.status !== 'dismissed' ? stored.draft : null);
+  const [status, setStatus] = useState((stored && stored.status) || null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [err, setErr] = useState(null);
@@ -32,7 +37,10 @@ function ReplyDraft({ locId, review }) {
     setBusy(true); setErr(null);
     api(`/marketing/reviews/${locId}/draft-reply`, {
       method: 'POST',
-      body: JSON.stringify({ author: review.author, rating: review.rating, text: review.text }),
+      body: JSON.stringify({
+        author: review.author, rating: review.rating, text: review.text,
+        ...(stored ? { review_time: stored.review_time } : {}),
+      }),
     })
       .then((d) => setDraft((d && d.draft) || ''))
       .catch((e) => setErr(String(e.message || e)))
@@ -43,6 +51,25 @@ function ReplyDraft({ locId, review }) {
     if (navigator.clipboard) navigator.clipboard.writeText(draft || '');
     setCopied(true); setTimeout(() => setCopied(false), 1600);
   };
+
+  const markPosted = () => {
+    setBusy(true); setErr(null);
+    api(`/marketing/reviews/${locId}/reply-status`, {
+      method: 'POST',
+      body: JSON.stringify({ review_time: stored.review_time, author: review.author, status: 'posted' }),
+    })
+      .then(() => setStatus('posted'))
+      .catch((e) => setErr(String(e.message || e)))
+      .finally(() => setBusy(false));
+  };
+
+  if (status === 'posted') {
+    return (
+      <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--success)' }}>
+        Replied ✓ — posted on Google
+      </div>
+    );
+  }
 
   if (draft == null) {
     return (
@@ -56,6 +83,11 @@ function ReplyDraft({ locId, review }) {
   }
   return (
     <div style={{ marginTop: '7px' }}>
+      {stored && stored.draft && (
+        <div style={{ fontFamily: MONO, fontSize: '9.5px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text3)', marginBottom: '3px' }}>
+          Auto-drafted
+        </div>
+      )}
       <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={3}
         style={{ width: '100%', fontSize: '12px', lineHeight: 1.5, padding: '7px 9px', boxSizing: 'border-box' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginTop: '5px', flexWrap: 'wrap' }}>
@@ -66,10 +98,17 @@ function ReplyDraft({ locId, review }) {
           style={{ fontSize: '11px', color: 'var(--accent)' }}>
           Paste on Google ↗
         </a>
+        {stored && (
+          <button onClick={markPosted} disabled={busy} title="I've pasted this reply on Google"
+            style={{ fontSize: '11px', padding: '3px 9px' }}>
+            Mark posted
+          </button>
+        )}
         <button onClick={generate} disabled={busy} style={{ fontSize: '11px', padding: '3px 9px', marginLeft: 'auto' }}>
           {busy ? '…' : 'Redraft'}
         </button>
       </div>
+      {err && <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--danger)' }}>{err}</div>}
     </div>
   );
 }
@@ -91,9 +130,11 @@ export default function ReviewsScorecard({ locId }) {
 
   if (hidden || !data) return null;
 
-  const { rating, total, delta, reviews, demo, low_recent, attention } = data;
+  const { rating, total, delta, reviews, demo, low_recent, attention, drafts } = data;
   const featured = (reviews || []).slice(0, 2);
   const lows = (attention || []).slice(0, 2);
+  const storedFor = (rv) => (drafts || []).find(d =>
+    Number(d.review_time) === Number(rv.time) && (d.author || '') === (rv.author || ''));
 
   return (
     <div className="card" style={{ borderLeft: '3px solid var(--accent)' }}>
@@ -119,7 +160,7 @@ export default function ReviewsScorecard({ locId }) {
       </div>
 
       {featured.map((rv, i) => (
-        <div key={i} style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--bg3)', borderRadius: '9px' }}>
+        <div key={rv.time || i} style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--bg3)', borderRadius: '9px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '4px' }}>
             <Stars rating={rv.rating} size={11} />
             <span style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
@@ -129,7 +170,7 @@ export default function ReviewsScorecard({ locId }) {
           <div style={{ fontSize: '12.5px', color: 'var(--text2)', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             {rv.text}
           </div>
-          {!demo && <ReplyDraft locId={locId} review={rv} />}
+          {!demo && <ReplyDraft locId={locId} review={rv} stored={storedFor(rv)} />}
         </div>
       ))}
 
@@ -141,7 +182,7 @@ export default function ReviewsScorecard({ locId }) {
             Needs response
           </div>
           {lows.map((rv, i) => (
-            <div key={i} style={{ marginTop: i ? '8px' : 0, padding: '10px 12px', background: 'var(--bg3)', borderRadius: '9px', borderLeft: '2px solid var(--warning)' }}>
+            <div key={rv.time || i} style={{ marginTop: i ? '8px' : 0, padding: '10px 12px', background: 'var(--bg3)', borderRadius: '9px', borderLeft: '2px solid var(--warning)' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '4px' }}>
                 <Stars rating={rv.rating} size={11} />
                 <span style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
@@ -151,7 +192,7 @@ export default function ReviewsScorecard({ locId }) {
               <div style={{ fontSize: '12.5px', color: 'var(--text2)', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                 {rv.text || '(star rating only, no text)'}
               </div>
-              <ReplyDraft locId={locId} review={rv} />
+              <ReplyDraft locId={locId} review={rv} stored={storedFor(rv)} />
             </div>
           ))}
         </div>
