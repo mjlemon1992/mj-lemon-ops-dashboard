@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { authenticateToken, requireOwner } = require('../middleware/auth');
+const { authenticateToken, requireOwner, invalidateUserCache } = require('../middleware/auth');
 
 module.exports = (pool) => {
   const router = express.Router();
@@ -68,11 +68,22 @@ module.exports = (pool) => {
         const last = await lastActiveOwner(req.params.id);
         if (last) return res.status(400).json({ error: 'This is the last active owner — promote someone else to owner first.' });
       }
+      // Bump token_version when a PERMISSION-affecting field changes (role,
+      // location, active) so that user's existing 7-day tokens are revoked at
+      // once. A name-only edit doesn't log them out.
+      const { rows: prevRows } = await pool.query('SELECT role, location_id, active FROM users WHERE id=$1', [req.params.id]);
+      if (!prevRows.length) return res.status(404).json({ error: 'User not found' });
+      const prev = prevRows[0];
+      const permChanged = (role != null && role !== prev.role)
+        || ((location_id || null) !== (prev.location_id || null))
+        || (active != null && active !== prev.active);
       const result = await pool.query(
-        'UPDATE users SET name=$1, role=$2, location_id=$3, active=$4, updated_at=NOW() WHERE id=$5 RETURNING id, email, name, role, location_id, active',
+        `UPDATE users SET name=$1, role=$2, location_id=$3, active=$4, updated_at=NOW()${permChanged ? ', token_version = token_version + 1' : ''}
+           WHERE id=$5 RETURNING id, email, name, role, location_id, active`,
         [name, role, location_id || null, active, req.params.id]
       );
       if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
+      if (permChanged) invalidateUserCache(req.params.id);
       res.json(result.rows[0]);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -88,6 +99,7 @@ module.exports = (pool) => {
       if (last === null) return res.status(404).json({ error: 'User not found' });
       if (last) return res.status(400).json({ error: 'This is the last active owner — promote someone else to owner first.' });
       await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+      invalidateUserCache(req.params.id);   // kill their sessions immediately
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -99,7 +111,10 @@ module.exports = (pool) => {
     if (!newPassword) return res.status(400).json({ error: 'newPassword required' });
     try {
       const hash = await bcrypt.hash(newPassword, 12);
-      await pool.query('UPDATE users SET password_hash=$1, updated_at=NOW() WHERE id=$2', [hash, req.params.id]);
+      // Bump token_version so a password reset also logs out any existing sessions
+      // (the whole point of resetting a possibly-compromised password).
+      await pool.query('UPDATE users SET password_hash=$1, token_version = token_version + 1, updated_at=NOW() WHERE id=$2', [hash, req.params.id]);
+      invalidateUserCache(req.params.id);
       res.json({ message: 'Password reset' });
     } catch (err) {
       res.status(500).json({ error: err.message });

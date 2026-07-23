@@ -12,6 +12,13 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
+// Wire the pool into the auth middleware for live session revocation, and make
+// sure the token_version column exists (bumped on role/location/password change).
+const { setAuthPool } = require('./middleware/auth');
+setAuthPool(pool);
+pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 1')
+  .catch((e) => console.error('token_version column ensure failed:', e.message));
+
 app.use(cors({ origin: process.env.CLIENT_URL || '*' }));
 // Stash the raw body alongside the parsed JSON so the Slack events endpoint can
 // verify request signatures (Slack signs the raw bytes, not the parsed object).

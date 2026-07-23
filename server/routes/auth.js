@@ -40,7 +40,7 @@ module.exports = (pool) => {
       if (!user || !valid) { bumpFail(); return res.status(401).json({ error: 'Invalid credentials' }); }
       loginFails.delete(lk);
       const token = jwt.sign(
-        { id: user.id, email: user.email, role: user.role, name: user.name, location_id: user.location_id },
+        { id: user.id, email: user.email, role: user.role, name: user.name, location_id: user.location_id, tv: Number(user.token_version) || 1 },
         JWT_SECRET,
         { expiresIn: '7d' }
       );

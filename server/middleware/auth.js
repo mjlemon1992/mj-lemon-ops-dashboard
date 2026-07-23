@@ -36,23 +36,55 @@ const ADVISOR_ALLOW = [
   /^\/api\/push\//,                        // notification subscriptions (per-device)
 ];
 
-function authenticateToken(req, res, next) {
+// LIVE SESSION REVOCATION. A JWT lives 7 days, so without this a deactivated,
+// deleted, demoted, relocated, or password-reset user would keep full old access
+// until it expired. index.js wires the pool in via setAuthPool(); each request
+// checks the user's current {active, token_version} against a 30s cache (so it's
+// ~1 cheap query per user per 30s, not per request), and the mutating routes bust
+// that user's cache for instant effect. Fails OPEN on a DB error — a transient
+// query blip must never lock the whole shop out.
+let _authPool = null;
+function setAuthPool(p) { _authPool = p; }
+const _userStateCache = new Map();   // userId -> { active, tv, at, missing }
+const USER_STATE_TTL = 30000;
+function invalidateUserCache(userId) { if (userId) _userStateCache.delete(String(userId)); }
+async function userState(userId) {
+  const key = String(userId);
+  const c = _userStateCache.get(key);
+  if (c && Date.now() - c.at < USER_STATE_TTL) return c;
+  const { rows } = await _authPool.query('SELECT active, token_version FROM users WHERE id=$1', [userId]);
+  const st = rows.length
+    ? { active: rows[0].active !== false, tv: Number(rows[0].token_version) || 1, at: Date.now(), missing: false }
+    : { active: false, tv: 0, at: Date.now(), missing: true };
+  _userStateCache.set(key, st);
+  return st;
+}
+
+async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Access token required' });
-  try {
-    const user = jwt.verify(token, JWT_SECRET);
-    req.user = user;
-    if (user.role === 'advisor') {
-      const path = (req.originalUrl || '').split('?')[0];
-      if (!ADVISOR_ALLOW.some((rx) => rx.test(path))) {
-        return res.status(403).json({ error: 'Not available to the advisor role' });
-      }
-    }
-    next();
-  } catch {
-    return res.status(403).json({ error: 'Invalid or expired token' });
+  let user;
+  try { user = jwt.verify(token, JWT_SECRET); }
+  catch { return res.status(403).json({ error: 'Invalid or expired token' }); }
+  req.user = user;
+  // Revocation gate. 401 (not 403) so the client clears the token and returns to
+  // login. Grandfathers pre-upgrade tokens (no `tv` claim) via the active check —
+  // a fired user is still killed instantly by active=false regardless of tv.
+  if (user.id && _authPool) {
+    try {
+      const st = await userState(user.id);
+      if (st.missing || !st.active) return res.status(401).json({ error: 'This account is no longer active — please sign in again.' });
+      if (user.tv != null && Number(user.tv) !== st.tv) return res.status(401).json({ error: 'Your session was reset — please sign in again.' });
+    } catch (e) { /* transient DB error: fail open, don't lock the shop out */ }
   }
+  if (user.role === 'advisor') {
+    const path = (req.originalUrl || '').split('?')[0];
+    if (!ADVISOR_ALLOW.some((rx) => rx.test(path))) {
+      return res.status(403).json({ error: 'Not available to the advisor role' });
+    }
+  }
+  next();
 }
 
 // Machine-to-machine auth: a valid X-Sync-Key header matching SYNC_SECRET
@@ -97,4 +129,4 @@ function canAccessLocation(user, locationId) {
   return ['manager', 'advisor'].includes(user.role) && !!user.location_id && user.location_id === locationId;
 }
 
-module.exports = { authenticateToken, syncAuth, requireOwner, requireOwnerOrPartner, requireRole, canAccessLocation, JWT_SECRET };
+module.exports = { authenticateToken, syncAuth, requireOwner, requireOwnerOrPartner, requireRole, canAccessLocation, setAuthPool, invalidateUserCache, JWT_SECRET };
