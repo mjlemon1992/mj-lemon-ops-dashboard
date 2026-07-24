@@ -58,7 +58,7 @@ export function FeedbackHost() {
   return (
     <>
       {/* Toast stack */}
-      <div style={{ position: 'fixed', bottom: 18, right: 18, zIndex: 200, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+      <div className="ops-toast-host" style={{ position: 'fixed', bottom: 18, right: 18, zIndex: 200, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
         {toasts.map((t) => (
           <div key={t.id} className={`ops-toast ${t.kind}`}>{t.message}</div>
         ))}

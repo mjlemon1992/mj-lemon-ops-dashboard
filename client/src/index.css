@@ -359,3 +359,8 @@ textarea:focus-visible {
 @keyframes inbox-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes inbox-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .inbox-scrim, .inbox-panel { animation: none; } }
+
+/* Toasts clear the Phase-3 mobile bottom tab bar instead of covering it. */
+@media (max-width: 768px) {
+  .ops-toast-host { bottom: calc(74px + env(safe-area-inset-bottom)) !important; }
+}

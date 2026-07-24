@@ -6,35 +6,30 @@ import { parseAlerts, alertId } from '../utils/alerts';
 import Icon from './Icon';
 import { FeedbackHost, showToast } from './Feedback';
 import Inbox from './Inbox';
+import { NUMBERS_TABS, MONEY_TABS, CREW_TABS, SHOP_TABS, tabRoles } from './ia';
 import { pushSupported, pushState, enablePush, disablePush, playChime } from '../utils/push';
 
 // Grouped nav (2026-07-17 refresh): same items, same roles — organized into five
 // sections so the sidebar reads in blocks instead of a flat list. Every item
 // carries its section so labels survive role filtering (showSection compares
 // against the previous VISIBLE item).
+// Phase 3 IA: six destinations + Atlas, with Admin pinned below. Destinations
+// are prefixes — /crew/bonus lights up Crew. Old URLs all redirect (App.js).
 const NAV = [
-  { path: '/', label: 'Home', icon: 'home', section: 'Overview', roles: ['owner', 'partner', 'manager', 'advisor'] },
-  { path: '/scorecard', label: 'Scorecard', icon: 'chart', section: 'Overview', roles: ['owner', 'partner'] },
-  { path: '/performance', label: 'Performance', icon: 'gauge', section: 'Overview' },
-  { path: '/alerts', label: 'Alerts', icon: 'bell', section: 'Overview', roles: ['owner', 'partner', 'manager', 'advisor'] },
-  { path: '/technicians', label: 'Technicians', icon: 'wrench', section: 'Crew' },
-  { path: '/time-clock', label: 'Time Clock', icon: 'clock', section: 'Crew', roles: ['owner', 'partner', 'manager'] },
-  { path: '/bonus', label: 'Bonus', icon: 'award', section: 'Crew', roles: ['owner', 'partner', 'manager'] },
-  { path: '/fuel-card', label: 'Fuel Card', icon: 'fuel', section: 'Crew', roles: ['owner', 'partner', 'manager'] },
-  { path: '/comebacks', label: 'Comebacks', icon: 'undo', section: 'Shop', roles: ['owner', 'partner', 'manager', 'advisor'] },
-  { path: '/wip', label: 'Committed WIP', icon: 'clipboard', section: 'Shop', roles: ['owner', 'partner', 'manager'] },
-  { path: '/notices', label: 'Shop Notices', icon: 'megaphone', section: 'Shop', roles: ['owner', 'partner', 'manager', 'advisor'] },
-  // The service advisor's whole dashboard: the re-order board, nothing money.
-  { path: '/reorders', label: 'Re-orders', icon: 'clipboard', section: 'Shop', roles: ['advisor'] },
-  { path: '/finance', label: 'Finance', icon: 'dollar', section: 'Money', roles: ['owner', 'partner', 'manager'] },
-  { path: '/parts', label: 'Parts', icon: 'wrench', section: 'Money', roles: ['owner', 'partner'] },
-  { path: '/reports', label: 'Reports', icon: 'file', section: 'Money', roles: ['owner', 'partner', 'manager'] },
-  { path: '/marketing', label: 'Marketing', icon: 'spark', section: 'Marketing', roles: ['owner', 'partner', 'manager'] },
-  { path: '/locations', label: 'Locations', icon: 'pin', section: 'Settings', roles: ['owner'] },
-  { path: '/targets', label: 'Targets', icon: 'target', section: 'Settings', roles: ['owner', 'partner', 'manager'] },
-  { path: '/users', label: 'Users', icon: 'users', section: 'Settings', roles: ['owner'] },
-  { path: '/chief-of-staff', label: 'Automations', icon: 'gear', section: 'Settings', roles: ['owner', 'partner'] },
+  { path: '/', label: 'Today', icon: 'home', roles: ['owner', 'partner', 'manager', 'advisor'] },
+  { path: '/numbers', label: 'Numbers', icon: 'chart', roles: tabRoles(NUMBERS_TABS) },
+  { path: '/money', label: 'Money', icon: 'dollar', roles: tabRoles(MONEY_TABS) },
+  { path: '/crew', label: 'Crew', icon: 'users', roles: tabRoles(CREW_TABS) },
+  { path: '/shop', label: 'Shop', icon: 'wrench', roles: tabRoles(SHOP_TABS) },
+  { path: '/studio', label: 'Studio', icon: 'spark', roles: ['owner', 'partner', 'manager'] },
+  { path: '/atlas', label: 'Atlas', icon: 'gear', roles: ['owner', 'partner'] },
+  { path: '/alerts', label: 'Alert history', icon: 'bell', section: 'Admin', roles: ['owner', 'partner', 'manager', 'advisor'] },
+  { path: '/locations', label: 'Locations', icon: 'pin', section: 'Admin', roles: ['owner'] },
+  { path: '/users', label: 'Users', icon: 'key', section: 'Admin', roles: ['owner'] },
 ];
+// Bottom tab bar (phones): the destinations only — Admin lives in the ☰ drawer.
+const TAB_BAR = NAV.filter(n => !n.section);
+const navActive = (path, pathname) => path === '/' ? pathname === '/' : (pathname === path || pathname.startsWith(path + '/'));
 
 export default function Layout() {
   const { user, logout, api } = useAuth();
@@ -176,7 +171,9 @@ export default function Layout() {
     ? (n.roles || []).includes('advisor')
     : (!n.roles || n.roles.includes(user?.role))));
   const initials = user?.name ? user.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : 'U';
-  const go = (path) => { navigate(path); if (isMobile) setNavOpen(false); };
+  // Re-tapping where you already are must never reset the destination to its
+  // first tab (mid-workflow unmount = lost form state — verify finding).
+  const go = (path) => { if (!navActive(path, location.pathname)) navigate(path); if (isMobile) setNavOpen(false); };
 
   const sidebarStyle = {
     width: 220, flexShrink: 0, background: 'var(--bg2)', borderRight: '0.5px solid var(--border)',
@@ -232,7 +229,7 @@ export default function Layout() {
 
         <nav style={{ padding: '4px 8px', flex: 1, overflowY: 'auto' }}>
           {visibleNav.map((item, i) => {
-            const active = location.pathname === item.path;
+            const active = navActive(item.path, location.pathname);
             const prevItem = visibleNav[i - 1];
             const showSection = item.section && (!prevItem || prevItem.section !== item.section);
             return (
@@ -286,7 +283,7 @@ export default function Layout() {
               <button onClick={() => setNavOpen(true)} aria-label="Open menu" style={{ background: 'none', border: 'none', color: 'var(--text)', fontSize: 'var(--fz-d3)', cursor: 'pointer', padding: 0, lineHeight: 1, flexShrink: 0 }}>☰</button>
             )}
             <div style={{ fontFamily: 'var(--font-disp)', fontSize: isMobile ? '19px' : '22px', fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {visibleNav.find(n => n.path === location.pathname)?.label || 'Dashboard'}
+              {visibleNav.find(n => navActive(n.path, location.pathname))?.label || 'Dashboard'}
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, position: 'relative' }}>
@@ -318,12 +315,27 @@ export default function Layout() {
           </div>
         </div>
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 14px' : '20px 24px', minWidth: 0 }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 14px calc(74px + env(safe-area-inset-bottom))' : '20px 24px', minWidth: 0 }}>
             <Outlet />
           </div>
 
         </div>
       </div>
+      {isMobile && (
+        <nav aria-label="Destinations" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 40, display: 'flex', justifyContent: 'space-around', background: 'var(--bg2)', borderTop: '0.5px solid var(--border)', padding: '4px 2px calc(4px + env(safe-area-inset-bottom))' }}>
+          {TAB_BAR.filter(n => (n.roles || []).includes(user?.role)).map(item => {
+            const active = navActive(item.path, location.pathname);
+            return (
+              <button key={item.path} onClick={() => { if (!active) navigate(item.path); setNavOpen(false); }}
+                aria-current={active ? 'page' : undefined}
+                style={{ flex: 1, maxWidth: 88, minHeight: 48, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', background: 'none', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', color: active ? 'var(--accent)' : 'var(--text3)', fontSize: 'var(--fz-micro)', fontWeight: 600, letterSpacing: '0.02em', padding: '4px 2px' }}>
+                <Icon name={item.icon} size={18} />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+      )}
       <Inbox open={inboxOpen} onClose={() => { setInboxOpen(false); setUnseen(false); }} detail={d} api={api}
         onAction={loadAttention} onDismiss={dismissCard} multiLoc={locations.length > 1}
         alerts={visibleWatch}
