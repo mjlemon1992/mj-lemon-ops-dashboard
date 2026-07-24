@@ -953,7 +953,7 @@ function OffMonth({ offset, board, holidays }) {
   return (
     <div style={{ background: 'var(--bg2)', borderRadius: '16px', padding: '16px', width: '390px', border: '1px solid var(--border)' }}>
       <div style={{ fontFamily: 'var(--font-disp)', textTransform: 'uppercase', letterSpacing: '0.03em', fontWeight: 700, fontSize: '19px', color: 'var(--text)', marginBottom: '12px', textAlign: 'center' }}>{first.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' })}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '11px', fontWeight: 600, letterSpacing: '0.1em', textAlign: 'center', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, letterSpacing: '0.1em', textAlign: 'center', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid var(--border)' }}>
         {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <div key={i} style={{ color: i >= 5 ? 'var(--text3)' : 'var(--text2)' }}>{d}</div>)}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
@@ -1002,7 +1002,7 @@ function CalLegend() {
 }
 
 const kh = { fontFamily: 'var(--font-disp)', textTransform: 'uppercase', letterSpacing: '0.03em', fontWeight: 700 };
-const eyebrow = { fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '10px', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)' };
+const eyebrow = { fontFamily: 'var(--font-mono)', fontSize: '10px', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)' };
 const wrap = { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', background: 'var(--bg)', color: 'var(--text)' };
 const lbl = { display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: 'var(--text3)' };
 const inp = { fontSize: '17px', padding: '10px' };
