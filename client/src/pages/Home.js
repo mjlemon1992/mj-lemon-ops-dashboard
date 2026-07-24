@@ -234,7 +234,16 @@ export default function Home() {
               <div className="hero-stats">
                 <div>
                   <div className="hero-num">{groupRevenue > 0 ? money0(groupRevenue) : '—'}</div>
-                  <div className="hero-sub">revenue · <span style={{ color: delta >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>{delta >= 0 ? `ahead by ${money0(delta)}` : `behind by ${money0(-delta)}`}</span> · {groupRevenue >= gRevTarget ? `${money0(groupRevenue - gRevTarget)} over target` : `${money0(gRevTarget - groupRevenue)} to go`}</div>
+                  <div className="hero-sub" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span className={`badge ${delta >= 0 ? 'success' : 'warning'}`} style={{ fontWeight: 600 }}>
+                      {delta >= 0 ? `+${money0(delta)} ahead of pace` : `−${money0(-delta)} behind pace`}
+                    </span>
+                    <span>
+                      {groupRevenue >= gRevTarget
+                        ? `${money0(groupRevenue - gRevTarget)} over target`
+                        : `${money0(gRevTarget - groupRevenue)} to go${daysLeft > 0 ? ` — ${money0((gRevTarget - groupRevenue) / daysLeft)} per working day closes it` : ''}`}
+                    </span>
+                  </div>
                 </div>
                 <div>
                   <div className="hero-num">{groupCarCount > 0 ? groupCarCount : '—'}</div>

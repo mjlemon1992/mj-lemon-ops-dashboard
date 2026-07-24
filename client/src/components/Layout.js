@@ -8,6 +8,7 @@ import { FeedbackHost, showToast } from './Feedback';
 import Inbox from './Inbox';
 import { NUMBERS_TABS, MONEY_TABS, CREW_TABS, SHOP_TABS, tabRoles } from './ia';
 import { pushSupported, pushState, enablePush, disablePush, playChime } from '../utils/push';
+import { workingDaysLeftInMonth, shopNow } from '../utils/pace';
 
 // Grouped nav (2026-07-17 refresh): same items, same roles — organized into five
 // sections so the sidebar reads in blocks instead of a flat list. Every item
@@ -282,8 +283,16 @@ export default function Layout() {
             {isMobile && (
               <button onClick={() => setNavOpen(true)} aria-label="Open menu" style={{ background: 'none', border: 'none', color: 'var(--text)', fontSize: 'var(--fz-d3)', cursor: 'pointer', padding: 0, lineHeight: 1, flexShrink: 0 }}>☰</button>
             )}
-            <div style={{ fontFamily: 'var(--font-disp)', fontSize: isMobile ? '19px' : '22px', fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {visibleNav.find(n => navActive(n.path, location.pathname))?.label || 'Dashboard'}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: 'var(--font-disp)', fontSize: isMobile ? '19px' : '22px', fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {visibleNav.find(n => navActive(n.path, location.pathname))?.label || 'Dashboard'}
+              </div>
+              {!isMobile && (
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--fz-micro)', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text2)', marginTop: '1px' }}>
+                  {shopNow().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  {(() => { const prov = (locations.find(l2 => l2.id === selectedId)?.province || locations[0]?.province || 'ab').toLowerCase(); const d = workingDaysLeftInMonth(prov); return ` · ${d} working day${d === 1 ? '' : 's'} left`; })()}
+                </div>
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, position: 'relative' }}>
