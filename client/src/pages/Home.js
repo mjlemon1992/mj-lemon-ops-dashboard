@@ -194,9 +194,9 @@ export default function Home() {
     <div>
       {!isAdvisor && (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginBottom: '12px' }}>
-        {lastSync && <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Last synced {lastSync.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })}</span>}
+        {lastSync && <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>Last synced {lastSync.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })}</span>}
         <button onClick={handleRefresh} disabled={refreshing}
-          style={{ fontSize: '12px', fontWeight: '500', padding: '6px 14px', borderRadius: '6px', cursor: refreshing ? 'default' : 'pointer',
+          style={{ fontSize: 'var(--fz-label)', fontWeight: '500', padding: '6px 14px', borderRadius: 'var(--r-sm)', cursor: refreshing ? 'default' : 'pointer',
             background: refreshing ? 'var(--surface2)' : 'var(--accent)', color: refreshing ? 'var(--text3)' : '#fff', border: 'none' }}>
           {refreshing ? 'Syncing…' : 'Refresh now'}
         </button>
@@ -204,17 +204,17 @@ export default function Home() {
       )}
       {alertCount > 0 && (
         <div className="alert-strip">
-          <span style={{ fontSize: '14px', color: 'var(--warning)' }}>⚠</span>
+          <span style={{ fontSize: 'var(--fz-body)', color: 'var(--warning)' }}>⚠</span>
           {staleCount > 0 && (
-            <span style={{ fontSize: '12px', color: 'var(--warning)' }}>{staleCount} stale vehicle{staleCount > 1 ? 's' : ''} ({staleDays}+ days)</span>
+            <span style={{ fontSize: 'var(--fz-label)', color: 'var(--warning)' }}>{staleCount} stale vehicle{staleCount > 1 ? 's' : ''} ({staleDays}+ days)</span>
           )}
           {staleCount > 0 && marginCount > 0 && (
-            <span style={{ fontSize: '12px', color: 'var(--warning)' }}>·</span>
+            <span style={{ fontSize: 'var(--fz-label)', color: 'var(--warning)' }}>·</span>
           )}
           {marginCount > 0 && (
-            <span style={{ fontSize: '12px', color: 'var(--warning)' }}>{marginCount} job{marginCount > 1 ? 's' : ''} below {marginTarget}% parts margin</span>
+            <span style={{ fontSize: 'var(--fz-label)', color: 'var(--warning)' }}>{marginCount} job{marginCount > 1 ? 's' : ''} below {marginTarget}% parts margin</span>
           )}
-          <span style={{ fontSize: '12px', color: 'var(--warning)', cursor: 'pointer', marginLeft: 'auto', textDecoration: 'underline' }} onClick={() => navigate('/alerts')}>View all</span>
+          <span style={{ fontSize: 'var(--fz-label)', color: 'var(--warning)', cursor: 'pointer', marginLeft: 'auto', textDecoration: 'underline' }} onClick={() => navigate('/alerts')}>View all</span>
         </div>
       )}
 
@@ -451,12 +451,12 @@ export default function Home() {
           to click through to either). */}
       {!isAdvisor && (<>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-        <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>Locations</div>
+        <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)' }}>Locations</div>
       </div>
 
       {activeLocations.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)' }}>
-          <div style={{ fontSize: '14px', marginBottom: '8px' }}>No locations configured</div>
+          <div style={{ fontSize: 'var(--fz-body)', marginBottom: '8px' }}>No locations configured</div>
           {user?.role === 'owner' && (
             <button className="primary" onClick={() => navigate('/locations')} style={{ marginTop: '12px' }}>Add your first location</button>
           )}
@@ -471,8 +471,8 @@ export default function Home() {
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/performance'); } }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                 <div>
-                  <div style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text)' }}>{loc.name}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>{loc.city}, {loc.province}</div>
+                  <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)' }}>{loc.name}</div>
+                  <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>{loc.city}, {loc.province}</div>
                 </div>
                 <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--success)' }}></div>
               </div>
@@ -484,10 +484,10 @@ export default function Home() {
                   { label: 'Avg RO', val: m && num(m.avg_ro_value) > 0 ? money0(num(m.avg_ro_value)) : '—', sub: (m && num(m.avg_ro_value) > 0 && t && t.avg_ro_value) ? `${targetPct(num(m.avg_ro_value), num(t.avg_ro_value))}% of target` : 'per car', ok: (m && t && t.avg_ro_value) ? num(m.avg_ro_value) >= num(t.avg_ro_value) : true },
                 ].map(item => (
                   <div key={item.label}>
-                    <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '3px' }}>{item.label}</div>
-                    <div style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text)' }}>{item.val}</div>
-                    <div style={{ fontSize: '10px', color: item.ok ? 'var(--success)' : 'var(--warning)', marginTop: '2px' }}>{item.sub}</div>
-                    {item.sub2 && <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '1px' }}>{item.sub2}</div>}
+                    <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', marginBottom: '3px' }}>{item.label}</div>
+                    <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)' }}>{item.val}</div>
+                    <div style={{ fontSize: 'var(--fz-micro)', color: item.ok ? 'var(--success)' : 'var(--warning)', marginTop: '2px' }}>{item.sub}</div>
+                    {item.sub2 && <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', marginTop: '1px' }}>{item.sub2}</div>}
                   </div>
                 ))}
               </div>
@@ -500,8 +500,8 @@ export default function Home() {
         <div key={loc.id} className="card" style={{ marginBottom: '12px', opacity: 0.5 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <div style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text)' }}>{loc.name}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Not yet active</div>
+              <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)' }}>{loc.name}</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>Not yet active</div>
             </div>
             <span className="badge neutral">Inactive</span>
           </div>

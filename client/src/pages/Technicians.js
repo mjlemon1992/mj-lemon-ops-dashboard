@@ -40,7 +40,7 @@ function TechniciansView({ locId }) {
   const minsSince = (t) => Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000));
   const ClockChip = ({ c }) => {
     if (!c) return null;
-    const style = { fontSize: '10px', fontWeight: 600, padding: '2px 8px', borderRadius: '10px', marginLeft: '8px', whiteSpace: 'nowrap' };
+    const style = { fontSize: 'var(--fz-micro)', fontWeight: 600, padding: '2px 8px', borderRadius: 'var(--radius)', marginLeft: '8px', whiteSpace: 'nowrap' };
     if (c.status === 'on') return <span style={{ ...style, background: 'rgba(52,199,89,0.14)', color: 'var(--success)' }}>🟢 Clocked in {fmtT(c.clock_in)}</span>;
     if (c.status === 'break') return <span style={{ ...style, background: 'rgba(255,184,0,0.16)', color: 'var(--warning)' }}>🟡 On break {minsSince(c.break_started_at)} min</span>;
     return <span style={{ ...style, background: 'var(--bg3)', color: 'var(--text3)' }}>⚫ Clocked out</span>;
@@ -128,7 +128,7 @@ function TechniciansView({ locId }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
         <div>
-          <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '3px' }}>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '3px' }}>
             Live roster pulled from Shopmonkey. Add or remove techs in Shopmonkey and this follows on the next sync &mdash; no manual list to maintain.
           </div>
         </div>
@@ -142,52 +142,52 @@ function TechniciansView({ locId }) {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', margin: '14px 0 18px' }}>
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Technicians</div>
+              <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Technicians</div>
               <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--text)', marginTop: '4px' }}>{count}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>{data?.roster_source === 'shopmonkey_live' ? 'live count' : 'last known'}</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>{data?.roster_source === 'shopmonkey_live' ? 'live count' : 'last known'}</div>
             </div>
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hours sold MTD</div>
+              <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hours sold MTD</div>
               <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--text)', marginTop: '4px' }}>{hasHours ? hrsNum(totalSold) : '\u2014'}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>{hasHours ? 'booked on tickets' : 'pending tech sync'}</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>{hasHours ? 'booked on tickets' : 'pending tech sync'}</div>
             </div>
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hours billed MTD</div>
+              <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hours billed MTD</div>
               <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--text)', marginTop: '4px' }}>{hasHours ? hrsNum(totalBilled) : '\u2014'}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>{hasHours ? 'completed lines' : 'pending tech sync'}</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>{hasHours ? 'completed lines' : 'pending tech sync'}</div>
             </div>
           </div>
 
           {data?.roster_error && (
-            <div className="card" style={{ padding: '12px 14px', color: 'var(--warning)', fontSize: '12px', marginBottom: '12px' }}>
+            <div className="card" style={{ padding: '12px 14px', color: 'var(--warning)', fontSize: 'var(--fz-label)', marginBottom: '12px' }}>
               Live roster unavailable ({data.roster_error}); showing last known count.
             </div>
           )}
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', gap: '3px', background: 'var(--bg2)', borderRadius: '8px', padding: '3px' }}>
+            <div style={{ display: 'flex', gap: '3px', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '3px' }}>
               {[['mtd', 'This month'], ['ytd', 'YTD']].map(([pk, label]) => (
                 <button key={pk} onClick={() => switchPeriod(pk)}
-                  style={{ fontSize: '12px', fontWeight: '600', padding: '5px 14px', borderRadius: '6px', cursor: 'pointer', border: 'none',
+                  style={{ fontSize: 'var(--fz-label)', fontWeight: '600', padding: '5px 14px', borderRadius: 'var(--r-sm)', cursor: 'pointer', border: 'none',
                     background: period === pk ? 'var(--accent)' : 'transparent', color: period === pk ? '#fff' : 'var(--text3)' }}>
                   {label}
                 </button>
               ))}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text3)', flex: 1 }}>
+            <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', flex: 1 }}>
               {recomputeMsg ? recomputeMsg : (period === 'ytd'
                 ? 'Year to date \u00b7 Jan 1 to today. Efficiency = hours sold \u00f7 working days elapsed this year \u00d7 8h.'
                 : 'This month \u00b7 efficiency = hours sold \u00f7 working days elapsed this month \u00d7 8h (stat holidays excluded).')}
             </div>
             <button onClick={refresh} disabled={saving}
-              style={{ fontSize: '12px', fontWeight: '500', padding: '6px 14px', borderRadius: '6px', cursor: saving ? 'default' : 'pointer',
+              style={{ fontSize: 'var(--fz-label)', fontWeight: '500', padding: '6px 14px', borderRadius: 'var(--r-sm)', cursor: saving ? 'default' : 'pointer',
                 background: saving ? 'var(--surface2)' : 'var(--accent)', color: saving ? 'var(--text3)' : '#fff', border: 'none', whiteSpace: 'nowrap' }}>
               {saving ? 'Working\u2026' : 'Refresh'}
             </button>
           </div>
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <div className="table-scroll">
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--fz-label)' }}>
               <thead>
                 <tr style={{ background: 'var(--bg3)', color: 'var(--text3)', textAlign: 'left' }}>
                   <th style={{ padding: '8px 12px', fontWeight: '500' }}>Technician</th>
@@ -216,7 +216,7 @@ function TechniciansView({ locId }) {
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: t.vehicle_count != null ? 'var(--text)' : 'var(--text3)' }}>{t.vehicle_count != null ? t.vehicle_count : '\u2014'}</td>
                     {showFinancials && <td style={{ padding: '8px 12px', textAlign: 'right', color: t.labour_revenue != null ? 'var(--text)' : 'var(--text3)' }}>{t.labour_revenue != null ? money0(t.labour_revenue) : '\u2014'}</td>}
                     <td style={{ padding: '8px 12px', textAlign: 'right' }}>{t.efficiency != null
-                      ? <span style={{ color: t.efficiency >= effTarget ? 'var(--success)' : 'var(--warning)', fontWeight: '600' }}>{Math.round(t.efficiency)}%{t.hours_worked != null ? <span style={{ color: 'var(--text3)', fontWeight: '400', fontSize: '11px' }}> ({hrsNum(t.hours_worked)}h)</span> : null}</span>
+                      ? <span style={{ color: t.efficiency >= effTarget ? 'var(--success)' : 'var(--warning)', fontWeight: '600' }}>{Math.round(t.efficiency)}%{t.hours_worked != null ? <span style={{ color: 'var(--text3)', fontWeight: '400', fontSize: 'var(--fz-label)' }}> ({hrsNum(t.hours_worked)}h)</span> : null}</span>
                       : <span style={{ color: 'var(--text3)' }}>{'\u2014'}</span>}</td>
                   </tr>
                 ))}
@@ -238,11 +238,11 @@ function TechniciansView({ locId }) {
             </div>
           </div>
           {hiddenTechList.length > 0 && (
-            <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text3)', display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ marginTop: '10px', fontSize: 'var(--fz-label)', color: 'var(--text3)', display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
               <span style={{ fontWeight: '600' }}>Hidden:</span>
               {hiddenTechList.map(t => (
                 <button key={t.tech_id || t.tech_name} onClick={() => toggleHide(t, false)}
-                  style={{ fontSize: '11px', padding: '2px 10px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text)', cursor: 'pointer' }}>
+                  style={{ fontSize: 'var(--fz-label)', padding: '2px 10px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text)', cursor: 'pointer' }}>
                   {t.tech_name} +
                 </button>
               ))}
@@ -250,7 +250,7 @@ function TechniciansView({ locId }) {
             </div>
           )}
 
-          <details style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
+          <details style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '10px' }}>
             <summary style={{ cursor: 'pointer', color: 'var(--text2)', userSelect: 'none' }}>How these numbers are worked out</summary>
             <div style={{ marginTop: '6px', lineHeight: 1.5 }}>
               Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks, goodwill). Labour revenue is pre-tax, after discounts. Efficiency = hours sold ÷ worked hours, measured month-to-date; worked = each tech’s weekly hours × weeks elapsed this month. Multi-tech jobs attribute each labour line to the tech who performed it, matching Shopmonkey&rsquo;s per-technician report.

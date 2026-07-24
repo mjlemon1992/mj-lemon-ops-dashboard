@@ -14,7 +14,7 @@ import { useAuth } from '../context/AuthContext';
 //     is on. Config stays on the Marketing card.
 // Live sending additionally needs env REVIEW_REQUESTS_LIVE=1 — until then Send
 // logs a dry-run row, nothing texts. Self-hides on error (e.g. advisor role).
-const MONO = "ui-monospace, 'SF Mono', Menlo, monospace";
+const MONO = 'var(--font-mono)';
 
 const STATUS_TONE = {
   sent: 'var(--success)', dry_run: 'var(--warning)',
@@ -105,22 +105,22 @@ export default function ReviewRequestsCard({ locId, deck = false, locName = null
     () => { setEditLink(false); return 'Review link saved.'; });
 
   const queueRows = (limit) => queue.slice(0, limit).map((row) => (
-    <div key={row.order_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', background: 'var(--bg3)', borderRadius: '8px' }}>
+    <div key={row.order_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)' }}>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: '12.5px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 'var(--fz-body)', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {row.customer_name || 'Customer'}
         </div>
-        <div style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.05em', color: 'var(--text3)' }}>
+        <div style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.05em', color: 'var(--text3)' }}>
           {row.number ? `RO ${row.number}` : ''}{row.invoiced_at ? ` · invoiced ${ago(row.invoiced_at)}` : ''}
         </div>
       </div>
       <button className="primary" disabled={busy != null || !data.link} onClick={() => sendOrder(row)}
-        style={{ fontSize: '12px', padding: '9px 16px', flexShrink: 0 }}>
+        style={{ fontSize: 'var(--fz-label)', padding: '9px 16px', flexShrink: 0 }}>
         {busy === row.order_id ? '…' : 'Send'}
       </button>
       <button disabled={busy != null} onClick={() => skipOrder(row)} title="Don't ask for this RO"
         aria-label="Skip — don't ask for this RO"
-        style={{ fontSize: '13px', padding: '9px 12px', flexShrink: 0, color: 'var(--text3)' }}>
+        style={{ fontSize: 'var(--fz-body)', padding: '9px 12px', flexShrink: 0, color: 'var(--text3)' }}>
         ✕
       </button>
     </div>
@@ -141,7 +141,7 @@ export default function ReviewRequestsCard({ locId, deck = false, locName = null
           </span>
         </div>
         {!data.link && (
-          <div style={{ fontSize: '11.5px', color: 'var(--danger)', marginBottom: '7px' }}>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--danger)', marginBottom: '7px' }}>
             No review link — set the Google place ID or a custom link on the Marketing page.
           </div>
         )}
@@ -150,11 +150,11 @@ export default function ReviewRequestsCard({ locId, deck = false, locName = null
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {queueRows(4)}
             {queue.length > 4 && (
-              <div style={{ fontSize: '10.5px', color: 'var(--text3)' }}>+{queue.length - 4} more on the Marketing page</div>
+              <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)' }}>+{queue.length - 4} more on the Marketing page</div>
             )}
           </div>
         )}
-        {msg && <div style={{ marginTop: '8px', fontSize: '11.5px', color: 'var(--text2)' }}>{msg}</div>}
+        {msg && <div style={{ marginTop: '8px', fontSize: 'var(--fz-label)', color: 'var(--text2)' }}>{msg}</div>}
         <div className="deck-foot">{tallyN} {tallyLabel} · 30d{data.stats.failed30 > 0 ? ` · ${data.stats.failed30} failed` : ''}</div>
       </div>
     );
@@ -164,25 +164,25 @@ export default function ReviewRequestsCard({ locId, deck = false, locName = null
   return (
     <div className="card" style={{ borderLeft: '3px solid var(--accent)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '10px' }}>
-        <span style={{ fontFamily: MONO, fontSize: '10.5px', fontWeight: 600, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text3)' }}>Review requests</span>
+        <span style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', fontWeight: 600, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text3)' }}>Review requests</span>
         {data.enabled && (
-          <span style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+          <span style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text3)' }}>
             {data.auto ? 'auto' : 'at pickup'}
           </span>
         )}
-        <span style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+        <span style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: dot, display: 'inline-block' }} />
           {mode}
         </span>
       </div>
 
       {data.enabled && !data.live && (
-        <div style={{ marginBottom: '9px', fontSize: '11.5px', color: 'var(--warning)' }}>
+        <div style={{ marginBottom: '9px', fontSize: 'var(--fz-label)', color: 'var(--warning)' }}>
           Burn-in mode — Send logs the exact message below, nothing is texted. Set <code>REVIEW_REQUESTS_LIVE=1</code> to go live.
         </div>
       )}
       {data.enabled && !data.link && (
-        <div style={{ marginBottom: '9px', fontSize: '11.5px', color: 'var(--danger)' }}>
+        <div style={{ marginBottom: '9px', fontSize: 'var(--fz-label)', color: 'var(--danger)' }}>
           No review link — set this location's Google place ID or a custom link below.
         </div>
       )}
@@ -190,26 +190,26 @@ export default function ReviewRequestsCard({ locId, deck = false, locName = null
       {/* THE PICKUP QUEUE — "how was your visit?" ... good answer → Send */}
       {data.enabled && queue.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '4px' }}>
-          <div style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+          <div style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text3)' }}>
             Ready to ask · {queue.length}
           </div>
           {queueRows(6)}
           {queue.length > 6 && (
-            <div style={{ fontSize: '10.5px', color: 'var(--text3)' }}>+{queue.length - 6} more in the queue</div>
+            <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)' }}>+{queue.length - 6} more in the queue</div>
           )}
         </div>
       )}
       {data.enabled && queue.length === 0 && (
-        <div style={{ fontSize: '11.5px', color: 'var(--text3)', marginBottom: '4px' }}>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginBottom: '4px' }}>
           Queue clear — invoiced ROs show up here to ask at pickup.
         </div>
       )}
 
-      {msg && <div style={{ marginTop: '8px', fontSize: '11.5px', color: 'var(--text2)' }}>{msg}</div>}
+      {msg && <div style={{ marginTop: '8px', fontSize: 'var(--fz-label)', color: 'var(--text2)' }}>{msg}</div>}
 
       {/* 30d tally + recent decisions */}
-      <div style={{ marginTop: '10px', paddingTop: '9px', borderTop: '0.5px solid var(--border)', display: 'flex', alignItems: 'baseline', gap: '10px', fontFamily: MONO, fontSize: '10.5px', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
-        <span><b style={{ color: 'var(--text)', fontSize: '13px' }}>{tallyN}</b> {tallyLabel} · 30d</span>
+      <div style={{ marginTop: '10px', paddingTop: '9px', borderTop: '0.5px solid var(--border)', display: 'flex', alignItems: 'baseline', gap: '10px', fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+        <span><b style={{ color: 'var(--text)', fontSize: 'var(--fz-body)' }}>{tallyN}</b> {tallyLabel} · 30d</span>
         {data.stats.failed30 > 0 && <span style={{ color: 'var(--danger)' }}>{data.stats.failed30} failed</span>}
         {data.stats.last_at && <span style={{ marginLeft: 'auto' }}>last {ago(data.stats.last_at)}</span>}
       </div>
@@ -217,14 +217,14 @@ export default function ReviewRequestsCard({ locId, deck = false, locName = null
       {(data.recent || []).length > 0 && (
         <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
           {data.recent.slice(0, 4).map((r, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: '7px', fontSize: '11px' }} title={r.detail || ''}>
-              <span style={{ fontFamily: MONO, fontSize: '9.5px', letterSpacing: '0.06em', textTransform: 'uppercase', color: STATUS_TONE[r.status] || 'var(--text3)', minWidth: '50px' }}>
+            <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: '7px', fontSize: 'var(--fz-label)' }} title={r.detail || ''}>
+              <span style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.06em', textTransform: 'uppercase', color: STATUS_TONE[r.status] || 'var(--text3)', minWidth: '50px' }}>
                 {STATUS_LABEL[r.status] || r.status}
               </span>
               <span style={{ color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {r.customer_name || 'Customer'}{r.order_number ? ` · RO ${r.order_number}` : ''}
               </span>
-              <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: '10px', flexShrink: 0 }}>{ago(r.created_at)}</span>
+              <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: 'var(--fz-micro)', flexShrink: 0 }}>{ago(r.created_at)}</span>
             </div>
           ))}
         </div>
@@ -232,24 +232,24 @@ export default function ReviewRequestsCard({ locId, deck = false, locName = null
 
       {isOwner && (
         <div style={{ marginTop: '10px', paddingTop: '9px', borderTop: '0.5px solid var(--border)', display: 'flex', gap: '7px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <button disabled={busy != null} onClick={toggle} style={{ fontSize: '11.5px', padding: '4px 10px' }}>
+          <button disabled={busy != null} onClick={toggle} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>
             {data.enabled ? 'Disable' : 'Enable'}
           </button>
           {data.enabled && (
-            <button disabled={busy != null} onClick={toggleAuto} style={{ fontSize: '11.5px', padding: '4px 10px' }}
+            <button disabled={busy != null} onClick={toggleAuto} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}
               title={data.auto ? 'Scheduler sends automatically — switch back to pickup-only' : 'Hands-off mode: the scheduler asks eligible customers itself'}>
               {data.auto ? 'Auto: on' : 'Auto: off'}
             </button>
           )}
-          <button disabled={busy != null} onClick={() => setEditLink(!editLink)} style={{ fontSize: '11.5px', padding: '4px 10px' }}>
+          <button disabled={busy != null} onClick={() => setEditLink(!editLink)} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>
             {editLink ? 'Cancel' : 'Link…'}
           </button>
           {editLink && (
             <div style={{ display: 'flex', gap: '6px', width: '100%', marginTop: '6px' }}>
               <input value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)}
                 placeholder={data.link_source === 'place_id' ? 'Using Google place ID link — override here' : 'https://g.page/r/…'}
-                style={{ flex: 1, fontSize: '11.5px', padding: '5px 8px' }} />
-              <button className="primary" disabled={busy != null} onClick={saveLink} style={{ fontSize: '11.5px', padding: '4px 10px' }}>Save</button>
+                style={{ flex: 1, fontSize: 'var(--fz-label)', padding: '5px 8px' }} />
+              <button className="primary" disabled={busy != null} onClick={saveLink} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>Save</button>
             </div>
           )}
         </div>

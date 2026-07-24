@@ -172,14 +172,14 @@ export default function Targets() {
       {/* ── Going for the Goals — the wall chart, live ── */}
       <div className="card" style={{ marginBottom: '16px', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', marginBottom: '4px' }}>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Going for the goals — {year}</div>
-          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
+          <div style={{ fontSize: 'var(--fz-body)', fontWeight: 700, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Going for the goals — {year}</div>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>
             Actual & last year from ShopMonkey{goals && goals.qbo_used ? ' · last-year months ShopMonkey can’t see use QuickBooks books income (no car counts)' : ''} · goal from this page
           </div>
-          <button onClick={() => setGoalsTick(n => n + 1)} disabled={goalsLoading} style={{ marginLeft: 'auto', fontSize: '12px' }}>↻ Refresh</button>
+          <button onClick={() => setGoalsTick(n => n + 1)} disabled={goalsLoading} style={{ marginLeft: 'auto', fontSize: 'var(--fz-label)' }}>↻ Refresh</button>
         </div>
-        {goalsLoading && <div style={{ color: 'var(--text3)', fontSize: '12px', padding: '18px 0' }}>Pulling ShopMonkey history — first load takes ~20 seconds…</div>}
-        {goalsErr && !goalsLoading && <div style={{ color: 'var(--warning)', fontSize: '12px', padding: '12px 0' }}>{goalsErr}</div>}
+        {goalsLoading && <div style={{ color: 'var(--text3)', fontSize: 'var(--fz-label)', padding: '18px 0' }}>Pulling ShopMonkey history — first load takes ~20 seconds…</div>}
+        {goalsErr && !goalsLoading && <div style={{ color: 'var(--warning)', fontSize: 'var(--fz-label)', padding: '12px 0' }}>{goalsErr}</div>}
         {goals && !goalsLoading && (() => {
           const money0 = (n) => (n == null ? '—' : '$' + Math.round(n).toLocaleString('en-CA'));
           const moneyK = (n) => (n == null ? '—' : '$' + Math.round(n / 1000) + 'k');
@@ -210,13 +210,13 @@ export default function Targets() {
                 <polyline points={line('actual')} fill="none" stroke="var(--text)" strokeWidth="2.2" />
                 {series.map((m, i) => (m.actual && m.actual.revenue > 0 ? <circle key={i} cx={X(i)} cy={Y(m.actual.revenue)} r="2.6" fill="var(--text)" /> : null))}
               </svg>
-              <div style={{ display: 'flex', gap: '16px', fontSize: '10px', color: 'var(--text3)', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', gap: '16px', fontSize: 'var(--fz-micro)', color: 'var(--text3)', marginBottom: '10px' }}>
                 <span><span style={{ display: 'inline-block', width: 18, borderTop: '2.2px solid var(--text)', verticalAlign: 'middle', marginRight: 5 }} />Actual</span>
                 <span><span style={{ display: 'inline-block', width: 18, borderTop: '2px dashed var(--accent)', verticalAlign: 'middle', marginRight: 5 }} />Goal</span>
                 <span><span style={{ display: 'inline-block', width: 18, borderTop: '2px dotted var(--text3)', verticalAlign: 'middle', marginRight: 5 }} />Last year</span>
               </div>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '860px', fontSize: '11px', fontVariantNumeric: 'tabular-nums' }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '860px', fontSize: 'var(--fz-label)', fontVariantNumeric: 'tabular-nums' }}>
                   <thead>
                     <tr>
                       <th style={{ textAlign: 'left', padding: '4px 6px', color: 'var(--text3)', fontWeight: 500 }}></th>
@@ -264,7 +264,7 @@ export default function Targets() {
 
       {/* ── Build the year from last year's curve ── */}
       <div className="card" style={{ marginBottom: '16px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text2)', flex: '1 1 260px' }}>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)', flex: '1 1 260px' }}>
           <strong style={{ color: 'var(--text)' }}>Build {year} from last year's curve.</strong> Enter the annual revenue target — it splits across the months the way {year - 1} actually flowed (slow months stay realistic, big months carry more), summing exactly to your number.
         </div>
         <input type="number" placeholder={`Annual revenue for ${year}`} value={annual} onChange={(e) => setAnnual(e.target.value)}
@@ -282,16 +282,16 @@ export default function Targets() {
               role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedMonth(i); } }}
               className="card"
               style={{ cursor: 'pointer', border: selectedMonth === i ? '0.5px solid var(--accent)' : '0.5px solid var(--border)', padding: '10px 12px' }}>
-              <div style={{ fontSize: '11px', fontWeight: '500', color: 'var(--text)', marginBottom: '6px' }}>{m}</div>
-              <div style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text)' }}>${Math.round((t.revenue || 0) / 1000)}k</div>
-              <div style={{ fontSize: '10px', color: 'var(--text3)' }}>{t.car_count} cars</div>
+              <div style={{ fontSize: 'var(--fz-label)', fontWeight: '500', color: 'var(--text)', marginBottom: '6px' }}>{m}</div>
+              <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)' }}>${Math.round((t.revenue || 0) / 1000)}k</div>
+              <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)' }}>{t.car_count} cars</div>
             </div>
           );
         })}
       </div>
 
       <div className="card">
-        <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '14px' }}>
+        <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)', marginBottom: '14px' }}>
           {MONTHS[selectedMonth]} {year} targets
         </div>
         <div className="form-row">{field('revenue','Revenue target ($)')} {field('car_count','Car count target')}</div>

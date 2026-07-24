@@ -20,14 +20,14 @@ export default function ApprovalsPage() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
-        <button onClick={() => navigate('/marketing')} style={{ fontSize: '12px' }}>← Marketing</button>
+        <button onClick={() => navigate('/marketing')} style={{ fontSize: 'var(--fz-label)' }}>← Marketing</button>
         <div style={{ fontSize: '15px', fontWeight: 500, color: 'var(--text)' }}>Approvals</div>
         {isAll && locations.length > 1 ? (
           <select value={locId || ''} onChange={e => setPicked(e.target.value)} style={{ width: 'auto' }}>
             {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         ) : (
-          loc && <span style={{ fontSize: '12px', color: 'var(--text3)' }}>{loc.name}</span>
+          loc && <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{loc.name}</span>
         )}
       </div>
       {locId && <ApprovalQueue locId={locId} locName={loc?.name} />}

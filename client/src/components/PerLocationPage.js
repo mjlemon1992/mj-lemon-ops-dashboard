@@ -12,9 +12,9 @@ export default function PerLocationPage({ children }) {
   return (
     <div>
       {isAll && scopeLocations.length > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', fontSize: '12px', color: 'var(--text3)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>
           Showing
-          <select value={locId} onChange={(e) => select(e.target.value)} style={{ width: 'auto', fontSize: '12px' }}>
+          <select value={locId} onChange={(e) => select(e.target.value)} style={{ width: 'auto', fontSize: 'var(--fz-label)' }}>
             {scopeLocations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
           <span>— group view stays selected in the sidebar</span>

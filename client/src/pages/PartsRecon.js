@@ -45,10 +45,10 @@ function PartsTabs({ locId }) {
     <div>
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
         {[['margin', 'Margin / exposure'], ['invoices', 'Vendor invoices'], ['statements', 'Statements'], ['warranty', 'Credits due']].map(([k, l]) => (
-          <button key={k} onClick={() => setView(k)} className={view === k ? 'primary' : ''} style={{ fontSize: '13px', padding: '7px 16px' }}>
+          <button key={k} onClick={() => setView(k)} className={view === k ? 'primary' : ''} style={{ fontSize: 'var(--fz-body)', padding: '7px 16px' }}>
             {l}
             {k === 'warranty' && credSum && credSum.count > 0 && (
-              <span style={{ marginLeft: 6, fontSize: '11px', fontWeight: 700, padding: '1px 7px', borderRadius: 9, background: 'rgba(255,184,0,0.18)', color: view === k ? undefined : 'var(--warning)' }}>
+              <span style={{ marginLeft: 6, fontSize: 'var(--fz-label)', fontWeight: 700, padding: '1px 7px', borderRadius: 'var(--radius)', background: 'rgba(255,184,0,0.18)', color: view === k ? undefined : 'var(--warning)' }}>
                 {credSum.count} · ${Math.round(credSum.expected).toLocaleString('en-CA')}
               </span>
             )}
@@ -109,12 +109,12 @@ function MarginView({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>
           Parts paid vs billed · this month · {data.orders_scanned} invoiced order{data.orders_scanned === 1 ? '' : 's'} scanned
           {data.capped ? ` (capped ${data.orders_scanned}/${data.orders_total})` : ''}
           {data.service_fetch_failed ? ` · ${data.service_fetch_failed} skipped` : ''}
         </div>
-        <button onClick={() => load(true)} disabled={busy} style={{ fontSize: '12px', padding: '6px 14px' }}>{busy ? 'Scanning…' : 'Refresh'}</button>
+        <button onClick={() => load(true)} disabled={busy} style={{ fontSize: 'var(--fz-label)', padding: '6px 14px' }}>{busy ? 'Scanning…' : 'Refresh'}</button>
       </div>
 
       <div className="stat-grid" style={{ marginBottom: '16px' }}>
@@ -126,7 +126,7 @@ function MarginView({ locId }) {
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
         {[['all', `All flagged (${data.items.length})`], ['leak', `Leaks (${s.leak_count})`], ['under_billed', `Under-billed (${s.underbilled_count})`], ['bundled', `Bundled (${s.bundled_count})`], ['reviewed', `Reviewed (${data.reviewed_count || 0})`]].map(([k, l]) => (
-          <button key={k} onClick={() => setFilter(k)} className={filter === k ? 'primary' : ''} style={{ fontSize: '12px', padding: '5px 12px' }}>{l}</button>
+          <button key={k} onClick={() => setFilter(k)} className={filter === k ? 'primary' : ''} style={{ fontSize: 'var(--fz-label)', padding: '5px 12px' }}>{l}</button>
         ))}
       </div>
 
@@ -135,7 +135,7 @@ function MarginView({ locId }) {
       ) : (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="table-scroll">
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--fz-label)' }}>
               <thead>
                 <tr style={{ background: 'var(--bg3)', color: 'var(--text3)', textAlign: 'left' }}>
                   <th style={th}>RO</th><th style={th}>Inv</th><th style={th}>Part</th><th style={th}>Service</th>
@@ -151,24 +151,24 @@ function MarginView({ locId }) {
                     <tr key={i} style={{ borderTop: '0.5px solid var(--border)' }}>
                       <td style={td}>{r.order_number}</td>
                       <td style={{ ...td, color: 'var(--text3)' }}>{fmtDate(r.invoiced_date)}</td>
-                      <td style={td}><div style={{ fontWeight: 600 }}>{r.part_name}</div>{r.part_number && <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{r.part_number}</div>}</td>
+                      <td style={td}><div style={{ fontWeight: 600 }}>{r.part_name}</div>{r.part_number && <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{r.part_number}</div>}</td>
                       <td style={{ ...td, color: 'var(--text2)' }}>{r.service || '—'}</td>
                       <td style={{ ...td, textAlign: 'right' }}>{r.qty}</td>
                       <td style={{ ...td, textAlign: 'right' }}>{money(r.cost)}</td>
                       <td style={{ ...td, textAlign: 'right' }}>{money(r.retail)}</td>
                       <td style={{ ...td, textAlign: 'right', color: r.margin_pct == null ? 'var(--text3)' : r.margin_pct < 0 ? 'var(--danger)' : 'var(--text2)' }}>{r.margin_pct == null ? '—' : `${r.margin_pct}%`}</td>
-                      <td style={td}><span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', color: c.color, background: c.bg, whiteSpace: 'nowrap' }}>{c.label}</span></td>
+                      <td style={td}><span style={{ fontSize: 'var(--fz-micro)', fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius)', color: c.color, background: c.bg, whiteSpace: 'nowrap' }}>{c.label}</span></td>
                       <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: r.exposure > 0 ? c.color : 'var(--text3)' }}>{r.exposure > 0 ? money(r.exposure) : '—'}</td>
                       <td style={{ ...td, whiteSpace: 'nowrap' }}>
                         {isReviewed ? (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{REASON_LABEL[r.reason] || r.reason}</span>
-                            <button onClick={() => undo(r)} style={{ fontSize: '11px', padding: '3px 9px' }}>Undo</button>
+                            <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{REASON_LABEL[r.reason] || r.reason}</span>
+                            <button onClick={() => undo(r)} style={{ fontSize: 'var(--fz-label)', padding: '3px 9px' }}>Undo</button>
                           </span>
                         ) : (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                            {r.sm_url && <a href={r.sm_url} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: 'var(--accent)', textDecoration: 'none' }}>Open ↗</a>}
-                            <button onClick={() => review(r)} style={{ fontSize: '11px', padding: '3px 9px' }}>✓ Reviewed</button>
+                            {r.sm_url && <a href={r.sm_url} target="_blank" rel="noreferrer" style={{ fontSize: 'var(--fz-label)', color: 'var(--accent)', textDecoration: 'none' }}>Open ↗</a>}
+                            <button onClick={() => review(r)} style={{ fontSize: 'var(--fz-label)', padding: '3px 9px' }}>✓ Reviewed</button>
                           </span>
                         )}
                       </td>
@@ -181,7 +181,7 @@ function MarginView({ locId }) {
         </div>
       )}
 
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
+      <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '10px' }}>
         <b>Leak</b> = paid for, $0 billed, not on a flat-rate job. <b>Under-billed</b> = billed below cost. <b>Bundled</b> = $0 part inside a lump-sum/flat-rate service (normal — shown for review). {data.cached ? 'Cached' : 'Fresh'} as of {new Date(data.generated_at).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })}.
       </div>
     </div>
@@ -344,13 +344,13 @@ function InvoicesView({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text3)', flex: '1 1 260px' }}>Supplier invoices matched to their RO by the number written on them. Photos flow in from the scan pipeline; you can also add one here.</div>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', flex: '1 1 260px' }}>Supplier invoices matched to their RO by the number written on them. Photos flow in from the scan pipeline; you can also add one here.</div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <button onClick={scanNow} disabled={scanning} title="Pull scanned invoices sent to the OPS inbox"
-            style={{ fontSize: '12px', padding: '7px 14px', borderRadius: '8px' }}>
+            style={{ fontSize: 'var(--fz-label)', padding: '7px 14px', borderRadius: 'var(--radius)' }}>
             {scanning ? 'Checking…' : '📥 Scan inbox'}
           </button>
-          <label className="primary" style={{ fontSize: '12px', padding: '7px 14px', cursor: busy ? 'default' : 'pointer', borderRadius: '8px' }}>
+          <label className="primary" style={{ fontSize: 'var(--fz-label)', padding: '7px 14px', cursor: busy ? 'default' : 'pointer', borderRadius: 'var(--radius)' }}>
             {busy ? (progress ? `Reading ${progress.done + 1} of ${progress.total}…` : 'Reading…') : '＋ Upload invoices'}
             <input type="file" multiple accept="image/*,application/pdf" style={{ display: 'none' }} disabled={busy}
               onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ''; upload(f); }} />
@@ -363,7 +363,7 @@ function InvoicesView({ locId }) {
           {[['attention', `Needs attention (${(data.invoices || []).filter(needsAttention).length})`],
             ['all', `All (${(data.invoices || []).filter((i) => !i.not_parts).length}${data.total_count > (data.invoices || []).length ? ` of ${data.total_count}` : ''})`],
             ['notparts', `Not parts (${(data.invoices || []).filter((i) => i.not_parts).length})`]].map(([k, l]) => (
-            <button key={k} onClick={() => setShow(k)} className={show === k ? 'primary' : ''} style={{ fontSize: '12px', padding: '5px 12px' }}>{l}</button>
+            <button key={k} onClick={() => setShow(k)} className={show === k ? 'primary' : ''} style={{ fontSize: 'var(--fz-label)', padding: '5px 12px' }}>{l}</button>
           ))}
         </div>
       )}
@@ -383,33 +383,33 @@ function InvoicesView({ locId }) {
         return (
           <div key={inv.id} className="card" style={{ marginBottom: '8px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-              <div style={{ fontWeight: 700 }}>{inv.vendor || 'Unknown vendor'} {inv.invoice_number && <span style={{ fontSize: '11px', color: 'var(--text3)', fontWeight: 400 }}>#{inv.invoice_number}</span>}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>{inv.invoice_date || '—'} · paid {money(inv.subtotal != null ? inv.subtotal : inv.total)} · ref {inv.ro_ref || '—'}</div>
+              <div style={{ fontWeight: 700 }}>{inv.vendor || 'Unknown vendor'} {inv.invoice_number && <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', fontWeight: 400 }}>#{inv.invoice_number}</span>}</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{inv.invoice_date || '—'} · paid {money(inv.subtotal != null ? inv.subtotal : inv.total)} · ref {inv.ro_ref || '—'}</div>
             </div>
-            <div style={{ fontSize: '12px', minWidth: '120px' }}>
+            <div style={{ fontSize: 'var(--fz-label)', minWidth: '120px' }}>
               {inv.matched_order_number
                 ? <span style={{ color: MATCH_COLOR[inv.match_status] }}>RO {inv.matched_order_number}{inv.sm_url && <> · <a href={inv.sm_url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>Open ↗</a></>}</span>
                 : <span style={{ color: MATCH_COLOR[inv.match_status] || 'var(--text3)' }}>{inv.match_status === 'no_ro' ? 'no RO · stock' : inv.match_status}</span>}
             </div>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: rs.c, minWidth: '130px', textAlign: 'right' }}>{rs.t}</div>
+            <div style={{ fontSize: 'var(--fz-label)', fontWeight: 700, color: rs.c, minWidth: '130px', textAlign: 'right' }}>{rs.t}</div>
             <div style={{ display: 'flex', gap: '6px' }}>
-              {inv.has_file && <button onClick={() => viewFile(inv)} title="Look at the original scan" style={{ fontSize: '11px', padding: '4px 10px' }}>🔍 View</button>}
-              {inv.not_parts && <button onClick={() => isParts(inv)} title="This is a parts purchase after all — re-read it and match to an RO" style={{ fontSize: '11px', padding: '4px 10px' }}>↩ Is parts</button>}
+              {inv.has_file && <button onClick={() => viewFile(inv)} title="Look at the original scan" style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>🔍 View</button>}
+              {inv.not_parts && <button onClick={() => isParts(inv)} title="This is a parts purchase after all — re-read it and match to an RO" style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>↩ Is parts</button>}
               {!inv.not_parts && <button onClick={() => markWarranty(inv)} title={inv.warranty ? 'Already a warranty claim — tap to change the expected credit' : 'Mark as warranty — watch for the supplier credit'}
-                style={{ fontSize: '11px', padding: '4px 10px', color: inv.warranty ? 'var(--info)' : undefined }}>🛡 Warranty</button>}
-              <button onClick={() => pickMatch(inv)} style={{ fontSize: '11px', padding: '4px 10px' }}>{inv.matched_order_number ? 'Re-match' : 'Match RO'}</button>
+                style={{ fontSize: 'var(--fz-label)', padding: '4px 10px', color: inv.warranty ? 'var(--info)' : undefined }}>🛡 Warranty</button>}
+              <button onClick={() => pickMatch(inv)} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>{inv.matched_order_number ? 'Re-match' : 'Match RO'}</button>
               {!inv.not_parts && !['matched', 'confirmed', 'no_ro'].includes(inv.match_status) &&
-                <button onClick={() => noRo(inv)} title="This purchase has no work order — stock or shop supplies. Clears it from the needs-matching list." style={{ fontSize: '11px', padding: '4px 10px' }}>📦 No RO</button>}
-              <button onClick={() => del(inv)} title="Remove" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>✕</button>
+                <button onClick={() => noRo(inv)} title="This purchase has no work order — stock or shop supplies. Clears it from the needs-matching list." style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>📦 No RO</button>}
+              <button onClick={() => del(inv)} title="Remove" style={{ fontSize: 'var(--fz-label)', padding: '4px 8px', color: 'var(--text3)' }}>✕</button>
             </div>
-            {inv.recon_note && <div style={{ flexBasis: '100%', fontSize: '11px', color: 'var(--text3)' }}>{inv.recon_note}</div>}
+            {inv.recon_note && <div style={{ flexBasis: '100%', fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{inv.recon_note}</div>}
             {inv.matched_order_number && inv.job_paid != null && (
-              <div style={{ flexBasis: '100%', fontSize: '11px', color: 'var(--text3)' }}>
+              <div style={{ flexBasis: '100%', fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>
                 Job total: <b>{money(inv.job_paid)}</b> of supplier invoices vs <b>{money(inv.ro_parts_cost)}</b> of parts cost on RO {inv.matched_order_number}
               </div>
             )}
             {(inv.line_findings || []).length > 0 && (
-              <div style={{ flexBasis: '100%', fontSize: '11px', color: 'var(--warning)' }}>
+              <div style={{ flexBasis: '100%', fontSize: 'var(--fz-label)', color: 'var(--warning)' }}>
                 {(inv.line_findings || []).map((f, i) => (
                   <div key={i}>
                     {f.status === 'cost_off'
@@ -423,17 +423,17 @@ function InvoicesView({ locId }) {
         );
       })}
 
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
+      <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '10px' }}>
         {preview && (
           <div onClick={closePreview} role="presentation"
             style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', zIndex: 3000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', cursor: 'zoom-out' }}>
-            <div style={{ color: '#fff', fontSize: '13px', marginBottom: '10px', display: 'flex', gap: '14px', alignItems: 'center' }}>
+            <div style={{ color: '#fff', fontSize: 'var(--fz-body)', marginBottom: '10px', display: 'flex', gap: '14px', alignItems: 'center' }}>
               <span>{preview.vendor}</span>
               <a href={preview.url} download onClick={(e) => e.stopPropagation()} style={{ color: 'var(--accent)', textDecoration: 'none' }}>⬇ Download</a>
-              <button onClick={closePreview} style={{ fontSize: '12px', padding: '3px 10px' }}>Close</button>
+              <button onClick={closePreview} style={{ fontSize: 'var(--fz-label)', padding: '3px 10px' }}>Close</button>
             </div>
             <img src={preview.url} alt="Supplier invoice" onClick={(e) => e.stopPropagation()}
-              style={{ maxWidth: '95vw', maxHeight: '85vh', objectFit: 'contain', background: '#fff', borderRadius: 8, cursor: 'default' }} />
+              style={{ maxWidth: '95vw', maxHeight: '85vh', objectFit: 'contain', background: '#fff', borderRadius: 'var(--radius)', cursor: 'default' }} />
           </div>
         )}
         <details>
@@ -492,7 +492,7 @@ function WarrantyView({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: '10px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text3)', flex: '1 1 260px' }}>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', flex: '1 1 260px' }}>
           Money suppliers owe you back — core deposits and warranty credits, cleared when a matching credit lands.
           <details style={{ marginTop: '4px' }}>
             <summary style={{ cursor: 'pointer', color: 'var(--text2)', userSelect: 'none' }}>How credits are tracked</summary>
@@ -505,7 +505,7 @@ function WarrantyView({ locId }) {
           <div className="spec-label">Awaiting credit</div>
           <div style={{ fontSize: '20px', fontWeight: 700, color: owed > 0 ? 'var(--warning)' : 'var(--text)' }}>{money(owed)}</div>
           {open.length > 0 && (
-            <div style={{ fontSize: '11px', color: 'var(--text3)' }}>
+            <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>
               {open.length} invoice{open.length === 1 ? '' : 's'} waiting · oldest {Math.max(...open.map((c) => c.age_days || 0))}d
               {open.some((c) => (c.age_days || 0) >= 60) && <span style={{ color: 'var(--danger)', fontWeight: 700 }}> · {open.filter((c) => (c.age_days || 0) >= 60).length} overdue</span>}
             </div>
@@ -523,11 +523,11 @@ function WarrantyView({ locId }) {
           <div key={c.id} className="card" style={{ padding: '12px 14px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 220px', minWidth: 0 }}>
               <div style={{ fontWeight: 600 }}>
-                <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: 4, marginRight: 6, background: c.kind === 'core' ? 'rgba(90,160,255,0.15)' : 'rgba(255,184,0,0.15)', color: c.kind === 'core' ? 'var(--info)' : 'var(--warning)' }}>{c.kind === 'core' ? 'CORE' : 'WARRANTY'}</span>
+                <span style={{ fontSize: 'var(--fz-micro)', fontWeight: 700, padding: '1px 6px', borderRadius: 4, marginRight: 6, background: c.kind === 'core' ? 'rgba(90,160,255,0.15)' : 'rgba(255,184,0,0.15)', color: c.kind === 'core' ? 'var(--info)' : 'var(--warning)' }}>{c.kind === 'core' ? 'CORE' : 'WARRANTY'}</span>
                 {c.vendor || 'Supplier'} {c.invoice_number ? `#${c.invoice_number}` : ''}
-                {c.source !== 'manual' && <span style={{ marginLeft: 6, fontSize: '10px', color: 'var(--text3)' }}>via {c.source === 'po' ? 'W on the PO' : c.source === 'stamp' ? 'stamp' : c.source === 'auto' ? 'invoice line' : 'email subject'}</span>}
+                {c.source !== 'manual' && <span style={{ marginLeft: 6, fontSize: 'var(--fz-micro)', color: 'var(--text3)' }}>via {c.source === 'po' ? 'W on the PO' : c.source === 'stamp' ? 'stamp' : c.source === 'auto' ? 'invoice line' : 'email subject'}</span>}
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>
                 {c.part_number ? `${c.part_number} · ` : ''}{c.invoice_date || '—'}{c.matched_order_number ? ` · RO ${c.matched_order_number}` : ''} · opened {c.age_days}d ago
                 {c.note && c.note !== c.part_number ? ` · ${c.note}` : ''}
               </div>
@@ -538,19 +538,19 @@ function WarrantyView({ locId }) {
             </div>
             <div style={{ minWidth: 150, textAlign: 'right' }}>
               {c.status === 'awaiting'
-                ? <span style={{ fontSize: '11px', fontWeight: 700, color: late ? 'var(--danger)' : 'var(--warning)' }}>{late ? `OVERDUE — ${c.age_days} DAYS` : 'AWAITING CREDIT'}</span>
+                ? <span style={{ fontSize: 'var(--fz-label)', fontWeight: 700, color: late ? 'var(--danger)' : 'var(--warning)' }}>{late ? `OVERDUE — ${c.age_days} DAYS` : 'AWAITING CREDIT'}</span>
                 : c.status === 'credited'
-                  ? <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--success)' }}>CREDITED {money(c.credited)}{c.credited_number ? ` · ${c.credited_number}` : ''}</span>
-                  : <span style={{ fontSize: '11px', color: 'var(--text3)' }}>CLOSED</span>}
+                  ? <span style={{ fontSize: 'var(--fz-label)', fontWeight: 700, color: 'var(--success)' }}>CREDITED {money(c.credited)}{c.credited_number ? ` · ${c.credited_number}` : ''}</span>
+                  : <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>CLOSED</span>}
             </div>
             <div style={{ display: 'flex', gap: '6px' }}>
               {c.status === 'awaiting'
                 ? <>
-                  <button onClick={() => settle(c)} style={{ fontSize: '11px', padding: '4px 10px' }}>Credit received</button>
-                  <button onClick={() => writeOff(c)} title="Stop watching — keeps it as closed, still shows here" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)' }}>Stop</button>
+                  <button onClick={() => settle(c)} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>Credit received</button>
+                  <button onClick={() => writeOff(c)} title="Stop watching — keeps it as closed, still shows here" style={{ fontSize: 'var(--fz-label)', padding: '4px 8px', color: 'var(--text3)' }}>Stop</button>
                 </>
-                : <button onClick={() => reopen(c)} style={{ fontSize: '11px', padding: '4px 10px' }}>Re-open</button>}
-              <button onClick={() => remove(c)} title="Raised by mistake? Remove it entirely" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--text3)', border: 0, background: 'none' }}>🗑</button>
+                : <button onClick={() => reopen(c)} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>Re-open</button>}
+              <button onClick={() => remove(c)} title="Raised by mistake? Remove it entirely" style={{ fontSize: 'var(--fz-label)', padding: '4px 8px', color: 'var(--text3)', border: 0, background: 'none' }}>🗑</button>
             </div>
           </div>
         );
@@ -615,8 +615,8 @@ function StatementsView({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text3)', flex: '1 1 260px' }}>At month-end, upload a supplier statement — it lists every invoice they billed. We flag the ones we never received or entered, so you can chase them.</div>
-        <label className="primary" style={{ fontSize: '12px', padding: '7px 14px', cursor: busy ? 'default' : 'pointer', borderRadius: '8px' }}>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', flex: '1 1 260px' }}>At month-end, upload a supplier statement — it lists every invoice they billed. We flag the ones we never received or entered, so you can chase them.</div>
+        <label className="primary" style={{ fontSize: 'var(--fz-label)', padding: '7px 14px', cursor: busy ? 'default' : 'pointer', borderRadius: 'var(--radius)' }}>
           {busy ? (progress ? `Reading ${progress.done + 1} of ${progress.total}…` : 'Reading…') : '＋ Upload statements'}
           <input type="file" multiple accept="image/*,application/pdf" style={{ display: 'none' }} disabled={busy}
             onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ''; upload(f); }} />
@@ -637,28 +637,28 @@ function StatementsView({ locId }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600 }}>{s.vendor || 'Statement'}{s.period_label ? ` · ${s.period_label}` : ''}</div>
-                <div style={{ fontSize: '12px', color: 'var(--text3)' }}>{s.statement_date || '—'} · {s.line_count} invoices{s.total != null ? ` · ${money(s.total)}` : ''}</div>
+                <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{s.statement_date || '—'} · {s.line_count} invoices{s.total != null ? ` · ${money(s.total)}` : ''}</div>
               </div>
-              <span className="badge" style={{ background: s.missing_count ? 'rgba(255,77,77,0.12)' : 'var(--bg3)', color: s.missing_count ? 'var(--danger)' : 'var(--text2)', fontWeight: 700, padding: '4px 10px', borderRadius: '6px' }}>
+              <span className="badge" style={{ background: s.missing_count ? 'rgba(255,77,77,0.12)' : 'var(--bg3)', color: s.missing_count ? 'var(--danger)' : 'var(--text2)', fontWeight: 700, padding: '4px 10px', borderRadius: 'var(--r-sm)' }}>
                 {s.missing_count ? `${s.missing_count} MISSING` : 'ALL ACCOUNTED FOR ✓'}
               </span>
-              {s.ties_out === false && <span className="badge" style={{ background: 'rgba(255,184,0,0.12)', color: 'var(--warning)', padding: '4px 10px', borderRadius: '6px', fontWeight: 600 }}>⚠ CHECK THE READ</span>}
-              {!!s.mismatch_count && <span className="badge" style={{ background: 'rgba(255,184,0,0.12)', color: 'var(--warning)', padding: '4px 10px', borderRadius: '6px', fontWeight: 600 }}>{s.mismatch_count} amount off</span>}
-              {!!missing.length && <button onClick={() => copyMissing(s, missing)} style={{ fontSize: '12px' }} title="Copy the missing document numbers to paste into an email to the supplier">📋 Copy numbers</button>}
-              <button onClick={() => setOpen((o) => ({ ...o, [s.id]: !o[s.id] }))} style={{ fontSize: '12px' }}>{isOpen ? 'Hide' : 'Details'}</button>
+              {s.ties_out === false && <span className="badge" style={{ background: 'rgba(255,184,0,0.12)', color: 'var(--warning)', padding: '4px 10px', borderRadius: 'var(--r-sm)', fontWeight: 600 }}>⚠ CHECK THE READ</span>}
+              {!!s.mismatch_count && <span className="badge" style={{ background: 'rgba(255,184,0,0.12)', color: 'var(--warning)', padding: '4px 10px', borderRadius: 'var(--r-sm)', fontWeight: 600 }}>{s.mismatch_count} amount off</span>}
+              {!!missing.length && <button onClick={() => copyMissing(s, missing)} style={{ fontSize: 'var(--fz-label)' }} title="Copy the missing document numbers to paste into an email to the supplier">📋 Copy numbers</button>}
+              <button onClick={() => setOpen((o) => ({ ...o, [s.id]: !o[s.id] }))} style={{ fontSize: 'var(--fz-label)' }}>{isOpen ? 'Hide' : 'Details'}</button>
               <button onClick={() => del(s)} title="Remove" style={{ color: 'var(--danger)', border: 0, background: 'none' }}>🗑</button>
             </div>
             {s.ties_out === false && (
-              <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--warning)' }}>
+              <div style={{ marginTop: '8px', fontSize: 'var(--fz-label)', color: 'var(--warning)' }}>
                 The {s.line_count} lines read add up to <b>{money(s.lines_sum)}</b> but the statement total is <b>{money(s.total)}</b>. Credits/returns may have been read as charges — check against the paper before chasing the missing list.
               </div>
             )}
             {isOpen && (
               <div style={{ marginTop: '12px', overflowX: 'auto' }}>
                 {!missing.length && !mismatch.length
-                  ? <div style={{ fontSize: '12px', color: 'var(--text3)' }}>Every invoice on this statement is captured in the system.</div>
+                  ? <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>Every invoice on this statement is captured in the system.</div>
                   : (
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--fz-body)' }}>
                       <thead><tr style={{ textAlign: 'left', color: 'var(--text3)', borderBottom: '1px solid var(--border)' }}>
                         <th style={th}>Invoice</th><th style={th}>Date</th><th style={{ ...th, textAlign: 'right' }}>Amount</th><th style={th}>Status</th>
                       </tr></thead>
@@ -667,7 +667,7 @@ function StatementsView({ locId }) {
                           <tr key={i} style={{ borderBottom: '0.5px solid var(--border)' }}>
                             <td style={td}>
                               {l.invoice_number || '—'}
-                              {(l.type === 'credit') && <span style={{ marginLeft: 6, fontSize: '10px', fontWeight: 700, color: 'var(--info)' }}>CREDIT</span>}
+                              {(l.type === 'credit') && <span style={{ marginLeft: 6, fontSize: 'var(--fz-micro)', fontWeight: 700, color: 'var(--info)' }}>CREDIT</span>}
                             </td>
                             <td style={td}>{fmtDate(l.invoice_date)}</td>
                             <td style={{ ...td, textAlign: 'right' }}>{l.amount_cents != null ? money(l.amount_cents / 100) : '—'}</td>
@@ -686,7 +686,7 @@ function StatementsView({ locId }) {
           </div>
         );
       })}
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
+      <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '10px' }}>
         <b>Missing</b> = the vendor billed it but we never captured it — chase it (likeliest place an unbilled part hides). Credit notes are listed too: a credit you never received is money owed back to you. <b>Amount off</b> = we have it but the total doesn’t match the statement. Use <b>📋 Copy numbers</b> to paste the list straight into an email to the supplier. Anything scanned in the same stack that isn't a parts purchase — fuel, coffee, cleaning supplies — is parked under <b>Not parts</b> and never reaches the worklist; tap <b>↩ Is parts</b> if one was called wrong.
       </div>
     </div>

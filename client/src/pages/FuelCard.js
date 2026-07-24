@@ -99,7 +99,7 @@ function FuelView({ locId }) {
           </div>
         )}
       </div>
-      <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '16px' }}>
+      <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginBottom: '16px' }}>
         Bonuses land here automatically when a month is approved on the Bonus tab · one card, tracked per person
         {tiles.statement_date ? ` · last reconciled ${String(tiles.statement_date).slice(0, 10)}` : ''}
       </div>
@@ -135,11 +135,11 @@ function FuelView({ locId }) {
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '13px 18px', borderBottom: '0.5px solid var(--border)' }}>
             <span style={{ fontWeight: 600 }}>Per-person balances</span>
-            <span style={{ fontSize: '12px', color: 'var(--text3)', marginLeft: '10px' }}>credited − used = remaining</span>
+            <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginLeft: '10px' }}>credited − used = remaining</span>
           </div>
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-              <thead><tr style={{ color: 'var(--text3)', fontSize: '11px', textTransform: 'uppercase' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--fz-body)' }}>
+              <thead><tr style={{ color: 'var(--text3)', fontSize: 'var(--fz-label)', textTransform: 'uppercase' }}>
                 <th style={{ textAlign: 'left', padding: '9px 14px', borderBottom: '0.5px solid var(--border)' }}>Person</th>
                 <th style={{ textAlign: 'left', padding: '9px 14px', borderBottom: '0.5px solid var(--border)' }}>Used of credited</th>
                 <th style={{ textAlign: 'right', padding: '9px 14px', borderBottom: '0.5px solid var(--border)' }}>Credited</th>
@@ -153,14 +153,14 @@ function FuelView({ locId }) {
                     <tr key={p.person_id} style={{ opacity: p.active ? 1 : 0.5 }}>
                       <td style={{ padding: '10px 14px', borderBottom: '0.5px solid var(--border)' }}>
                         <div style={{ fontWeight: 600 }}>{p.name}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{p.role === 'advisor' ? 'Service Advisor' : 'Technician'}</div>
+                        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{p.role === 'advisor' ? 'Service Advisor' : 'Technician'}</div>
                       </td>
                       <td style={{ padding: '10px 14px', borderBottom: '0.5px solid var(--border)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <div style={{ position: 'relative', width: '110px', height: '10px', background: 'var(--bg3)', borderRadius: '4px' }}>
                             <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${pctUsed}%`, background: 'var(--accent)', borderRadius: '4px' }} />
                           </div>
-                          <span style={{ fontSize: '11px', color: 'var(--text3)', width: '32px' }}>{pctUsed}%</span>
+                          <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', width: '32px' }}>{pctUsed}%</span>
                         </div>
                       </td>
                       <td style={{ padding: '10px 14px', borderBottom: '0.5px solid var(--border)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{money(p.credited)}</td>
@@ -185,17 +185,17 @@ function FuelView({ locId }) {
             <span style={{ fontWeight: 600 }}>Recent card activity</span>
           </div>
           <div style={{ maxHeight: '440px', overflowY: 'auto' }}>
-            {ledger.length === 0 && <div style={{ padding: '20px', color: 'var(--text3)', fontSize: '13px' }}>No activity yet — approve a bonus month or log a purchase.</div>}
+            {ledger.length === 0 && <div style={{ padding: '20px', color: 'var(--text3)', fontSize: 'var(--fz-body)' }}>No activity yet — approve a bonus month or log a purchase.</div>}
             {ledger.map((l) => {
               const unassigned = !l.person_id && l.type === 'purchase';
               return (
                 <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', borderBottom: '0.5px solid var(--border)', background: unassigned ? 'rgba(255,184,0,0.06)' : 'transparent' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: '13px' }}>
+                    <div style={{ fontWeight: 600, fontSize: 'var(--fz-body)' }}>
                       {unassigned ? '⚠ Unassigned' : (l.person_name || (l.type === 'bonus_credit' ? 'Bonus' : '—'))}
-                      <span style={{ fontWeight: 400, color: 'var(--text3)', marginLeft: '6px', fontSize: '11px' }}>{l.type.replace('_', ' ')}</span>
+                      <span style={{ fontWeight: 400, color: 'var(--text3)', marginLeft: '6px', fontSize: 'var(--fz-label)' }}>{l.type.replace('_', ' ')}</span>
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {String(l.occurred_on).slice(0, 10)}{l.memo ? ` · ${l.memo}` : ''}
                     </div>
                   </div>
@@ -209,7 +209,7 @@ function FuelView({ locId }) {
                         {activePeople.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     ) : (
-                      <button onClick={() => setAssigning(l.id)} style={{ fontSize: '11px', padding: '4px 10px' }}>Assign ▾</button>
+                      <button onClick={() => setAssigning(l.id)} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>Assign ▾</button>
                     )
                   )}
                 </div>
@@ -222,7 +222,7 @@ function FuelView({ locId }) {
       <div style={{ display: 'flex', gap: '8px', marginTop: '14px', alignItems: 'center' }}>
         <button onClick={() => dl('xlsx')}>⬇ Export XLSX</button>
         <button onClick={() => dl('csv')}>⬇ Export CSV</button>
-        <span style={{ fontSize: '11px', color: 'var(--text3)', marginLeft: 'auto' }}>
+        <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginLeft: 'auto' }}>
           Unassigned purchases hit the card balance but nobody's share — that's exactly what the variance surfaces.
         </span>
       </div>

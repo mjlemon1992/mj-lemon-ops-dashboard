@@ -93,7 +93,7 @@ export default function Users() {
               </select>
             </div>
           )}
-          {error && <div style={{ fontSize: '12px', color: 'var(--danger)', marginBottom: '12px' }}>{error}</div>}
+          {error && <div style={{ fontSize: 'var(--fz-label)', color: 'var(--danger)', marginBottom: '12px' }}>{error}</div>}
           <div className="btn-row">
             <button onClick={() => setEditing(null)}>Cancel</button>
             <button className="primary" onClick={save} disabled={saving}>{saving ? 'Saving...' : editing === 'new' ? 'Create user' : 'Save changes'}</button>
@@ -117,17 +117,17 @@ export default function Users() {
           const loc = locations.find(l => l.id === u.location_id);
           return (
             <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 0', borderBottom: '0.5px solid var(--border)' }}>
-              <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(77,184,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '500', color: 'var(--info)', flexShrink: 0 }}>{initials(u.name)}</div>
+              <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(77,184,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'var(--fz-label)', fontWeight: '500', color: 'var(--info)', flexShrink: 0 }}>{initials(u.name)}</div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '13px', fontWeight: '500', color: u.active ? 'var(--text)' : 'var(--text3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: u.active ? 'var(--text)' : 'var(--text3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   {u.name}
                   {!u.active && <span className="badge neutral">Inactive</span>}
                 </div>
-                <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{u.email}{loc ? ` · ${loc.name}` : ''}</div>
+                <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{u.email}{loc ? ` · ${loc.name}` : ''}</div>
               </div>
               <span className={`badge ${roleBadgeClass(u.role)}`} style={{ textTransform: 'capitalize' }}>{u.role}</span>
-              {u.id !== me?.id && <button onClick={() => openEdit(u)} style={{ fontSize: '11px', padding: '4px 10px' }}>Edit</button>}
-              {u.id !== me?.id && <button onClick={() => remove(u)} style={{ fontSize: '11px', padding: '4px 10px', color: 'var(--danger)' }}>Delete</button>}
+              {u.id !== me?.id && <button onClick={() => openEdit(u)} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px' }}>Edit</button>}
+              {u.id !== me?.id && <button onClick={() => remove(u)} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px', color: 'var(--danger)' }}>Delete</button>}
             </div>
           );
         })}

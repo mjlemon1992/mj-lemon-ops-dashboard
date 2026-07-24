@@ -60,7 +60,7 @@ export default function Locations() {
                     <option key={c} value={c}>{n} ({c})</option>
                   ))}
                 </select>
-                <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>Sets which stat-holiday calendar applies to this shop.</div>
+                <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '4px' }}>Sets which stat-holiday calendar applies to this shop.</div>
               </div>
             </div>
           </div>
@@ -75,7 +75,7 @@ export default function Locations() {
               <div className="form-group">
                 <label className="form-label">Technicians (auto-derived)</label>
                 <input type="text" value={`${form.num_technicians ?? '—'} · synced from Shopmonkey`} disabled readOnly />
-                <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>Pulled live from the Shopmonkey roster (see the Technicians page) — no longer set by hand.</div>
+                <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '4px' }}>Pulled live from the Shopmonkey roster (see the Technicians page) — no longer set by hand.</div>
               </div>
               {field('labour_rate','Labour rate ($/hr)','number',{min:1})}
             </div>
@@ -88,7 +88,7 @@ export default function Locations() {
                   const set = new Set(String(form.open_days || 'mon,tue,wed,thu,fri').split(',').map(s => s.trim()).filter(Boolean));
                   const on = set.has(k);
                   return (
-                    <label key={k} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', cursor: 'pointer' }}>
+                    <label key={k} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: 'var(--fz-body)', cursor: 'pointer' }}>
                       <input type="checkbox" checked={on} onChange={() => {
                         const next = new Set(set);
                         if (on) next.delete(k); else next.add(k);
@@ -99,7 +99,7 @@ export default function Locations() {
                   );
                 })}
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '4px' }}>
                 Holiday "days used" and the bonus schedule only count these days — closed days and stat holidays never cost anyone a day off.
               </div>
             </div>
@@ -120,7 +120,7 @@ export default function Locations() {
                 <option value="show">Show — group standings (all locations' revenue)</option>
                 <option value="hide">Hide — this shop's numbers only</option>
               </select>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '4px' }}>
                 Hide keeps other locations' figures off this TV entirely — they never leave the server.
               </div>
             </div>
@@ -129,7 +129,7 @@ export default function Locations() {
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 {['night_start', 'night_end'].map((k, i) => (
                   <React.Fragment key={k}>
-                    {i === 1 && <span style={{ color: 'var(--text3)', fontSize: '12px' }}>until</span>}
+                    {i === 1 && <span style={{ color: 'var(--text3)', fontSize: 'var(--fz-label)' }}>until</span>}
                     <select value={form[k] ?? (k === 'night_start' ? 21 : 6)}
                       onChange={e => setForm(f => ({ ...f, [k]: Number(e.target.value) }))}>
                       {Array.from({ length: 24 }, (_, h) => (
@@ -141,21 +141,21 @@ export default function Locations() {
                   </React.Fragment>
                 ))}
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '4px' }}>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '4px' }}>
                 On the TV's own clock. Set both to the same hour to turn the night screen off entirely.
               </div>
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>
+            <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>
               Efficiency = hours sold ÷ available hours (weekly hours minus this province's stat holidays).
             </div>
             {editing !== 'new' && (
-              <div style={{ fontSize: '12px', color: 'var(--text2)', marginTop: '10px' }}>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)', marginTop: '10px' }}>
                 Display URL: <span style={{ color: 'var(--accent)' }}>{window.location.origin}/display/{editing}</span>
-                <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>Open this on the shop TV and enter the PIN. It auto-refreshes every 2 hours.</div>
+                <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>Open this on the shop TV and enter the PIN. It auto-refreshes every 2 hours.</div>
               </div>
             )}
           </div>
-          {error && <div style={{ fontSize: '12px', color: 'var(--danger)', marginBottom: '12px' }}>{error}</div>}
+          {error && <div style={{ fontSize: 'var(--fz-label)', color: 'var(--danger)', marginBottom: '12px' }}>{error}</div>}
           <div className="btn-row">
             <button onClick={() => setEditing(null)}>Cancel</button>
             <button className="primary" onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save location'}</button>
@@ -182,8 +182,8 @@ export default function Locations() {
         <div key={loc.id} className="card" style={{ marginBottom: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
             <div>
-              <div style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text)' }}>{loc.name}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>{loc.city}, {loc.province} · {loc.active ? 'Active' : 'Inactive'}</div>
+              <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)' }}>{loc.name}</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>{loc.city}, {loc.province} · {loc.active ? 'Active' : 'Inactive'}</div>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button onClick={() => openEdit(loc)}>Edit</button>
@@ -206,8 +206,8 @@ export default function Locations() {
               ['Days open', String(loc.open_days || 'mon,tue,wed,thu,fri').split(',').map(d => d.trim().slice(0, 1).toUpperCase() + d.trim().slice(1, 3)).join(' ')],
             ].map(([l, v]) => (
               <div key={l}>
-                <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '2px' }}>{l}</div>
-                <div style={{ fontSize: '12px', color: 'var(--text)' }}>{v}</div>
+                <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', marginBottom: '2px' }}>{l}</div>
+                <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text)' }}>{v}</div>
               </div>
             ))}
           </div>

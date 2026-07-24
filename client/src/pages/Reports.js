@@ -14,7 +14,7 @@ export default function Reports() {
   const navigate = useNavigate();
   return (
     <div>
-      <div style={{ background: 'rgba(77,184,255,0.08)', border: '0.5px solid rgba(77,184,255,0.2)', borderRadius: 'var(--radius)', padding: '12px 16px', marginBottom: '16px', fontSize: '12px', color: 'var(--info)' }}>
+      <div style={{ background: 'rgba(77,184,255,0.08)', border: '0.5px solid rgba(77,184,255,0.2)', borderRadius: 'var(--radius)', padding: '12px 16px', marginBottom: '16px', fontSize: 'var(--fz-label)', color: 'var(--info)' }}>
         Operational reports run live from Shopmonkey. Click an available report to open it.
       </div>
       <div className="two-col">
@@ -26,9 +26,9 @@ export default function Reports() {
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
               <div style={{ fontSize: '20px', color: 'var(--text2)', flexShrink: 0, marginTop: '1px' }}>{r.icon}</div>
               <div>
-                <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '3px' }}>{r.title}</div>
-                <div style={{ fontSize: '11px', color: 'var(--text2)', marginBottom: '6px' }}>{r.sub}</div>
-                <div style={{ fontSize: '10px', color: 'var(--text3)' }}>{r.freq}</div>
+                <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)', marginBottom: '3px' }}>{r.title}</div>
+                <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)', marginBottom: '6px' }}>{r.sub}</div>
+                <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)' }}>{r.freq}</div>
               </div>
               {!r.available && <span className="badge neutral" style={{ marginLeft: 'auto', flexShrink: 0 }}>Post-closing</span>}
             </div>

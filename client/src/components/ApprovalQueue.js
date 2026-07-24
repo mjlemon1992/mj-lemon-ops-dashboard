@@ -561,12 +561,12 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       const col = st === 'sent' ? 'var(--success)' : st === 'failed' ? 'var(--danger)' : 'var(--text3)';
       const mark = st === 'sent' ? '✓' : st === 'failed' ? '✗' : '○';
       const title = st === 'failed' ? (pub[ch].error || 'failed') : st === 'sent' ? 'posted' : 'not connected yet';
-      return <span key={ch} title={`${label}: ${title}`} style={{ fontSize: '10.5px', fontFamily: "ui-monospace, Menlo, monospace", color: col, letterSpacing: '0.04em' }}>{label} {mark}</span>;
+      return <span key={ch} title={`${label}: ${title}`} style={{ fontSize: 'var(--fz-micro)', fontFamily: "ui-monospace, Menlo, monospace", color: col, letterSpacing: '0.04em' }}>{label} {mark}</span>;
     };
     return (
       <span style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
         {chip('fb', 'FB')}{chip('ig', 'IG')}{chip('gbp', 'GBP')}
-        {anyFailed && <button onClick={() => retryPublish(p.id)} style={{ fontSize: '10.5px', padding: '2px 8px' }}>Retry</button>}
+        {anyFailed && <button onClick={() => retryPublish(p.id)} style={{ fontSize: 'var(--fz-micro)', padding: '2px 8px' }}>Retry</button>}
       </span>
     );
   };
@@ -578,8 +578,8 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       onDragLeave={e => { if (e.currentTarget === e.target) setDragOver(false); }}
       onDrop={onDrop}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', gap: '12px', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>Approve &amp; post</div>
-        <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{posts.length} in queue · posting goes live once Meta/GBP access clears</span>
+        <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)' }}>Approve &amp; post</div>
+        <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{posts.length} in queue · posting goes live once Meta/GBP access clears</span>
         <div style={{ flex: 1 }} />
         <input value={note} onChange={e => setNote(e.target.value)} placeholder="optional note — e.g. 10R80 valve body, bay 3"
           style={{ width: '240px', maxWidth: '50vw' }} />
@@ -593,7 +593,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
           <button disabled={!locId} onClick={() => setLibOpen(true)}>🖼 Photo library</button>
         )}
       </div>
-      <div style={{ fontSize: '11px', color: dragOver ? 'var(--accent)' : 'var(--text3)', marginBottom: '12px' }}>
+      <div style={{ fontSize: 'var(--fz-label)', color: dragOver ? 'var(--accent)' : 'var(--text3)', marginBottom: '12px' }}>
         {dragOver ? 'Drop the photo to add it' : 'Tip: drag a photo straight from Photos or Finder anywhere onto this panel.'}
       </div>
       {notice && <div className="alert-strip" style={{ background: 'rgba(255,184,0,0.08)', borderColor: 'rgba(255,184,0,0.35)' }}><span style={{ color: 'var(--warning)' }}>{notice}</span></div>}
@@ -601,7 +601,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       {/* Generate a branded poster/ad (AI copy -> rendered to your brand template) */}
       <div style={{ marginBottom: '14px', padding: '10px 12px', background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)' }}>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text2)', fontWeight: 500 }}>Generate a poster</span>
+          <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)', fontWeight: 500 }}>Generate a poster</span>
           <select value={posterType} onChange={e => setPosterType(e.target.value)} style={{ width: 'auto' }}>
             <option value="seasonal">Seasonal</option>
             <option value="educational">Educational</option>
@@ -619,16 +619,16 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
           </button>
         </div>
         {imageGen && (
-          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '6px' }}>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '6px' }}>
             Next photo engine: <b>{imgProvider === 'gemini' ? 'Gemini' : 'OpenAI'}</b> — each generate flips to the other so you can compare.
           </div>
         )}
         {ideas.length > 0 && (
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
-            <span style={{ fontSize: '11px', color: 'var(--text3)', alignSelf: 'center' }}>Timely ideas — click to use:</span>
+            <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', alignSelf: 'center' }}>Timely ideas — click to use:</span>
             {ideas.map((idea, i) => (
               <button key={i} onClick={() => useIdea(idea)} title={idea.why || ''}
-                style={{ fontSize: '12px', textAlign: 'left', maxWidth: '280px' }}>
+                style={{ fontSize: 'var(--fz-label)', textAlign: 'left', maxWidth: '280px' }}>
                 <span style={{ color: 'var(--accent)', textTransform: 'capitalize' }}>{idea.type}</span> · {idea.label || idea.topic}
               </button>
             ))}
@@ -639,7 +639,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       {!configured && (
         <div className="alert-strip" style={{ background: 'rgba(77,184,255,0.06)', borderColor: 'rgba(77,184,255,0.3)' }}>
           <span style={{ color: 'var(--info)' }}>Caption generation not configured.</span>
-          <span style={{ fontSize: '12px', color: 'var(--text2)' }}>Set <code>ANTHROPIC_API_KEY</code> to enable photo → captions.</span>
+          <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)' }}>Set <code>ANTHROPIC_API_KEY</code> to enable photo → captions.</span>
         </div>
       )}
       {err && <div className="alert-strip" style={{ background: 'rgba(255,77,77,0.07)', borderColor: 'rgba(255,77,77,0.3)' }}><span style={{ color: 'var(--danger)' }}>{err}</span></div>}
@@ -660,18 +660,18 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
             <div className="card" key={p.id} style={{ padding: 0, overflow: 'hidden' }}>
               <div style={{ display: 'flex', gap: '14px', padding: '14px' }}>
                 {p.image
-                  ? <img src={p.image} alt="" onClick={() => setLightbox(p.image)} title="Click to enlarge" style={{ width: 130, height: 130, objectFit: 'cover', borderRadius: 8, border: '0.5px solid var(--border)', flexShrink: 0, cursor: 'zoom-in' }} />
-                  : <div style={{ width: 130, height: 130, borderRadius: 8, background: 'var(--bg3)', flexShrink: 0 }} />}
+                  ? <img src={p.image} alt="" onClick={() => setLightbox(p.image)} title="Click to enlarge" style={{ width: 130, height: 130, objectFit: 'cover', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', flexShrink: 0, cursor: 'zoom-in' }} />
+                  : <div style={{ width: 130, height: 130, borderRadius: 'var(--radius)', background: 'var(--bg3)', flexShrink: 0 }} />}
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {p.note && <div style={{ fontSize: '12px', color: 'var(--text3)' }}>note: {p.note}</div>}
+                  {p.note && <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>note: {p.note}</div>}
                   {CAPS.map(([k, label]) => (
                     <div key={k}>
                       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 3 }}>
-                        <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</div>
-                        <button onClick={() => copy(cur[k])} style={{ marginLeft: 'auto', fontSize: '10px', padding: '1px 8px', border: 0, background: 'none', color: 'var(--info)' }}>Copy</button>
+                        <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</div>
+                        <button onClick={() => copy(cur[k])} style={{ marginLeft: 'auto', fontSize: 'var(--fz-micro)', padding: '1px 8px', border: 0, background: 'none', color: 'var(--info)' }}>Copy</button>
                       </div>
                       <AutoTextarea value={cur[k] || ''} onChange={e => editField(p.id, k, e.target.value, p.captions)}
-                        style={{ width: '100%', fontSize: '12.5px', lineHeight: 1.45 }} />
+                        style={{ width: '100%', fontSize: 'var(--fz-body)', lineHeight: 1.45 }} />
                     </div>
                   ))}
                 </div>
@@ -680,7 +680,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
                 <button className="primary" onClick={() => act(p.id, 'approve')}>Approve</button>
                 {schedId === p.id ? (
                   <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                    <input type="datetime-local" value={schedVal} onChange={e => setSchedVal(e.target.value)} style={{ fontSize: '12px', padding: '4px 6px' }} />
+                    <input type="datetime-local" value={schedVal} onChange={e => setSchedVal(e.target.value)} style={{ fontSize: 'var(--fz-label)', padding: '4px 6px' }} />
                     <button onClick={() => approveAt(p.id, schedVal)} disabled={!schedVal}>Schedule</button>
                     <button onClick={() => { setSchedId(null); setSchedVal(''); }} style={{ color: 'var(--text3)', border: 0, background: 'none' }}>cancel</button>
                   </span>
@@ -709,26 +709,26 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       </div>
 
       {previewLimit && posts.length > shownDrafts.length && (
-        <button onClick={onViewAll} style={{ marginTop: '12px', width: '100%', fontSize: '13px' }}>
+        <button onClick={onViewAll} style={{ marginTop: '12px', width: '100%', fontSize: 'var(--fz-body)' }}>
           View all {posts.length} awaiting approval →
         </button>
       )}
 
       {approved.length > 0 && (
         <div style={{ marginTop: '20px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>
+          <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)' }}>
             Ready to post <span style={{ color: 'var(--text3)', fontWeight: 400 }}>({approved.length})</span>
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text3)', margin: '2px 0 10px' }}>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', margin: '2px 0 10px' }}>
             Approved and waiting — these publish automatically once Meta/GBP access is live. Scheduled ones (⏰) fire at their set time.
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {approved.map(p => (
               <div className="card" key={p.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '10px 12px', flexWrap: 'wrap' }}>
                 {p.image
-                  ? <img src={p.image} alt="" onClick={() => setLightbox(p.image)} title="Click to enlarge" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, flexShrink: 0, cursor: 'zoom-in' }} />
-                  : <div style={{ width: 44, height: 44, borderRadius: 6, background: 'var(--bg3)', flexShrink: 0 }} />}
-                <div style={{ flex: '1 1 160px', minWidth: 0, fontSize: '12px', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  ? <img src={p.image} alt="" onClick={() => setLightbox(p.image)} title="Click to enlarge" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 'var(--r-sm)', flexShrink: 0, cursor: 'zoom-in' }} />
+                  : <div style={{ width: 44, height: 44, borderRadius: 'var(--r-sm)', background: 'var(--bg3)', flexShrink: 0 }} />}
+                <div style={{ flex: '1 1 160px', minWidth: 0, fontSize: 'var(--fz-label)', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {p.captions?.ig || p.note || '(no caption)'}
                 </div>
                 {p.scheduled_for && !p.published_at
@@ -738,24 +738,24 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
                 {p.scheduled_for && !p.published_at && (
                   schedId === p.id ? (
                     <span style={{ display: 'inline-flex', gap: '5px', alignItems: 'center' }}>
-                      <input type="datetime-local" value={schedVal} onChange={e => setSchedVal(e.target.value)} style={{ fontSize: '12px', padding: '3px 5px' }} />
-                      <button onClick={() => reschedule(p.id, schedVal)} disabled={!schedVal} style={{ fontSize: '12px' }}>Set</button>
-                      <button onClick={() => { setSchedId(null); setSchedVal(''); }} style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '12px' }}>cancel</button>
+                      <input type="datetime-local" value={schedVal} onChange={e => setSchedVal(e.target.value)} style={{ fontSize: 'var(--fz-label)', padding: '3px 5px' }} />
+                      <button onClick={() => reschedule(p.id, schedVal)} disabled={!schedVal} style={{ fontSize: 'var(--fz-label)' }}>Set</button>
+                      <button onClick={() => { setSchedId(null); setSchedVal(''); }} style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: 'var(--fz-label)' }}>cancel</button>
                     </span>
                   ) : (
                     <>
-                      <button onClick={() => reschedule(p.id, null)} style={{ fontSize: '12px' }} title="Publish immediately">Post now</button>
-                      <button onClick={() => { setSchedId(p.id); setSchedVal(''); }} style={{ fontSize: '12px' }}>Reschedule</button>
+                      <button onClick={() => reschedule(p.id, null)} style={{ fontSize: 'var(--fz-label)' }} title="Publish immediately">Post now</button>
+                      <button onClick={() => { setSchedId(p.id); setSchedVal(''); }} style={{ fontSize: 'var(--fz-label)' }}>Reschedule</button>
                     </>
                   )
                 )}
-                <button onClick={() => download(p)} style={{ fontSize: '12px' }}>⬇ Image</button>
-                <button onClick={() => copy(p.captions?.ig)} style={{ fontSize: '12px' }} title="Copy Instagram caption">IG</button>
-                <button onClick={() => copy(p.captions?.fb)} style={{ fontSize: '12px' }} title="Copy Facebook caption">FB</button>
-                <button onClick={() => copy(p.captions?.gbp)} style={{ fontSize: '12px' }} title="Copy Google caption">GBP</button>
-                <button onClick={() => act(p.id, 'unapprove')} title="Back to drafts" style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '13px' }}>↩</button>
-                <button onClick={() => act(p.id, 'skip')} title="Archive" style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: '13px' }}>✕</button>
-                <button onClick={() => del(p.id)} title="Delete" style={{ color: 'var(--danger)', border: 0, background: 'none', fontSize: '13px' }}>🗑</button>
+                <button onClick={() => download(p)} style={{ fontSize: 'var(--fz-label)' }}>⬇ Image</button>
+                <button onClick={() => copy(p.captions?.ig)} style={{ fontSize: 'var(--fz-label)' }} title="Copy Instagram caption">IG</button>
+                <button onClick={() => copy(p.captions?.fb)} style={{ fontSize: 'var(--fz-label)' }} title="Copy Facebook caption">FB</button>
+                <button onClick={() => copy(p.captions?.gbp)} style={{ fontSize: 'var(--fz-label)' }} title="Copy Google caption">GBP</button>
+                <button onClick={() => act(p.id, 'unapprove')} title="Back to drafts" style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: 'var(--fz-body)' }}>↩</button>
+                <button onClick={() => act(p.id, 'skip')} title="Archive" style={{ color: 'var(--text3)', border: 0, background: 'none', fontSize: 'var(--fz-body)' }}>✕</button>
+                <button onClick={() => del(p.id)} title="Delete" style={{ color: 'var(--danger)', border: 0, background: 'none', fontSize: 'var(--fz-body)' }}>🗑</button>
               </div>
             ))}
           </div>
@@ -765,7 +765,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       {deleted.length > 0 && (
         <div style={{ marginTop: '18px' }}>
           <button onClick={() => setShowDeleted(v => !v)}
-            style={{ border: 0, background: 'none', color: 'var(--text3)', fontSize: '12px', cursor: 'pointer', padding: '4px 0' }}>
+            style={{ border: 0, background: 'none', color: 'var(--text3)', fontSize: 'var(--fz-label)', cursor: 'pointer', padding: '4px 0' }}>
             {showDeleted ? '▾' : '▸'} Recently deleted ({deleted.length})
           </button>
           {showDeleted && (
@@ -773,15 +773,15 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
               {deleted.map(p => (
                 <div className="card" key={p.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '10px 12px', flexWrap: 'wrap', opacity: 0.75 }}>
                   {p.image
-                    ? <img src={p.image} alt="" onClick={() => setLightbox(p.image)} title="Click to enlarge" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, flexShrink: 0, cursor: 'zoom-in' }} />
-                    : <div style={{ width: 44, height: 44, borderRadius: 6, background: 'var(--bg3)', flexShrink: 0 }} />}
-                  <div style={{ flex: '1 1 160px', minWidth: 0, fontSize: '12px', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    ? <img src={p.image} alt="" onClick={() => setLightbox(p.image)} title="Click to enlarge" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 'var(--r-sm)', flexShrink: 0, cursor: 'zoom-in' }} />
+                    : <div style={{ width: 44, height: 44, borderRadius: 'var(--r-sm)', background: 'var(--bg3)', flexShrink: 0 }} />}
+                  <div style={{ flex: '1 1 160px', minWidth: 0, fontSize: 'var(--fz-label)', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {p.captions?.ig || p.note || '(no caption)'}
                   </div>
-                  <span style={{ fontSize: '11px', color: 'var(--text3)' }}>
+                  <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>
                     {p.deleted_via === 'purge' ? 'auto-expired' : 'deleted'}
                   </span>
-                  <button onClick={() => restore(p.id)} style={{ fontSize: '12px' }}>↩ Restore</button>
+                  <button onClick={() => restore(p.id)} style={{ fontSize: 'var(--fz-label)' }}>↩ Restore</button>
                 </div>
               ))}
             </div>
@@ -792,7 +792,7 @@ export default function ApprovalQueue({ locId, locName, onCount, seed, reloadKey
       {lightbox && (
         <div onClick={() => setLightbox(null)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', cursor: 'zoom-out' }}>
-          <img src={lightbox} alt="" style={{ maxWidth: '92vw', maxHeight: '92vh', borderRadius: 8, boxShadow: '0 10px 50px rgba(0,0,0,0.6)' }} />
+          <img src={lightbox} alt="" style={{ maxWidth: '92vw', maxHeight: '92vh', borderRadius: 'var(--radius)', boxShadow: '0 10px 50px rgba(0,0,0,0.6)' }} />
         </div>
       )}
 

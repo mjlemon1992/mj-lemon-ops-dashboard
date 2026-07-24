@@ -107,27 +107,27 @@ function PerformanceView({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center' }}>
-        <div style={{ fontSize: '11px', color: 'var(--text3)' }}>This month &middot; {hasMetrics ? 'live from Shopmonkey \u00b7 pre-tax' : 'awaiting sync'}</div>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>This month &middot; {hasMetrics ? 'live from Shopmonkey \u00b7 pre-tax' : 'awaiting sync'}</div>
       </div>
 
       <div style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
         <div>
-          <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '4px' }}>Profit per hour</div>
-          <div style={{ fontSize: '30px', fontWeight: '500', color: 'var(--text)' }}>{pph > 0 ? `$${Math.round(pph)}` : '\u2014'}<span style={{ fontSize: '13px', color: 'var(--text3)', fontWeight: '400' }}>/hr</span></div>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginBottom: '4px' }}>Profit per hour</div>
+          <div style={{ fontSize: 'var(--fz-d2)', fontWeight: '500', color: 'var(--text)' }}>{pph > 0 ? `$${Math.round(pph)}` : '\u2014'}<span style={{ fontSize: 'var(--fz-body)', color: 'var(--text3)', fontWeight: '400' }}>/hr</span></div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '4px' }}>vs ${pphTarget} target</div>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginBottom: '4px' }}>vs ${pphTarget} target</div>
           {pph > 0 ? (
             <>
-              <div style={{ fontSize: '14px', color: pph >= pphTarget ? 'var(--success)' : 'var(--warning)', fontWeight: '500' }}>{pph >= pphTarget ? '+' : '-'}${Math.abs(Math.round(pphTarget - pph))}/hr</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{Math.round(pph / pphTarget * 100)}% of target</div>
+              <div style={{ fontSize: 'var(--fz-body)', color: pph >= pphTarget ? 'var(--success)' : 'var(--warning)', fontWeight: '500' }}>{pph >= pphTarget ? '+' : '-'}${Math.abs(Math.round(pphTarget - pph))}/hr</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{Math.round(pph / pphTarget * 100)}% of target</div>
             </>
-          ) : <div style={{ fontSize: '12px', color: 'var(--text3)' }}>awaiting sync</div>}
+          ) : <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>awaiting sync</div>}
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '4px' }}>Group efficiency</div>
-          <div style={{ fontSize: '30px', fontWeight: '500', color: 'var(--text)' }}>{groupEff != null && groupEff > 0 ? `${groupEff}%` : '\u2014'}</div>
-          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{groupEff != null && groupEff > 0 ? (groupEff >= effTarget ? `above ${effTarget}% target \u2713` : `below ${effTarget}% target`) : 'no hours yet'}</div>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginBottom: '4px' }}>Group efficiency</div>
+          <div style={{ fontSize: 'var(--fz-d2)', fontWeight: '500', color: 'var(--text)' }}>{groupEff != null && groupEff > 0 ? `${groupEff}%` : '\u2014'}</div>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{groupEff != null && groupEff > 0 ? (groupEff >= effTarget ? `above ${effTarget}% target \u2713` : `below ${effTarget}% target`) : 'no hours yet'}</div>
         </div>
       </div>
 
@@ -153,26 +153,26 @@ function PerformanceView({ locId }) {
 
       <div className={showFinancials ? 'two-col' : ''} style={{ marginBottom: '16px' }}>
         <div className="card">
-          <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '12px' }}>Metrics vs target</div>
+          <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)', marginBottom: '12px' }}>Metrics vs target</div>
           {metricsVsTarget.map(([l, a, t, ok]) => (
             <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
-              <div style={{ fontSize: '12px', color: 'var(--text2)' }}>{l}</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)' }}>{l}</div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>{a}</div>
-                <div style={{ fontSize: '11px', color: ok ? 'var(--success)' : 'var(--warning)' }}>{t}</div>
+                <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)' }}>{a}</div>
+                <div style={{ fontSize: 'var(--fz-label)', color: ok ? 'var(--success)' : 'var(--warning)' }}>{t}</div>
               </div>
             </div>
           ))}
         </div>
         {showFinancials && (
           <div className="card">
-            <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '12px' }}>Profit &amp; labour</div>
+            <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)', marginBottom: '12px' }}>Profit &amp; labour</div>
             {profitRows.map(([l, a, t]) => (
               <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text2)' }}>{l}</div>
+                <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)' }}>{l}</div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>{a}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{t}</div>
+                  <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)' }}>{a}</div>
+                  <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{t}</div>
                 </div>
               </div>
             ))}
@@ -182,14 +182,14 @@ function PerformanceView({ locId }) {
 
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-          <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>Technicians ({techCount})</div>
-          <div style={{ fontSize: '11px', color: 'var(--text3)' }}>live roster from Shopmonkey</div>
+          <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)' }}>Technicians ({techCount})</div>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>live roster from Shopmonkey</div>
         </div>
-        <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '12px' }}>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginBottom: '12px' }}>
           Hours sold = booked on tickets; hours billed = completed lines. The gap is labour discounted down (road tests, multi-checks). Hours billed counts only revenue-generating lines, so the gap is labour discounted to $0. Efficiency = hours sold ÷ hours worked; worked hours imported from Connecteam each pay period. Owner shown on a flat-hours basis (est).
         </div>
         {techs.length === 0 ? (
-          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)', fontSize: '12px' }}>
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)', fontSize: 'var(--fz-label)' }}>
             {techData && techData.roster_error ? `Roster unavailable: ${techData.roster_error}` : 'No technicians returned from Shopmonkey yet.'}
           </div>
         ) : (
@@ -233,7 +233,7 @@ function PerformanceView({ locId }) {
           </div>
         )}
         {!hasHours && techs.length > 0 && (
-          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '10px' }}>
             Roster is live. Per-tech figures populate after the next tech sync (same schedule as metrics).
           </div>
         )}

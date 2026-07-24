@@ -19,25 +19,29 @@ export default function PaceTach({ pct, size = 140 }) {
     const A0 = Math.PI * 0.75, A1 = Math.PI * 2.25;
     const ang = (f) => A0 + (A1 - A0) * f;
     const cssVar = (v, fb) => (getComputedStyle(document.documentElement).getPropertyValue(v).trim() || fb);
+    // Canvas paint styles can't resolve var() — read the token's computed
+    // value once per draw so the gauge follows the theme (verify finding:
+    // a raw var() string is silently ignored and the arc rendered black).
     const draw = (f) => {
       const steel = '#8b93a3';
+      const accent = cssVar('--accent', '#F05423');
       x.clearRect(0, 0, W, H);
-      x.beginPath(); x.arc(cx, cy, R, ang(0.85), A1); x.strokeStyle = '#F05423'; x.lineWidth = 6; x.stroke();
+      x.beginPath(); x.arc(cx, cy, R, ang(0.85), A1); x.strokeStyle = accent; x.lineWidth = 6; x.stroke();
       for (let i = 0; i <= 10; i++) {
         const a = ang(i / 10);
         x.beginPath();
         x.moveTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
         x.lineTo(cx + Math.cos(a) * (R - 8), cy + Math.sin(a) * (R - 8));
-        x.strokeStyle = i / 10 >= 0.85 ? '#F05423' : steel; x.lineWidth = 2; x.stroke();
+        x.strokeStyle = i / 10 >= 0.85 ? accent : steel; x.lineWidth = 2; x.stroke();
       }
       const a = ang(f);
       x.beginPath();
       x.moveTo(cx + Math.cos(a + Math.PI / 2) * 3, cy + Math.sin(a + Math.PI / 2) * 3);
       x.lineTo(cx + Math.cos(a) * (R - 11), cy + Math.sin(a) * (R - 11));
       x.lineTo(cx + Math.cos(a - Math.PI / 2) * 3, cy + Math.sin(a - Math.PI / 2) * 3);
-      x.closePath(); x.fillStyle = '#F05423'; x.fill();
+      x.closePath(); x.fillStyle = accent; x.fill();
       x.beginPath(); x.arc(cx, cy, 4.5, 0, 7); x.fillStyle = cssVar('--text', '#e0e0e0'); x.fill();
-      x.fillStyle = '#F05423'; x.font = `700 ${Math.round(W * 0.09)}px 'Avenir Next Condensed','Barlow Condensed','Arial Narrow',sans-serif`;
+      x.fillStyle = accent; x.font = `700 ${Math.round(W * 0.09)}px 'Avenir Next Condensed','Barlow Condensed','Arial Narrow',sans-serif`;
       x.textAlign = 'center';
       x.fillText(pct != null ? Math.round(pct) : '—', cx, cy + R * 0.55);
       x.fillStyle = steel; x.font = '600 8px ui-monospace, Menlo, monospace';

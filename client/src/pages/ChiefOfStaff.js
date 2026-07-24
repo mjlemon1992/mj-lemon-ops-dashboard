@@ -52,35 +52,35 @@ export default function ChiefOfStaff() {
 
   return (
     <div style={{ maxWidth: 880 }}>
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '16px', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginBottom: '16px', lineHeight: 1.5 }}>
         Always-on jobs the dashboard runs for you — even when Claude is closed. The full chief of staff lives in your Claude app (Atlas); this page is just the scheduler.
       </div>
 
       {/* CREATE AN AUTOMATION */}
       <div className="card" style={{ marginBottom: '20px', borderLeft: '3px solid var(--accent)' }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>Schedule an automation</div>
+        <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>Schedule an automation</div>
         <textarea
           value={cmd}
           onChange={e => setCmd(e.target.value)}
           onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') sendCommand(); }}
           placeholder={'e.g. "Send me a marketing digest at 10pm every day" · "Draft 2 marketing posts each week for approval"'}
           rows={2}
-          style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg3)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '10px', fontSize: '13px', color: 'var(--text)', resize: 'vertical', fontFamily: 'inherit' }}
+          style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg3)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '10px', fontSize: 'var(--fz-body)', color: 'var(--text)', resize: 'vertical', fontFamily: 'inherit' }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px', flexWrap: 'wrap' }}>
           <button onClick={sendCommand} disabled={!cmd.trim() || cmdBusy}
-            style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', padding: '7px 14px', fontSize: '13px', fontWeight: 500, cursor: cmd.trim() ? 'pointer' : 'default', opacity: cmd.trim() ? 1 : 0.5 }}>
+            style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', padding: '7px 14px', fontSize: 'var(--fz-body)', fontWeight: 500, cursor: cmd.trim() ? 'pointer' : 'default', opacity: cmd.trim() ? 1 : 0.5 }}>
             {cmdBusy ? 'Setting up…' : 'Create'}
           </button>
-          <span style={{ fontSize: '11px', color: 'var(--text3)' }}>⌘↵ to send · nothing posts or sends without your approval</span>
+          <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>⌘↵ to send · nothing posts or sends without your approval</span>
         </div>
-        {cmdReply && <div style={{ fontSize: '13px', color: 'var(--success)', marginTop: '10px', background: 'var(--bg3)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>{cmdReply}</div>}
+        {cmdReply && <div style={{ fontSize: 'var(--fz-body)', color: 'var(--success)', marginTop: '10px', background: 'var(--bg3)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>{cmdReply}</div>}
       </div>
 
       {/* ACTIVE AUTOMATIONS */}
-      <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '10px' }}>Active automations</div>
+      <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)', marginBottom: '10px' }}>Active automations</div>
       {autos.length === 0 ? (
-        <div className="card" style={{ fontSize: '13px', color: 'var(--text2)', marginBottom: '24px' }}>
+        <div className="card" style={{ fontSize: 'var(--fz-body)', color: 'var(--text2)', marginBottom: '24px' }}>
           None yet — schedule one above.
         </div>
       ) : (
@@ -88,13 +88,13 @@ export default function ChiefOfStaff() {
           {autos.map(a => (
             <div key={a.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', opacity: a.enabled ? 1 : 0.5 }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '13px', color: 'var(--text)' }}>{a.title}</div>
-                <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '3px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <div style={{ fontSize: 'var(--fz-body)', color: 'var(--text)' }}>{a.title}</div>
+                <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', marginTop: '3px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   {a.action_type.replace(/_/g, ' ')} · {scheduleText(a)}{a.params && a.params.count ? ` · ${a.params.count}x` : ''}
                 </div>
               </div>
               <button onClick={() => toggleAuto(a.id)} disabled={busyId === a.id}
-                style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 10px', cursor: 'pointer', fontSize: '12px', color: a.enabled ? 'var(--success)' : 'var(--text3)' }}>
+                style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 10px', cursor: 'pointer', fontSize: 'var(--fz-label)', color: a.enabled ? 'var(--success)' : 'var(--text3)' }}>
                 {a.enabled ? 'On' : 'Off'}
               </button>
             </div>
@@ -104,11 +104,11 @@ export default function ChiefOfStaff() {
 
       {/* PREFERENCES (the standing rules these jobs apply) */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '10px' }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Preferences these jobs apply</div>
-        <div style={{ fontSize: '11px', color: 'var(--text3)' }}>👍 keep · 👎 drop</div>
+        <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)' }}>Preferences these jobs apply</div>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>👍 keep · 👎 drop</div>
       </div>
       {learnings.length === 0 ? (
-        <div className="card" style={{ fontSize: '13px', color: 'var(--text2)' }}>
+        <div className="card" style={{ fontSize: 'var(--fz-body)', color: 'var(--text2)' }}>
           No preferences yet. Add one above, e.g. “always lead the digest with parts margin”.
         </div>
       ) : (
@@ -116,17 +116,17 @@ export default function ChiefOfStaff() {
           {learnings.map(l => (
             <div key={l.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', opacity: busyId === l.id ? 0.5 : 1 }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '13px', color: 'var(--text)' }}>{l.insight}</div>
-                <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '3px', display: 'flex', gap: '8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <div style={{ fontSize: 'var(--fz-body)', color: 'var(--text)' }}>{l.insight}</div>
+                <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', marginTop: '3px', display: 'flex', gap: '8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   <span>{CAT_LABEL[l.category] || l.category}</span>
                   <span>conf {l.confidence}/10</span>
                   <span>{l.source}</span>
                 </div>
               </div>
               <button onClick={() => vote(l.id, 'up')} disabled={busyId === l.id} title="Reinforce"
-                style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', cursor: 'pointer', fontSize: '13px' }}>👍</button>
+                style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', cursor: 'pointer', fontSize: 'var(--fz-body)' }}>👍</button>
               <button onClick={() => vote(l.id, 'down')} disabled={busyId === l.id} title="Drop this"
-                style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', cursor: 'pointer', fontSize: '13px' }}>👎</button>
+                style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', cursor: 'pointer', fontSize: 'var(--fz-body)' }}>👎</button>
             </div>
           ))}
         </div>

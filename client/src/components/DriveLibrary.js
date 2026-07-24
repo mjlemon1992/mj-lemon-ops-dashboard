@@ -64,16 +64,16 @@ export default function DriveLibrary({ locId, onImported, onClose, defaultNote }
         <div onClick={e => e.stopPropagation()}
           style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '14px 16px', maxWidth: '760px', width: '100%', maxHeight: '84vh', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>Photo library</div>
-            <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Google Drive · tap to preview, then add</span>
+            <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)' }}>Photo library</div>
+            <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>Google Drive · tap to preview, then add</span>
             <div style={{ flex: 1 }} />
-            <button onClick={() => load()} disabled={loading} style={{ fontSize: '12px', padding: '4px 9px' }}>{loading ? 'Loading…' : '↻'}</button>
+            <button onClick={() => load()} disabled={loading} style={{ fontSize: 'var(--fz-label)', padding: '4px 9px' }}>{loading ? 'Loading…' : '↻'}</button>
             <button onClick={onClose} title="Close" style={{ border: 0, background: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
           </div>
 
-          {err && <div style={{ fontSize: '11.5px', color: 'var(--danger)' }}>{err}</div>}
+          {err && <div style={{ fontSize: 'var(--fz-label)', color: 'var(--danger)' }}>{err}</div>}
           {!loading && !err && !files.length && (
-            <div style={{ fontSize: '12px', color: 'var(--text3)', padding: '12px 0' }}>
+            <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', padding: '12px 0' }}>
               No photos in the Drive folder yet — add some from your phone's Drive app, then hit ↻.
             </div>
           )}
@@ -81,11 +81,11 @@ export default function DriveLibrary({ locId, onImported, onClose, defaultNote }
           <div style={{ overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))', gap: '8px' }}>
             {files.map((f, idx) => (
               <button key={f.id} onClick={() => setPreviewIdx(idx)} title={`Preview ${f.name}`}
-                style={{ position: 'relative', padding: 0, border: '0.5px solid var(--border2)', borderRadius: '8px', overflow: 'hidden', aspectRatio: '1 / 1', cursor: 'pointer', background: 'var(--bg3)' }}>
+                style={{ position: 'relative', padding: 0, border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)', overflow: 'hidden', aspectRatio: '1 / 1', cursor: 'pointer', background: 'var(--bg3)' }}>
                 <AuthImg url={`/api/marketing/drive/${locId}/thumb/${f.id}`} token={token} alt={f.name}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 {done[f.id] && (
-                  <span style={{ position: 'absolute', top: 4, right: 4, background: 'var(--success)', color: '#0d1410', fontSize: '10px', fontWeight: 600, padding: '1px 5px', borderRadius: '10px' }}>✓</span>
+                  <span style={{ position: 'absolute', top: 4, right: 4, background: 'var(--success)', color: '#0d1410', fontSize: 'var(--fz-micro)', fontWeight: 600, padding: '1px 5px', borderRadius: 'var(--radius)' }}>✓</span>
                 )}
               </button>
             ))}
@@ -99,11 +99,11 @@ export default function DriveLibrary({ locId, onImported, onClose, defaultNote }
           <div onClick={e => e.stopPropagation()}
             style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '14px', maxWidth: '720px', width: '100%', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{preview.name}</div>
-              <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{when(preview.createdTime)} · {previewIdx + 1}/{files.length}</span>
+              <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{preview.name}</div>
+              <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{when(preview.createdTime)} · {previewIdx + 1}/{files.length}</span>
               <button onClick={() => setPreviewIdx(null)} style={{ marginLeft: 'auto', border: 0, background: 'none', color: 'var(--text3)', fontSize: '18px', cursor: 'pointer' }} title="Back to grid">✕</button>
             </div>
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', borderRadius: '8px', overflow: 'hidden' }}>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
               <AuthImg url={`/api/marketing/drive/${locId}/thumb/${preview.id}?size=1200`} token={token} alt={preview.name}
                 style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain' }} />
               {files.length > 1 && <>
@@ -116,7 +116,7 @@ export default function DriveLibrary({ locId, onImported, onClose, defaultNote }
               <button className="primary" disabled={!!busy[preview.id]} onClick={() => importFile(preview)}>
                 {busy[preview.id] ? 'Adding…' : '＋ Add to posts'}
               </button>
-              {done[preview.id] && <span style={{ fontSize: '12px', color: 'var(--success)' }}>Added ✓</span>}
+              {done[preview.id] && <span style={{ fontSize: 'var(--fz-label)', color: 'var(--success)' }}>Added ✓</span>}
               <span style={{ flex: 1 }} />
               <button onClick={() => setPreviewIdx(null)}>Back</button>
             </div>

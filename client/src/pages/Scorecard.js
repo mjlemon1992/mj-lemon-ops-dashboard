@@ -81,16 +81,16 @@ function ScorecardView({ locId }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{monthName()} · the one-screen read</span>
+        <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{monthName()} · the one-screen read</span>
       </div>
 
       {/* The books — QBO */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '10px' }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>The books</div>
-        <div style={{ fontSize: '11px', color: 'var(--text3)' }}>QuickBooks · month to date</div>
+        <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)' }}>The books</div>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>QuickBooks · month to date</div>
       </div>
       {pnlErr || !pnl ? (
-        <div className="card" style={{ color: 'var(--text3)', padding: '18px', marginBottom: '18px', fontSize: '12px' }}>
+        <div className="card" style={{ color: 'var(--text3)', padding: '18px', marginBottom: '18px', fontSize: 'var(--fz-label)' }}>
           QuickBooks not connected for this view yet — the operations numbers below are live.
         </div>
       ) : (
@@ -110,8 +110,8 @@ function ScorecardView({ locId }) {
 
       {/* Operations — Shopmonkey */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '10px' }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Operations</div>
-        <div style={{ fontSize: '11px', color: 'var(--text3)' }}>Shopmonkey · {hasMetrics ? 'live · pre-tax' : 'awaiting sync'}</div>
+        <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)' }}>Operations</div>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>Shopmonkey · {hasMetrics ? 'live · pre-tax' : 'awaiting sync'}</div>
       </div>
       <div className="stat-grid">
         <Tile label="Revenue MTD" value={hasMetrics ? money0(revenue) : '—'}

@@ -31,8 +31,8 @@ export default function ShotsList({ locId, onCount, onUse }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>This week's shots</div>
-        <span style={{ fontSize: '11px', color: 'var(--text3)' }}>
+        <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)' }}>This week's shots</div>
+        <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>
           {openOrders != null ? `from ${openOrders} open jobs · grounded in the bench` : 'from your open repair orders'}
         </span>
         <div style={{ flex: 1 }} />
@@ -56,17 +56,17 @@ export default function ShotsList({ locId, onCount, onUse }) {
             role={onUse ? 'button' : undefined} tabIndex={onUse ? 0 : undefined}
             title={onUse ? 'Use this shot — tags your next capture' : undefined}
             style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', padding: '12px 14px', cursor: onUse ? 'pointer' : 'default' }}>
-            <div style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 8, border: '0.5px solid var(--border2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', fontSize: 16 }}>📷</div>
+            <div style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius)', border: '0.5px solid var(--border2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', fontSize: 16 }}>📷</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text)' }}>{s.shot}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: 1 }}>
+              <div style={{ fontSize: 'var(--fz-body)', fontWeight: 500, color: 'var(--text)' }}>{s.shot}</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: 1 }}>
                 {s.vehicle || 'Vehicle'}{s.ro ? ` · RO #${s.ro}` : ''}
               </div>
-              {s.why && <div style={{ fontSize: '12px', color: 'var(--text2)', marginTop: 4 }}>{s.why}</div>}
+              {s.why && <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)', marginTop: 4 }}>{s.why}</div>}
             </div>
-            {onUse && <span style={{ alignSelf: 'center', fontSize: '11px', fontWeight: 500, color: 'var(--accent)', whiteSpace: 'nowrap' }}>Use →</span>}
+            {onUse && <span style={{ alignSelf: 'center', fontSize: 'var(--fz-label)', fontWeight: 500, color: 'var(--accent)', whiteSpace: 'nowrap' }}>Use →</span>}
             <button onClick={e => { e.stopPropagation(); dismiss(i); }} title="Dismiss this shot"
-              style={{ alignSelf: 'center', border: 0, background: 'none', color: 'var(--text3)', fontSize: '14px', lineHeight: 1, padding: '2px 4px', cursor: 'pointer' }}>✕</button>
+              style={{ alignSelf: 'center', border: 0, background: 'none', color: 'var(--text3)', fontSize: 'var(--fz-body)', lineHeight: 1, padding: '2px 4px', cursor: 'pointer' }}>✕</button>
           </div>
         ))}
       </div>
