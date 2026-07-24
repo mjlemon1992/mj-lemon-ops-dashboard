@@ -11,7 +11,9 @@ import { fmtShortDate, fmtClock, monthLabel, money, OFF_LABEL } from '../utils/f
 const fmtD = fmtShortDate;
 const fmtT = fmtClock;
 
-export default function WaitingRail({ detail, api, onAction, onClose, onDismiss, multiLoc }) {
+// `embedded` renders just the cards (no header/footer) for the Inbox drawer;
+// `onNavigate` lets the host close itself when a deep-link fires.
+export default function WaitingRail({ detail, api, onAction, onClose, onDismiss, multiLoc, embedded = false, onNavigate }) {
   const navigate = useNavigate();
   const { select } = useLocations();
   const { user } = useAuth();
@@ -21,7 +23,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
   const { timeoff = [], edits = [], fuel = [], reorders = [], clockq = [], bonus = [], parts = [] } = detail || {};
   const total = timeoff.length + edits.length + fuel.length + reorders.length + clockq.length + bonus.length + parts.length;
   // Deep-links must land on the card's own shop, not whatever is globally selected.
-  const goTo = (locationId, path) => { select(locationId); navigate(path); };
+  const goTo = (locationId, path) => { select(locationId); navigate(path); onNavigate && onNavigate(); };
 
   const act = async (fn, doneMsg) => {
     setBusy(true);
@@ -48,15 +50,15 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
   );
 
   return (
-    <div className="wr-rail">
-      <div className="wr-head">
+    <div className={embedded ? undefined : 'wr-rail'}>
+      {!embedded && <div className="wr-head">
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
           <div className="wr-title">Waiting on you</div>
           <button onClick={onClose} title="Hide the rail — the ⏳ pill up top brings it back"
             style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 'var(--fz-title)', padding: '0 2px', lineHeight: 1 }}>✕</button>
         </div>
         <div className="wr-sub">{total} item{total === 1 ? '' : 's'}</div>
-      </div>
+      </div>}
 
       {timeoff.map((r) => (
         <div key={r.id} className="wr-card hot">
@@ -74,6 +76,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
             <button disabled={busy} onClick={async () => {
               if (await askConfirm({ title: 'Deny request', body: `Deny ${r.person_name}'s request for ${fmtD(r.start_date)}–${fmtD(r.end_date)}?`, confirmLabel: 'Deny', danger: true })) decideOff(r, 'deny');
             }}>Deny</button>
+            <button onClick={() => goTo(r.location_id, '/time-clock')} title="Open on the Time Clock page">Open →</button>
           </div>
         </div>
       ))}
@@ -96,6 +99,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
               title={!r.entry_id && !(r.proposed_clock_in && r.proposed_clock_out) ? 'A missing punch needs both proposed times — fix it from Time Clock' : undefined}
               onClick={() => decideEdit(r, 'apply')}>Apply</button>
             <button disabled={busy} onClick={() => decideEdit(r, 'dismissed')}>Dismiss</button>
+            <button onClick={() => goTo(r.location_id, '/time-clock')} title="Open on the Time Clock page — needed when a missing punch can't be applied from here">Open →</button>
           </div>
         </div>
       ))}
@@ -123,6 +127,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
               : <button className="primary" disabled={busy} onClick={() => decideReorder(r, 'ordered')}>Mark ordered</button>}
             {/* Killing a tech's request is an owner/manager call — advisors order and receive. */}
             {user?.role !== 'advisor' && <button disabled={busy} onClick={() => decideReorder(r, 'dismissed')}>Dismiss</button>}
+            <button onClick={() => goTo(r.location_id, user?.role === 'advisor' ? '/reorders' : '/time-clock')} title="Open the board">Open →</button>
           </div>
         </div>
       ))}
@@ -139,6 +144,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
           <div className="wr-actions">
             <button className="primary" disabled={busy} onClick={() => decideClockq(r, 'approve')}>Apply to pay</button>
             <button disabled={busy} onClick={() => decideClockq(r, 'dismiss')}>Dismiss</button>
+            <button onClick={() => goTo(r.location_id, '/time-clock')} title="Open on the Time Clock page">Open →</button>
           </div>
         </div>
       ))}
@@ -165,7 +171,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
         </div>
       ))}
 
-      <div className="wr-foot">Every decision from every page lands here. Approvals update payroll, the kiosk and Shopmonkey instantly.</div>
+      {!embedded && <div className="wr-foot">Every decision from every page lands here. Approvals update payroll, the kiosk and Shopmonkey instantly.</div>}
     </div>
   );
 }

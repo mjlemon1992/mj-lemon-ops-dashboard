@@ -5,7 +5,7 @@ import { useLocations } from '../context/LocationContext';
 import { parseAlerts, alertId } from '../utils/alerts';
 import Icon from './Icon';
 import { FeedbackHost, showToast } from './Feedback';
-import WaitingRail from './WaitingRail';
+import Inbox from './Inbox';
 import { pushSupported, pushState, enablePush, disablePush, playChime } from '../utils/push';
 
 // Grouped nav (2026-07-17 refresh): same items, same roles — organized into five
@@ -48,12 +48,18 @@ export default function Layout() {
   }, [theme]);
   const navigate = useNavigate();
   const location = useLocation();
-  const [alertCount, setAlertCount] = useState(0);
+  const [watchAlerts, setWatchAlerts] = useState([]);   // visible (undismissed) Watch feed
+  const [ackedLocal, setAckedLocal] = useState(() => new Set());  // acked this session
+  const alertCount = watchAlerts.filter(a => !ackedLocal.has(alertId(a))).length;
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth <= 768);
   const [navOpen, setNavOpen] = useState(false);
   const [attention, setAttention] = useState({ items: [], total: 0, detail: null });
-  const [attnOpen, setAttnOpen] = useState(false);
-  const [railOpen, setRailOpen] = useState(() => localStorage.getItem('ops_rail') !== 'off');
+  // Phase 2: the unified Inbox drawer replaces the ⏳ pill popover, the
+  // Home-pinned rail and the separate alerts badge. ops_rail localStorage
+  // key retired (harmless if present on devices).
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const inboxOpenRef = React.useRef(false);
+  useEffect(() => { inboxOpenRef.current = inboxOpen; }, [inboxOpen]);
 
   // "Waiting on you" — human queues (holiday requests, punch changes,
   // unassigned fuel, bonus prompt). One aggregate call, refreshed every minute.
@@ -72,7 +78,7 @@ export default function Layout() {
         if (!d || !Array.isArray(d.items)) return;
         if (prevTotal.current != null && d.total > prevTotal.current) {
           playChime();
-          setUnseen(true);
+          if (!inboxOpenRef.current) setUnseen(true);
           showToast(`⏳ ${d.total - prevTotal.current} new item${d.total - prevTotal.current === 1 ? '' : 's'} waiting on you`);
         }
         if (d.total === 0) setUnseen(false);
@@ -128,15 +134,9 @@ export default function Layout() {
     parts: (_raw.parts || []).filter(p => !dismissed.has(`parts-${p.id}`)),
   };
   const railCount = d.timeoff.length + d.edits.length + d.fuel.length + d.reorders.length + d.clockq.length + d.bonus.length + d.parts.length;
-  // Full rail only on Home — elsewhere the ⏳ pill opens the same dropdown popover
-  // (below) so content pages keep their full width instead of a persistent column.
-  const onHome = location.pathname === '/';
-  const showRail = !isMobile && railOpen && railCount > 0 && onHome;
-  const toggleRail = () => {
-    setUnseen(false);   // queue opened — stop the shake + title flash
-    if (isMobile) { setAttnOpen(o => !o); return; }
-    setRailOpen(o => { localStorage.setItem('ops_rail', o ? 'off' : 'on'); return !o; });
-  };
+  const visibleWatch = watchAlerts.filter(a => !ackedLocal.has(alertId(a)));
+  const inboxCount = railCount + visibleWatch.length;
+  const openInbox = () => { setUnseen(false); setInboxOpen(true); };
 
   // Collapse the sidebar into a drawer on phones; restore it on wider screens.
   useEffect(() => {
@@ -154,14 +154,18 @@ export default function Layout() {
   useEffect(() => {
     if (!user) return undefined;
     let cancelled = false;
-    const path = isAll ? '/metrics/group/summary' : `/metrics/${selectedId}/summary`;
+    // Advisors can't read the group rollup (firewalled) — pin them to their
+    // own shop so the Watch feed is honest instead of silently empty.
+    const path = (user.role === 'advisor' && user.location_id)
+      ? `/metrics/${user.location_id}/summary`
+      : (isAll ? '/metrics/group/summary' : `/metrics/${selectedId}/summary`);
     Promise.all([api(path), api('/cos/alerts/dismissed').catch(() => [])])
       .then(([res, dismissed]) => {
         const rows = Array.isArray(res) ? res : [res];
         const dset = new Set(dismissed || []);
-        return rows.reduce((n, m) => n + parseAlerts(m).filter(a => !dset.has(alertId(a))).length, 0);
+        return rows.flatMap(m => parseAlerts(m)).filter(a => !dset.has(alertId(a)));
       })
-      .then(n => { if (!cancelled) setAlertCount(n); })
+      .then(list => { if (!cancelled) { setWatchAlerts(list); setAckedLocal(new Set()); } })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [user, api, isAll, selectedId]);
@@ -286,51 +290,13 @@ export default function Layout() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, position: 'relative' }}>
-            {railCount > 0 && (
-              <>
-                <div className={`badge warning${unseen ? ' pill-shake' : ''}`} style={{ cursor: 'pointer', userSelect: 'none', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                  onClick={() => ((!isMobile && onHome) ? toggleRail() : setAttnOpen(o => !o))}>
-                  <Icon name="hourglass" size={12} /> {railCount}{isMobile ? '' : ' waiting on you'}
-                </div>
-                {attnOpen && (
-                  <>
-                    <div onClick={() => setAttnOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
-                    <div style={{ position: 'absolute', top: '40px', right: 0, zIndex: 61, minWidth: 260, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 8px 28px rgba(0,0,0,0.35)', padding: '6px', maxHeight: '60vh', overflowY: 'auto' }}>
-                      <div className="section-label" style={{ padding: '6px 10px 4px' }}>Waiting on you</div>
-                      {/* Built from the SAME filtered detail as the pill and rail —
-                          bonus prompts included, dismissed cards excluded. */}
-                      {[
-                        ...d.timeoff.map(r => ({ key: `to-${r.id}`, icon: '🏖', text: `${r.person_name} — holiday request`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
-                        ...d.edits.map(r => ({ key: `ed-${r.id}`, icon: '✎', text: `${r.person_name} — punch change`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
-                        ...d.fuel.map(r => ({ key: `fu-${r.location_id}`, icon: '⛽', text: `${r.n} unassigned fuel purchase${r.n === 1 ? '' : 's'}`, loc: r.location_id, locName: r.location_name, path: '/fuel-card', dismissKey: `fuel-${r.location_id}-${r.n}-${r.total}` })),
-                        ...d.reorders.map(r => ({ key: `ro-${r.id}`, icon: '📦', text: `Re-order: ${r.item}`, loc: r.location_id, locName: r.location_name, path: user?.role === 'advisor' ? '/reorders' : '/time-clock' })),
-                        ...d.clockq.map(r => ({ key: `cq-${r.id}`, icon: '⏱', text: `${r.person_name} — ${r.kind === 'overtime' ? 'overtime' : 'missed break'}`, loc: r.location_id, locName: r.location_name, path: '/time-clock' })),
-                        ...d.bonus.map(b => ({ key: `bo-${b.location_id}`, icon: '◆', text: `Bonus — ${b.status === 'draft' ? 'draft awaiting lock' : 'month open'}`, loc: b.location_id, locName: b.location_name, path: '/bonus', dismissKey: `bonus-${b.location_id}-${b.month}` })),
-                        ...d.parts.map(r => ({ key: `pt-${r.id}`, icon: '🔧', text: r.text, loc: r.location_id, locName: r.location_name, path: `/parts?tab=${r.kind === 'statement' ? 'statements' : r.kind === 'warranty' ? 'warranty' : 'invoices'}`, dismissKey: `parts-${r.id}` })),
-                      ].map((it) => (
-                        <div key={it.key}
-                          onClick={() => { setAttnOpen(false); select(it.loc); navigate(it.path); }}
-                          style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: 'var(--r-sm)', cursor: 'pointer', fontSize: 'var(--fz-body)', color: 'var(--text)' }}
-                          onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg3)'; }}
-                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
-                          <span style={{ fontSize: 'var(--fz-body)' }}>{it.icon}</span>
-                          <span style={{ flex: 1 }}>{it.text}</span>
-                          <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{it.locName}</span>
-                          {it.dismissKey && (
-                            <button title="Dismiss this notification — the item itself stays on its page"
-                              onClick={(e) => { e.stopPropagation(); dismissCard(it.dismissKey); }}
-                              style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 'var(--fz-body)', padding: '0 2px', lineHeight: 1 }}>✕</button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-            {alertCount > 0 && !onHome && (
-              <div className="badge danger" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }} onClick={() => navigate('/alerts')}>
-                <Icon name="alertTriangle" size={12} /> {alertCount}{isMobile ? '' : ' active alerts'}
+            {canQueue && (
+              <div className={`badge ${inboxCount > 0 ? 'warning' : 'neutral'}${unseen ? ' pill-shake' : ''}`}
+                role="button" tabIndex={0} aria-label="Open inbox"
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openInbox(); } }}
+                onClick={openInbox}
+                style={{ cursor: 'pointer', userSelect: 'none', display: 'inline-flex', alignItems: 'center', gap: '5px', fontVariantNumeric: 'tabular-nums' }}>
+                <Icon name="mail" size={12} /> {isMobile ? (inboxCount || '') : `Inbox${inboxCount ? ` · ${inboxCount}` : ''}`}
               </div>
             )}
             {canQueue && pushSupported() && (
@@ -355,13 +321,13 @@ export default function Layout() {
           <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 14px' : '20px 24px', minWidth: 0 }}>
             <Outlet />
           </div>
-          {showRail && (
-            <div style={{ width: 300, flexShrink: 0, overflowY: 'auto', borderLeft: '0.5px solid var(--border)', background: 'var(--bg2)' }}>
-              <WaitingRail detail={d} api={api} onAction={loadAttention} onClose={toggleRail} onDismiss={dismissCard} multiLoc={locations.length > 1} />
-            </div>
-          )}
+
         </div>
       </div>
+      <Inbox open={inboxOpen} onClose={() => { setInboxOpen(false); setUnseen(false); }} detail={d} api={api}
+        onAction={loadAttention} onDismiss={dismissCard} multiLoc={locations.length > 1}
+        alerts={visibleWatch}
+        onAlertAcked={(id) => setAckedLocal(prev => { const n = new Set(prev); n.add(id); return n; })} />
       <FeedbackHost />
     </div>
   );
