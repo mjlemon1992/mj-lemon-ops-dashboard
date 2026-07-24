@@ -34,14 +34,14 @@ export default function ReportSummary() {
 
   return (
     <div>
-      <button onClick={() => navigate('/reports')} style={{ fontSize: '12px', color: 'var(--text2)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>&larr; Reports</button>
+      <button onClick={() => navigate('/reports')} style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>&larr; Reports</button>
       <h2 style={{ fontSize: '20px', margin: '4px 0 2px' }}>{meta.title}</h2>
-      <div style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '16px' }}>{meta.blurb} · live from Shopmonkey</div>
+      <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)', marginBottom: '16px' }}>{meta.blurb} · live from Shopmonkey</div>
       {loading ? <div style={{ color: 'var(--text3)' }}>Loading…</div> : (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--fz-body)' }}>
             <thead>
-              <tr style={{ borderBottom: '0.5px solid var(--border)', color: 'var(--text3)', fontSize: '11px' }}>
+              <tr style={{ borderBottom: '0.5px solid var(--border)', color: 'var(--text3)', fontSize: 'var(--fz-label)' }}>
                 <th style={cellL}>Location</th><th style={cell}>Revenue MTD</th><th style={cell}>Cars</th>
                 <th style={cell}>Parts margin</th><th style={cell}>Labour margin</th><th style={cell}>Avg RO</th>
               </tr>

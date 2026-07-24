@@ -60,13 +60,13 @@ export default function Alerts() {
             {alert.type === 'stale' ? '⏱' : '◈'}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               {alert.type === 'stale' ? 'Stale vehicle' : 'Margin flag'} · {alert.location}
             </div>
-            <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '2px' }}>{alertTitle(alert)}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text2)' }}>{alertSub(alert)}</div>
+            <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)', marginBottom: '2px' }}>{alertTitle(alert)}</div>
+            <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)' }}>{alertSub(alert)}</div>
           </div>
-          <button onClick={() => { const id = alertId(alert); setResolved(prev => [...prev, id]); api('/cos/alerts/ack', { method: 'POST', body: JSON.stringify({ keys: [id] }) }).catch(() => {}); }} style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}>
+          <button onClick={() => { const id = alertId(alert); setResolved(prev => [...prev, id]); api('/cos/alerts/ack', { method: 'POST', body: JSON.stringify({ keys: [id] }) }).catch(() => {}); }} style={{ fontSize: 'var(--fz-label)', padding: '4px 10px', flexShrink: 0 }}>
             Resolve
           </button>
         </div>

@@ -40,10 +40,10 @@ export default function ReportTechEfficiency() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-        <button onClick={() => navigate('/reports')} style={{ fontSize: '12px', color: 'var(--text2)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>&larr; Reports</button>
+        <button onClick={() => navigate('/reports')} style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>&larr; Reports</button>
       </div>
       <h2 style={{ fontSize: '20px', margin: '0 0 2px' }}>Technician efficiency</h2>
-      <div style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '16px' }}>{loc ? loc.name : ''} · live from Shopmonkey · sold hours / worked hours</div>
+      <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)', marginBottom: '16px' }}>{loc ? loc.name : ''} · live from Shopmonkey · sold hours / worked hours</div>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
         <button onClick={() => setPeriod('mtd')} className="badge" style={{ cursor: 'pointer', background: period === 'mtd' ? 'var(--accent)' : 'var(--bg3)', color: period === 'mtd' ? '#000' : 'var(--text2)' }}>This month</button>
@@ -52,9 +52,9 @@ export default function ReportTechEfficiency() {
 
       {loading ? <div style={{ color: 'var(--text3)' }}>Loading…</div> : (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--fz-body)' }}>
             <thead>
-              <tr style={{ borderBottom: '0.5px solid var(--border)', color: 'var(--text3)', fontSize: '11px' }}>
+              <tr style={{ borderBottom: '0.5px solid var(--border)', color: 'var(--text3)', fontSize: 'var(--fz-label)' }}>
                 <th style={cellL}>Technician</th>
                 <th style={cell}>Hours sold</th>
                 <th style={cell}>Hours worked</th>

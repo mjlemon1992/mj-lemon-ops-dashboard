@@ -53,7 +53,7 @@ export default function WaitingRail({ detail, api, onAction, onClose, onDismiss,
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
           <div className="wr-title">Waiting on you</div>
           <button onClick={onClose} title="Hide the rail — the ⏳ pill up top brings it back"
-            style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '16px', padding: '0 2px', lineHeight: 1 }}>✕</button>
+            style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 'var(--fz-title)', padding: '0 2px', lineHeight: 1 }}>✕</button>
         </div>
         <div className="wr-sub">{total} item{total === 1 ? '' : 's'}</div>
       </div>

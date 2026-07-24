@@ -1,22 +1,52 @@
 :root {
+  /* ── OPS 1.0 tokens (Phase 1 of the redesign). Values are the contract:
+     every inline style should reference these, never restate them. ── */
+
   /* OPS display face: plate-condensed for headings and hero numbers.
      Avenir Next Condensed on Apple devices, Barlow Condensed elsewhere. */
   --font-disp: 'Avenir Next Condensed', 'Barlow Condensed', 'Archivo', 'Arial Narrow', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Shop (dark) theme — the default. Neutrals carry a 2% warm bias toward the
+     brand orange: chosen, not defaulted. */
   --bg: #0a0a0a;
   --bg2: #111111;
   --bg3: #1a1a1a;
   --border: #222222;
   --border2: #2a2a2a;
-  --text: #e0e0e0;
-  --text2: #888888;
-  --text3: #555555;
+  --text: #e6e4e1;
+  --text2: #9a968f;
+  /* Was #555555 (≈3.6:1 — below AA for the micro-labels it carries most).
+     New value clears 4.5:1 on --bg2. Never use for text under 11.5px anyway;
+     micro-labels take --text2. */
+  --text3: #807b74;
   --accent: #F05423;
+  --accent-hover: #F8703B;
   --success: #4dff91;
   --warning: #ffb800;
   --danger: #ff4d4d;
   --info: #4db8ff;
+
+  /* Type ramp — seven steps, no other font sizes. d-steps pair with
+     --font-disp + tabular-nums; micro pairs with --font-mono uppercase. */
+  --fz-micro: 10px;
+  --fz-label: 11.5px;
+  --fz-body: 13px;
+  --fz-title: 16px;
+  --fz-d3: 22px;
+  --fz-d2: 30px;
+  --fz-d1: 46px;
+
+  /* Radii — four, total. */
+  --r-sm: 6px;
   --radius: 8px;
   --radius-lg: 12px;
+  --r-pill: 999px;
+
+  /* Motion — communicates cause, never decoration. */
+  --dur-snap: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -101,7 +131,7 @@ button.danger {
   padding: 14px 16px;
 }
 
-.metric-label { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 9.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text2); }
+.metric-label { font-family: var(--font-mono); font-size: var(--fz-micro); font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text2); }
 /* Tabular figures so columns of KPI numbers align digit-for-digit. */
 .metric-value { font-family: var(--font-disp); font-size: 30px; font-weight: 700; letter-spacing: 0.01em; color: var(--text); font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 .metric-sub { font-size: 11px; margin-top: 4px; color: var(--text3); }
@@ -163,11 +193,24 @@ td.strong { font-weight: 500; color: var(--text); }
    the ☀/🌙 switch in the header via data-theme on <html>; dark stays default so
    the shop-floor board and kiosk devices are unaffected unless switched. ── */
 :root[data-theme="light"] {
-  --bg: #f7f5f1; --bg2: #ffffff; --bg3: #f1ede4;
-  --border: #e3ded5; --border2: #d8d2c6;
-  --text: #26221d; --text2: #6c6459; --text3: #a39a8c;
-  --success: #17854a; --warning: #a87500; --danger: #cc2f2f; --info: #2470b3;
-  --surface: #ffffff; --surface2: #f1ede4; --surface-2: #f1ede4;
+  /* Office theme, tuned per the OPS 1.0 spec: warm paper ground, ink text
+     that clears AA at every ramp step (old --text3 #a39a8c was ≈2.4:1 —
+     effectively unreadable), and semantic colors re-picked for paper
+     (dark-mode neons wash out on white). */
+  --bg: #f7f5f2; --bg2: #ffffff; --bg3: #efece7;
+  --border: #e3dfd8; --border2: #d6d1c8;
+  --text: #1c1b19; --text2: #5c5850; --text3: #767066;
+  --success: #1d8a4e; --warning: #8f5b00; --danger: #c22f27; --info: #1467a8;
+  --accent-hover: #d64415;
+  --surface: #ffffff; --surface2: #efece7; --surface-2: #efece7;
+}
+
+/* Dark mode has no shadows (depth = the bg ramp + hairlines, the plate
+   aesthetic). Paper needs one soft tier or cards read flat. */
+:root[data-theme="light"] .card,
+:root[data-theme="light"] .hero-band,
+:root[data-theme="light"] .wr-card {
+  box-shadow: 0 1px 2px rgba(28, 27, 25, 0.06), 0 4px 12px rgba(28, 27, 25, 0.05);
 }
 
 /* Type scale — applies to semantic headings; inline styles still win where set. */
@@ -176,7 +219,7 @@ h2 { font-family: var(--font-disp); font-size: 18px; font-weight: 700; letter-sp
 h3 { font-family: var(--font-disp); font-size: 15px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.3; }
 
 /* The repeated "13px uppercase muted" section label, as one utility. */
-.section-label { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text3); }
+.section-label { font-family: var(--font-mono); font-size: var(--fz-micro); font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text3); }
 
 /* Metric/stat grids reflow instead of breaking on tablet/phone. */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
@@ -238,19 +281,19 @@ table { font-variant-numeric: tabular-nums; }
 .hero-bar { position: relative; flex: 1; max-width: 560px; height: 8px; background: var(--bg3); border-radius: 4px; overflow: visible; }
 .hero-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.6s ease; }
 .hero-bar-marker { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text2); }
-.hero-bar-cap { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); white-space: nowrap; }
+.hero-bar-cap { font-family: var(--font-mono); font-size: var(--fz-micro); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); white-space: nowrap; }
 .deck-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 20px; }
 .deck { padding: 16px 18px; }
 .deck-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
 .deck-title { font-family: var(--font-disp); font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
 .deck-empty { font-size: 12px; color: var(--text3); padding: 10px 0; }
-.deck-foot { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text3); margin-top: 10px; line-height: 1.6; }
+.deck-foot { font-family: var(--font-mono); font-size: var(--fz-micro); letter-spacing: 0.05em; text-transform: uppercase; color: var(--text3); margin-top: 10px; line-height: 1.6; }
 .crew-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 0.5px solid var(--border); }
 .crew-row:last-of-type { border-bottom: none; }
 .crew-ava { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
 .crew-ava-fallback { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; font-weight: 700; }
 .crew-name { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.crew-state { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 10.5px; letter-spacing: 0.06em; }
+.crew-state { font-family: var(--font-mono); font-size: var(--fz-micro); letter-spacing: 0.06em; }
 .eff-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
 .eff-bar { position: relative; flex: 1; height: 7px; background: var(--bg3); border-radius: 4px; }
 .eff-bar-fill { height: 100%; border-radius: 4px; }
@@ -265,7 +308,7 @@ table { font-variant-numeric: tabular-nums; }
 .wr-rail { padding: 16px 14px; }
 .wr-head { margin-bottom: 12px; }
 .wr-title { font-family: var(--font-disp); font-size: 17px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
-.wr-sub { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); margin-top: 3px; }
+.wr-sub { font-family: var(--font-mono); font-size: var(--fz-micro); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); margin-top: 3px; }
 .wr-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
 .wr-card.hot { border-color: rgba(240,84,35,0.45); }
 .wr-card-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; }

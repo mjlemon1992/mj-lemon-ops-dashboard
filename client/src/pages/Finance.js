@@ -52,15 +52,15 @@ function FinanceView({ locId }) {
       {/* Controls */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
         <input type="date" value={start} max={end} onChange={e => setStart(e.target.value)} style={{ width: 'auto' }} />
-        <span style={{ color: 'var(--text3)', fontSize: '12px' }}>to</span>
+        <span style={{ color: 'var(--text3)', fontSize: 'var(--fz-label)' }}>to</span>
         <input type="date" value={end} min={start} max={today()} onChange={e => setEnd(e.target.value)} style={{ width: 'auto' }} />
-        <div style={{ fontSize: '11px', color: 'var(--text3)' }}>read-only · live from QuickBooks via the connector</div>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>read-only · live from QuickBooks via the connector</div>
       </div>
 
       {!configured && (
         <div className="alert-strip" style={{ background: 'rgba(77,184,255,0.06)', borderColor: 'rgba(77,184,255,0.3)' }}>
           <span style={{ color: 'var(--info)' }}>QBO connector not configured yet.</span>
-          <span style={{ fontSize: '12px', color: 'var(--text2)' }}>
+          <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)' }}>
             Set <code>QBO_CONNECTOR_URL</code> and <code>QBO_API_TOKEN</code> in the dashboard env to light this up.
           </span>
         </div>
@@ -70,8 +70,8 @@ function FinanceView({ locId }) {
 
       {!loading && err && (
         <div className="card" style={{ borderColor: 'rgba(255,77,77,0.3)' }}>
-          <div style={{ fontSize: '13px', color: 'var(--danger)', marginBottom: '4px' }}>Couldn&rsquo;t load financials</div>
-          <div style={{ fontSize: '12px', color: 'var(--text2)' }}>{err}</div>
+          <div style={{ fontSize: 'var(--fz-body)', color: 'var(--danger)', marginBottom: '4px' }}>Couldn&rsquo;t load financials</div>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)' }}>{err}</div>
         </div>
       )}
 
@@ -91,11 +91,11 @@ function FinanceView({ locId }) {
 
           <div className="card">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)' }}>Profit &amp; Loss</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{loc?.name} · {summaries.length} lines</div>
+              <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)' }}>Profit &amp; Loss</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{loc?.name} · {summaries.length} lines</div>
             </div>
             {summaries.length === 0 ? (
-              <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)', fontSize: '12px' }}>
+              <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)', fontSize: 'var(--fz-label)' }}>
                 No line items returned for this period.
               </div>
             ) : (

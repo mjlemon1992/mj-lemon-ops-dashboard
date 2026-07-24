@@ -200,16 +200,16 @@ export default function Notices() {
 
   const locName = (id) => (locations.find(l => l.id === id) || {}).name || 'Unknown';
 
-  const input = { width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg3)', color: 'var(--text)', fontSize: '14px' };
-  const label = { fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px', display: 'block' };
+  const input = { width: '100%', padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', background: 'var(--bg3)', color: 'var(--text)', fontSize: 'var(--fz-body)' };
+  const label = { fontSize: 'var(--fz-label)', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px', display: 'block' };
 
   return (
     <div>
-      <div style={{ color: 'var(--text3)', fontSize: '14px', marginBottom: '24px' }}>
+      <div style={{ color: 'var(--text3)', fontSize: 'var(--fz-body)', marginBottom: '24px' }}>
         Whatever is active here rotates on the shop-floor display so the techs see it — updates, shout-outs, safety notes, or full posters.
       </div>
 
-      <form onSubmit={submit} style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '14px', padding: '20px', marginBottom: '28px', display: 'grid', gap: '14px' }}>
+      <form onSubmit={submit} style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '20px', marginBottom: '28px', display: 'grid', gap: '14px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px' }}>
           <div>
             <span style={label}>Board</span>
@@ -244,17 +244,17 @@ export default function Notices() {
           <span style={label}>Message</span>
           <textarea value={form.body} onChange={e => set('body', e.target.value)} rows={3} placeholder="Optional detail shown under the title" style={{ ...input, resize: 'vertical' }} />
         </div>
-        <div style={{ padding: '12px 14px', background: 'var(--bg3)', border: '0.5px solid var(--border)', borderRadius: '10px' }}>
+        <div style={{ padding: '12px 14px', background: 'var(--bg3)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
             <button type="button" className="primary" onClick={generatePoster} disabled={designing || !form.title.trim()}
-              style={{ padding: '9px 18px', fontSize: '14px' }}>
+              style={{ padding: '9px 18px', fontSize: 'var(--fz-body)' }}>
               {designing ? 'Designing…' : '✨ Generate poster'}
             </button>
             <button type="button" onClick={suggestIdeas} disabled={ideasLoading}
-              style={{ padding: '9px 18px', fontSize: '14px' }}>
+              style={{ padding: '9px 18px', fontSize: 'var(--fz-body)' }}>
               {ideasLoading ? 'Thinking…' : '💡 Suggest ideas'}
             </button>
-            <span style={{ fontSize: '12px', color: 'var(--text3)' }}>
+            <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>
               Claude designs a board poster from the title, message and type above. Branding follows the Board choice — one shop gets its own line, “All locations” gets the combined brand.
             </span>
           </div>
@@ -262,12 +262,12 @@ export default function Notices() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
               {ideas.map((idea, i) => (
                 <button key={i} type="button" onClick={() => useIdea(idea)} title={idea.why || ''}
-                  style={{ textAlign: 'left', padding: '10px 14px', borderRadius: '10px', border: '0.5px solid var(--border)', background: 'var(--bg2)', cursor: 'pointer' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>
+                  style={{ textAlign: 'left', padding: '10px 14px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', background: 'var(--bg2)', cursor: 'pointer' }}>
+                  <span style={{ fontSize: 'var(--fz-body)', fontWeight: 700, color: 'var(--text)' }}>
                     {(KINDS.find(k => k.value === idea.kind) || KINDS[0]).label} · {idea.title}
                   </span>
-                  {idea.body && <span style={{ display: 'block', fontSize: '12px', color: 'var(--text2)', marginTop: '3px' }}>{idea.body}</span>}
-                  {idea.why && <span style={{ display: 'block', fontSize: '11px', color: 'var(--text3)', marginTop: '3px' }}>why now: {idea.why}</span>}
+                  {idea.body && <span style={{ display: 'block', fontSize: 'var(--fz-label)', color: 'var(--text2)', marginTop: '3px' }}>{idea.body}</span>}
+                  {idea.why && <span style={{ display: 'block', fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '3px' }}>why now: {idea.why}</span>}
                 </button>
               ))}
             </div>
@@ -276,23 +276,23 @@ export default function Notices() {
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginTop: '12px' }}>
               <img src={genPreview} alt="Generated poster preview" title="Click to enlarge"
                 onClick={() => setLightbox(genPreview)}
-                style={{ width: '220px', height: '220px', objectFit: 'cover', borderRadius: '10px', border: '0.5px solid var(--border)', cursor: 'zoom-in' }} />
+                style={{ width: '220px', height: '220px', objectFit: 'cover', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', cursor: 'zoom-in' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button type="button" onClick={() => rate('up')} disabled={designing || rated === 'up'}
-                    style={{ padding: '7px 14px', fontSize: '13px' }}>
+                    style={{ padding: '7px 14px', fontSize: 'var(--fz-body)' }}>
                     {rated === 'up' ? '👍 Saved' : '👍 Like'}
                   </button>
                   <button type="button" onClick={() => rate('down')} disabled={designing}
-                    style={{ padding: '7px 14px', fontSize: '13px' }}>
+                    style={{ padding: '7px 14px', fontSize: 'var(--fz-body)' }}>
                     👎 Not this
                   </button>
                 </div>
-                <button type="button" onClick={generatePoster} disabled={designing} style={{ padding: '7px 14px', fontSize: '13px' }}>
+                <button type="button" onClick={generatePoster} disabled={designing} style={{ padding: '7px 14px', fontSize: 'var(--fz-body)' }}>
                   {designing ? 'Designing…' : '↻ Regenerate'}
                 </button>
-                <button type="button" onClick={clearGenerated} style={{ padding: '7px 14px', fontSize: '13px', color: 'var(--danger)' }}>✕ Discard</button>
-                <span style={{ fontSize: '12px', color: 'var(--text3)', maxWidth: '260px' }}>
+                <button type="button" onClick={clearGenerated} style={{ padding: '7px 14px', fontSize: 'var(--fz-body)', color: 'var(--danger)' }}>✕ Discard</button>
+                <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', maxWidth: '260px' }}>
                   👍/👎 teach the designer your taste — 👎 saves the dislike and tries a fresh design. Click the image to enlarge. Happy with it? Hit “Post to board”.
                 </span>
               </div>
@@ -305,7 +305,7 @@ export default function Notices() {
             <input type="file" accept="image/jpeg,image/png,image/webp,image/gif"
               onChange={e => { const f = e.target.files && e.target.files[0] ? e.target.files[0] : null; setFile(f); if (f) clearGenerated(); }}
               style={{ ...input, padding: '8px 12px' }} />
-            {file && <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '4px' }}>{file.name} · {Math.round(file.size / 1024)} KB</div>}
+            {file && <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '4px' }}>{file.name} · {Math.round(file.size / 1024)} KB</div>}
           </div>
           <div>
             <span style={label}>…or image URL</span>
@@ -316,12 +316,12 @@ export default function Notices() {
           <button className="primary" type="submit" disabled={saving} style={{ padding: '10px 28px', fontSize: '15px' }}>
             {saving ? 'Posting…' : 'Post to board'}
           </button>
-          {error && <span style={{ color: 'var(--danger)', fontSize: '14px' }}>{error}</span>}
+          {error && <span style={{ color: 'var(--danger)', fontSize: 'var(--fz-body)' }}>{error}</span>}
         </div>
       </form>
 
-      <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '14px', overflow: 'hidden' }}>
-        <div style={{ padding: '12px 20px', borderBottom: '0.5px solid var(--border)', fontSize: '13px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+      <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+        <div style={{ padding: '12px 20px', borderBottom: '0.5px solid var(--border)', fontSize: 'var(--fz-body)', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           Posted notices
         </div>
         {items.length === 0 && <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text3)' }}>Nothing posted yet.</div>}
@@ -332,21 +332,21 @@ export default function Notices() {
           const live = n.active && !expired && !scheduled;
           return (
             <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 20px', borderBottom: '0.5px solid var(--border)', opacity: live || scheduled ? 1 : 0.55 }}>
-              <span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.08em', padding: '3px 10px', borderRadius: '10px', background: live ? 'var(--success)' : (scheduled ? 'var(--warning, #e2a336)' : 'var(--bg3)'), color: live || scheduled ? '#1a1a1a' : 'var(--text3)', flexShrink: 0 }}>
+              <span style={{ fontSize: 'var(--fz-label)', fontWeight: 800, letterSpacing: '0.08em', padding: '3px 10px', borderRadius: 'var(--radius)', background: live ? 'var(--success)' : (scheduled ? 'var(--warning, #e2a336)' : 'var(--bg3)'), color: live || scheduled ? '#1a1a1a' : 'var(--text3)', flexShrink: 0 }}>
                 {live ? 'LIVE' : (scheduled ? '⏰ SCHEDULED' : (expired ? 'EXPIRED' : 'OFF'))}
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {kind.label} · {n.title || n.body || (n.image_url || n.has_image ? 'Image poster' : '(empty)')}{n.has_image ? ' · 🖼' : ''}
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '2px' }}>
+                <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>
                   {n.location_id ? locName(n.location_id) : 'All locations'} · by {n.created_by || '—'} · {new Date(n.created_at).toLocaleDateString('en-CA')}
                   {scheduled ? ` · goes live ${new Date(n.publish_at).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
                   {n.expires_at ? ` · until ${new Date(n.expires_at).toLocaleDateString('en-CA')}` : ''}
                 </div>
               </div>
-              <button onClick={() => toggle(n.id)} style={{ padding: '6px 14px', fontSize: '13px' }}>{n.active ? 'Turn off' : 'Turn on'}</button>
-              <button onClick={() => remove(n.id)} style={{ padding: '6px 14px', fontSize: '13px', color: 'var(--danger)' }}>Delete</button>
+              <button onClick={() => toggle(n.id)} style={{ padding: '6px 14px', fontSize: 'var(--fz-body)' }}>{n.active ? 'Turn off' : 'Turn on'}</button>
+              <button onClick={() => remove(n.id)} style={{ padding: '6px 14px', fontSize: 'var(--fz-body)', color: 'var(--danger)' }}>Delete</button>
             </div>
           );
         })}
@@ -355,7 +355,7 @@ export default function Notices() {
       {lightbox && (
         <div onClick={() => setLightbox(null)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', cursor: 'zoom-out' }}>
-          <img src={lightbox} alt="" style={{ maxWidth: '92vw', maxHeight: '92vh', borderRadius: 8, boxShadow: '0 10px 50px rgba(0,0,0,0.6)' }} />
+          <img src={lightbox} alt="" style={{ maxWidth: '92vw', maxHeight: '92vh', borderRadius: 'var(--radius)', boxShadow: '0 10px 50px rgba(0,0,0,0.6)' }} />
         </div>
       )}
     </div>

@@ -47,14 +47,14 @@ function ComebacksView({ locId }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
         <div>
-          <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '3px' }}>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '3px' }}>
             Warranty re-dos, goodwill work and internal tickets — unbilled labour the shop absorbs this month.
           </div>
         </div>
       </div>
 
       {data?.snapshot_date && (
-        <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '16px' }}>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginBottom: '16px' }}>
           Snapshot: {new Date(data.snapshot_date).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' })}
         </div>
       )}
@@ -66,7 +66,7 @@ function ComebacksView({ locId }) {
       ) : count === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)' }}>
           No comebacks recorded this month ✓
-          <div style={{ fontSize: '11px', marginTop: '6px' }}>
+          <div style={{ fontSize: 'var(--fz-label)', marginTop: '6px' }}>
             (If you expect some, run the comebacks sync — they refresh on the same schedule as metrics.)
           </div>
         </div>
@@ -75,29 +75,29 @@ function ComebacksView({ locId }) {
           {/* Headline stat cards: the two signals */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '18px' }}>
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Comebacks</div>
+              <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Comebacks</div>
               <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--text)', marginTop: '4px' }}>{count}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>this month</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>this month</div>
             </div>
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Comeback rate</div>
+              <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Comeback rate</div>
               <div style={{ fontSize: '24px', fontWeight: '600', color: rate != null && rate > 10 ? 'var(--warning)' : 'var(--text)', marginTop: '4px' }}>
                 {rate != null ? rate.toFixed(1) + '%' : '—'}
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>
                 {totalJobs != null ? `${count} of ${totalJobs} jobs` : 'quality signal'}
               </div>
             </div>
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Unbilled hours</div>
+              <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Unbilled hours</div>
               <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--text)', marginTop: '4px' }}>{hours.toFixed(1)}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>labour given away</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>labour given away</div>
             </div>
             {!isAdvisor && (
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Cost leakage</div>
+              <div style={{ fontSize: 'var(--fz-micro)', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Cost leakage</div>
               <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--danger)', marginTop: '4px' }}>{money(cost)}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>wage cost of those hours</div>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>wage cost of those hours</div>
             </div>
             )}
           </div>
@@ -105,12 +105,12 @@ function ComebacksView({ locId }) {
           {/* Per-tech rollup */}
           {byTech.length > 0 && (
             <div style={{ marginBottom: '18px' }}>
-              <div style={{ fontSize: '11px', fontWeight: '500', color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>By technician</div>
+              <div style={{ fontSize: 'var(--fz-label)', fontWeight: '500', color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>By technician</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {byTech.map(t => (
                   <div key={t.tech_name} className="card" style={{ padding: '10px 14px', flex: '0 0 auto' }}>
-                    <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text)' }}>{t.tech_name}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>
+                    <div style={{ fontSize: 'var(--fz-label)', fontWeight: '500', color: 'var(--text)' }}>{t.tech_name}</div>
+                    <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '2px' }}>
                       {t.count} {t.count === 1 ? 'job' : 'jobs'} · {Number(t.hours).toFixed(1)}h{!isAdvisor && ` · ${money(t.cost)}`}
                     </div>
                   </div>
@@ -120,9 +120,9 @@ function ComebacksView({ locId }) {
           )}
 
           {/* Detail list */}
-          <div style={{ fontSize: '11px', fontWeight: '500', color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>Detail</div>
+          <div style={{ fontSize: 'var(--fz-label)', fontWeight: '500', color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>Detail</div>
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--fz-label)' }}>
               <thead>
                 <tr style={{ background: 'var(--bg3)', color: 'var(--text3)', textAlign: 'left' }}>
                   <th style={{ padding: '8px 12px', fontWeight: '500' }}>RO</th>
@@ -140,7 +140,7 @@ function ComebacksView({ locId }) {
                     <td style={{ padding: '8px 12px', color: 'var(--text3)' }}>{fmtDate(r.invoiced_date)}</td>
                     <td style={{ padding: '8px 12px', color: 'var(--text)' }}>
                       <div>{r.customer_name || '—'}</div>
-                      {r.vehicle_name && <div style={{ fontSize: '11px', color: 'var(--text3)' }}>{r.vehicle_name}</div>}
+                      {r.vehicle_name && <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{r.vehicle_name}</div>}
                     </td>
                     <td style={{ padding: '8px 12px', color: 'var(--text2)' }}>{r.tech_name || 'Unassigned'}</td>
                     <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text2)' }}>{Number(r.labour_hours || 0).toFixed(1)}</td>
@@ -151,7 +151,7 @@ function ComebacksView({ locId }) {
             </table>
           </div>
 
-          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '10px' }}>
+          <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '10px' }}>
             Note: these orders are invoiced at $0, so they're correctly excluded from revenue, parts-margin and PPH.
             This page exists so that unbilled work stays visible rather than disappearing.
           </div>

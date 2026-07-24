@@ -32,9 +32,9 @@ function Gauge({ label, value, sub, tone, rail, onClick, soon }) {
         borderRadius: 'var(--radius)', padding: '12px 13px',
         opacity: soon ? 0.6 : 1, cursor: clickable ? 'pointer' : 'default',
       }}>
-      <div style={{ fontSize: '10px', letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text3)', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 'var(--fz-micro)', letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text3)', fontWeight: 600 }}>{label}</div>
       <div style={{ fontFamily: 'var(--font-disp)', fontVariantNumeric: 'tabular-nums', fontSize: '26px', fontWeight: 600, lineHeight: 1.1, marginTop: '7px', color: tone || 'var(--text)' }}>{value}</div>
-      <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '5px' }}>{soon ? 'soon' : sub}</div>
+      <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '5px' }}>{soon ? 'soon' : sub}</div>
     </div>
   );
 }
@@ -155,8 +155,8 @@ function MarketingView({ locId }) {
               Hidden for shop operators (owner/partner tool). */}
           {!isManager && <div className="card">
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '9px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Calls</span>
-              <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{summary ? `${monthLabel(summary.period_start)} · Marchex` : 'Marchex'}</span>
+              <span style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)' }}>Calls</span>
+              <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{summary ? `${monthLabel(summary.period_start)} · Marchex` : 'Marchex'}</span>
               {summary && (() => {
                 // Flag stale data — the Marchex report is uploaded by hand, so it
                 // lags. Say how old the latest one is so a 2-month-old number isn't
@@ -166,16 +166,16 @@ function MarketingView({ locId }) {
                 const now = new Date();
                 const monthsOld = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
                 if (monthsOld <= 0) return null;
-                return <span style={{ fontSize: '11px', color: 'var(--warning)', fontWeight: 600 }} title="Upload the latest Marchex PDF to refresh">· {monthsOld} mo old</span>;
+                return <span style={{ fontSize: 'var(--fz-label)', color: 'var(--warning)', fontWeight: 600 }} title="Upload the latest Marchex PDF to refresh">· {monthsOld} mo old</span>;
               })()}
             </div>
 
             {loading && !summary && <div style={{ color: 'var(--text3)', padding: '8px 0' }}>Loading…</div>}
 
             {!loading && !summary && (
-              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
+              <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>
                 No call reports yet.
-                <button onClick={openDetail} style={{ marginLeft: '8px', fontSize: '12px', padding: '4px 9px' }}>Upload a PDF</button>
+                <button onClick={openDetail} style={{ marginLeft: '8px', fontSize: 'var(--fz-label)', padding: '4px 9px' }}>Upload a PDF</button>
               </div>
             )}
 
@@ -183,19 +183,19 @@ function MarketingView({ locId }) {
               <>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
                   <span style={{ fontSize: '29px', fontWeight: 600, letterSpacing: '-.02em', lineHeight: 1 }}>{fmt(t.total)}</span>
-                  <span style={{ fontSize: '11px', color: 'var(--text3)' }}>total</span>
-                  {prev && <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text3)' }}>{delta(pct(t.total, prev.total)) || '—'} MoM</span>}
+                  <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>total</span>
+                  {prev && <span style={{ marginLeft: 'auto', fontSize: 'var(--fz-label)', color: 'var(--text3)' }}>{delta(pct(t.total, prev.total)) || '—'} MoM</span>}
                 </div>
                 <div style={{ height: '7px', borderRadius: '5px', overflow: 'hidden', display: 'flex', margin: '11px 0 8px', border: '0.5px solid var(--border)' }}>
                   <div style={{ width: `${orgShare}%`, background: 'var(--info)' }} />
                   <div style={{ width: `${100 - orgShare}%`, background: 'var(--accent)' }} />
                 </div>
-                <div style={{ display: 'flex', gap: '14px', fontSize: '11.5px', color: 'var(--text2)', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '14px', fontSize: 'var(--fz-label)', color: 'var(--text2)', flexWrap: 'wrap' }}>
                   <span><span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: 2, background: 'var(--info)', marginRight: 5 }} />Organic <b style={{ color: 'var(--text)' }}>{fmt(t.organic)}</b></span>
                   <span><span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: 2, background: 'var(--accent)', marginRight: 5 }} />Paid <b style={{ color: 'var(--text)' }}>{fmt(t.paid)}</b></span>
                 </div>
                 {ppcCh?.qualified_calls != null && (
-                  <div style={{ marginTop: '10px', paddingTop: '9px', borderTop: '0.5px solid var(--border)', fontSize: '11.5px', color: 'var(--text2)', display: 'flex', justifyContent: 'space-between' }}>
+                  <div style={{ marginTop: '10px', paddingTop: '9px', borderTop: '0.5px solid var(--border)', fontSize: 'var(--fz-label)', color: 'var(--text2)', display: 'flex', justifyContent: 'space-between' }}>
                     <span>Qualified PPC (≥{status.qualifiedMinSeconds || 60}s)</span>
                     <span><b style={{ color: 'var(--text)' }}>{fmt(ppcCh.qualified_calls)}</b> of {fmt(ppcCh.total_calls)}</span>
                   </div>
@@ -203,7 +203,7 @@ function MarketingView({ locId }) {
                 <div onClick={() => (showDetail ? setShowDetail(false) : openDetail())}
                   role="button" tabIndex={0}
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showDetail ? setShowDetail(false) : openDetail(); } }}
-                  style={{ marginTop: '10px', fontSize: '11.5px', color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  style={{ marginTop: '10px', fontSize: 'var(--fz-label)', color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   {showDetail ? '▴ Hide detail' : '▾ View detail'}
                 </div>
               </>
@@ -224,7 +224,7 @@ function MarketingView({ locId }) {
       {showDetail && !isManager && (
         <div ref={detailRef} style={{ marginTop: '20px', borderTop: '0.5px solid var(--border)', paddingTop: '18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
-            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>Call tracking detail</div>
+            <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)' }}>Call tracking detail</div>
             <div style={{ flex: 1 }} />
             <input ref={fileRef} type="file" accept="application/pdf" multiple style={{ display: 'none' }}
               onChange={e => onPick(e.target.files)} />
@@ -237,7 +237,7 @@ function MarketingView({ locId }) {
           {!status.configured && (
             <div className="alert-strip" style={{ background: 'rgba(77,184,255,0.06)', borderColor: 'rgba(77,184,255,0.3)' }}>
               <span style={{ color: 'var(--info)' }}>Call-tracking extraction not configured yet.</span>
-              <span style={{ fontSize: '12px', color: 'var(--text2)' }}>Set <code>ANTHROPIC_API_KEY</code> in the dashboard env to enable PDF ingestion.</span>
+              <span style={{ fontSize: 'var(--fz-label)', color: 'var(--text2)' }}>Set <code>ANTHROPIC_API_KEY</code> in the dashboard env to enable PDF ingestion.</span>
             </div>
           )}
           {msg && <div className="alert-strip" style={{ background: 'rgba(77,255,145,0.07)', borderColor: 'rgba(77,255,145,0.3)' }}><span style={{ color: 'var(--success)' }}>{msg}</span></div>}
@@ -245,7 +245,7 @@ function MarketingView({ locId }) {
 
           {summary && (
             <div className="card" style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '10px' }}>By channel · {monthLabel(summary.period_start)}</div>
+              <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)', marginBottom: '10px' }}>By channel · {monthLabel(summary.period_start)}</div>
               <div className="table-wrap">
                 <table>
                   <thead>
@@ -274,7 +274,7 @@ function MarketingView({ locId }) {
 
           {periods.length > 1 && (
             <div className="card">
-              <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text)', marginBottom: '10px' }}>History</div>
+              <div style={{ fontSize: 'var(--fz-body)', fontWeight: '500', color: 'var(--text)', marginBottom: '10px' }}>History</div>
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>Period</th><th style={{ textAlign: 'right' }}>Total calls</th><th style={{ textAlign: 'right' }}>Ingested</th></tr></thead>
@@ -295,7 +295,7 @@ function MarketingView({ locId }) {
       )}
 
       {/* System-trust line */}
-      <div style={{ marginTop: '20px', paddingTop: '12px', borderTop: '0.5px solid var(--border)', fontSize: '11px', color: 'var(--text3)', lineHeight: 1.5 }}>
+      <div style={{ marginTop: '20px', paddingTop: '12px', borderTop: '0.5px solid var(--border)', fontSize: 'var(--fz-label)', color: 'var(--text3)', lineHeight: 1.5 }}>
         Pulls from Shopmonkey, Marchex, Google. Nothing posts automatically yet — approvals wait here until Meta/GBP access is live.
       </div>
     </div>
@@ -317,14 +317,14 @@ function ShopMarketingCard({ loc, onOpen }) {
     return () => { on = false; };
   }, [loc.id, api]);
   const Row = ({ label, value, tone }) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '5px 0' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fz-label)', padding: '5px 0' }}>
       <span style={{ color: 'var(--text3)' }}>{label}</span>
       <span style={{ color: tone || 'var(--text)', fontWeight: 500 }}>{value}</span>
     </div>
   );
   return (
     <div className="card">
-      <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>{loc.name}</div>
+      <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>{loc.name}</div>
       <Row label="Google rating" value={rev && rev.rating ? `★ ${rev.rating} (${fmt(rev.total)})` : 'not connected'} tone={rev && rev.rating ? 'var(--success)' : 'var(--text3)'} />
       <Row label="Awaiting approval" value={drafts == null ? '…' : drafts} tone={drafts ? 'var(--accent)' : undefined} />
       <Row label="Shots to grab" value={shots == null ? '…' : shots} tone={shots ? 'var(--warning)' : undefined} />
@@ -344,8 +344,8 @@ function MarketingOverview() {
         {scopeLocations.map(l => <ShopMarketingCard key={l.id} loc={l} onOpen={select} />)}
       </div>
       <div className="card" style={{ marginTop: '16px', opacity: 0.6 }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Broadcast post → all locations</div>
-        <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '4px', lineHeight: 1.5 }}>
+        <div style={{ fontSize: 'var(--fz-body)', fontWeight: 600, color: 'var(--text)' }}>Broadcast post → all locations</div>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginTop: '4px', lineHeight: 1.5 }}>
           Compose once, publish to every location's Meta + Google Business Profile. Available once channel posting is connected.
         </div>
         <button disabled style={{ marginTop: '10px' }}>Compose broadcast (soon)</button>

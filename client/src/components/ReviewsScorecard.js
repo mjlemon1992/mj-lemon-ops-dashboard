@@ -12,7 +12,7 @@ import { useAuth } from '../context/AuthContext';
 // Pasting is deliberately the human's job — nothing is ever posted from
 // here (future Google Business API auto-post slots in at "Mark posted").
 // Self-hides if the endpoint isn't configured.
-const MONO = "ui-monospace, 'SF Mono', Menlo, monospace";
+const MONO = 'var(--font-mono)';
 
 const Stars = ({ rating, size = 14 }) => {
   const full = Math.round(rating || 0);
@@ -95,7 +95,7 @@ function ReplyDraft({ locId, review, stored }) {
 
   if (status === 'posted') {
     return (
-      <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--success)' }}>
+      <div style={{ marginTop: '6px', fontSize: 'var(--fz-label)', color: 'var(--success)' }}>
         Replied ✓ — posted on Google
       </div>
     );
@@ -104,41 +104,41 @@ function ReplyDraft({ locId, review, stored }) {
   if (draft == null) {
     return (
       <div style={{ marginTop: '7px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <button onClick={generate} disabled={busy} style={{ fontSize: '11px', padding: '3px 9px' }}>
+        <button onClick={generate} disabled={busy} style={{ fontSize: 'var(--fz-label)', padding: '3px 9px' }}>
           {busy ? 'Drafting…' : '✍ Draft reply'}
         </button>
-        {err && <span style={{ fontSize: '11px', color: 'var(--danger)' }}>{err}</span>}
+        {err && <span style={{ fontSize: 'var(--fz-label)', color: 'var(--danger)' }}>{err}</span>}
       </div>
     );
   }
   return (
     <div style={{ marginTop: '7px' }}>
       {stored && stored.draft && (
-        <div style={{ fontFamily: MONO, fontSize: '9.5px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text3)', marginBottom: '3px' }}>
+        <div style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text3)', marginBottom: '3px' }}>
           Auto-drafted
         </div>
       )}
       <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={3}
-        style={{ width: '100%', fontSize: '12px', lineHeight: 1.5, padding: '7px 9px', boxSizing: 'border-box' }} />
+        style={{ width: '100%', fontSize: 'var(--fz-label)', lineHeight: 1.5, padding: '7px 9px', boxSizing: 'border-box' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginTop: '5px', flexWrap: 'wrap' }}>
-        <button className="primary" onClick={copy} style={{ fontSize: '11px', padding: '3px 10px' }}>
+        <button className="primary" onClick={copy} style={{ fontSize: 'var(--fz-label)', padding: '3px 10px' }}>
           {copied ? 'Copied ✓' : 'Copy'}
         </button>
         <a href="https://business.google.com/reviews" target="_blank" rel="noreferrer"
-          style={{ fontSize: '11px', color: 'var(--accent)' }}>
+          style={{ fontSize: 'var(--fz-label)', color: 'var(--accent)' }}>
           Paste on Google ↗
         </a>
         {stored && (
           <button onClick={markPosted} disabled={busy} title="I've pasted this reply on Google"
-            style={{ fontSize: '11px', padding: '3px 9px' }}>
+            style={{ fontSize: 'var(--fz-label)', padding: '3px 9px' }}>
             Mark posted
           </button>
         )}
-        <button onClick={generate} disabled={busy} style={{ fontSize: '11px', padding: '3px 9px', marginLeft: 'auto' }}>
+        <button onClick={generate} disabled={busy} style={{ fontSize: 'var(--fz-label)', padding: '3px 9px', marginLeft: 'auto' }}>
           {busy ? '…' : 'Redraft'}
         </button>
       </div>
-      {err && <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--danger)' }}>{err}</div>}
+      {err && <div style={{ marginTop: '4px', fontSize: 'var(--fz-label)', color: 'var(--danger)' }}>{err}</div>}
     </div>
   );
 }
@@ -169,8 +169,8 @@ export default function ReviewsScorecard({ locId }) {
   return (
     <div className="card" style={{ borderLeft: '3px solid var(--accent)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '12px' }}>
-        <span style={{ fontFamily: MONO, fontSize: '10.5px', fontWeight: 600, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text3)' }}>Google reviews</span>
-        <span style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: demo ? 'var(--warning)' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+        <span style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', fontWeight: 600, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text3)' }}>Google reviews</span>
+        <span style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.1em', textTransform: 'uppercase', color: demo ? 'var(--warning)' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: demo ? 'var(--warning)' : 'var(--success)', display: 'inline-block' }} />
           {demo ? 'sample' : 'live'}
         </span>
@@ -182,7 +182,7 @@ export default function ReviewsScorecard({ locId }) {
         </span>
         <div>
           <Stars rating={rating} />
-          <div style={{ fontFamily: MONO, fontSize: '10.5px', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)', marginTop: '3px' }}>
+          <div style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)', marginTop: '3px' }}>
             {total != null ? `${Number(total).toLocaleString('en-CA')} reviews` : '—'}
             {delta > 0 && <span style={{ color: 'var(--success)' }}> · +{delta} this mo</span>}
           </div>
@@ -190,14 +190,14 @@ export default function ReviewsScorecard({ locId }) {
       </div>
 
       {featured.map((rv, i) => (
-        <div key={rv.time || i} style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--bg3)', borderRadius: '9px' }}>
+        <div key={rv.time || i} style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '4px' }}>
             <Stars rating={rv.rating} size={11} />
-            <span style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+            <span style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
               {rv.author || 'Customer'}{rv.when ? ` · ${rv.when}` : ''}
             </span>
           </div>
-          <div style={{ fontSize: '12.5px', color: 'var(--text2)', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+          <div style={{ fontSize: 'var(--fz-body)', color: 'var(--text2)', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             {rv.text}
           </div>
           {!demo && <ReplyDraft locId={locId} review={rv} stored={storedFor(rv)} />}
@@ -208,18 +208,18 @@ export default function ReviewsScorecard({ locId }) {
           same drafting flow. Tone rules live server-side. */}
       {lows.length > 0 && !demo && (
         <div style={{ marginTop: '12px' }}>
-          <div style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--warning)', marginBottom: '6px' }}>
+          <div style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--warning)', marginBottom: '6px' }}>
             Needs response
           </div>
           {lows.map((rv, i) => (
-            <div key={rv.time || i} style={{ marginTop: i ? '8px' : 0, padding: '10px 12px', background: 'var(--bg3)', borderRadius: '9px', borderLeft: '2px solid var(--warning)' }}>
+            <div key={rv.time || i} style={{ marginTop: i ? '8px' : 0, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', borderLeft: '2px solid var(--warning)' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '4px' }}>
                 <Stars rating={rv.rating} size={11} />
-                <span style={{ fontFamily: MONO, fontSize: '10px', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+                <span style={{ fontFamily: MONO, fontSize: 'var(--fz-micro)', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
                   {rv.author || 'Customer'}{rv.when ? ` · ${rv.when}` : ''}
                 </span>
               </div>
-              <div style={{ fontSize: '12.5px', color: 'var(--text2)', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+              <div style={{ fontSize: 'var(--fz-body)', color: 'var(--text2)', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                 {rv.text || '(star rating only, no text)'}
               </div>
               <ReplyDraft locId={locId} review={rv} stored={storedFor(rv)} />
@@ -228,13 +228,13 @@ export default function ReviewsScorecard({ locId }) {
         </div>
       )}
       {low_recent > lows.length && !demo && (
-        <div style={{ marginTop: '10px', fontSize: '11.5px', color: 'var(--warning)' }}>
+        <div style={{ marginTop: '10px', fontSize: 'var(--fz-label)', color: 'var(--warning)' }}>
           {low_recent - lows.length} more under 4★ · handle on Google
         </div>
       )}
 
       {demo && (
-        <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--warning)' }}>
+        <div style={{ marginTop: '10px', fontSize: 'var(--fz-label)', color: 'var(--warning)' }}>
           Sample data — set the Google API key + place_id to go live.
         </div>
       )}

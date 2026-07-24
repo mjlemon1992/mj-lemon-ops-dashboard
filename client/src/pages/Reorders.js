@@ -45,17 +45,17 @@ function Board({ locId }) {
   const ordered = (rows || []).filter((r) => r.status === 'ordered');
 
   const Row = ({ r }) => (
-    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px', background: 'var(--bg3)', borderRadius: '10px', marginBottom: '6px' }}>
+    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', marginBottom: '6px' }}>
       <span style={{ fontWeight: 700 }}>{r.item}</span>
-      {r.qty && <span style={{ color: 'var(--text2)', fontSize: '13px' }}>· {r.qty}</span>}
-      {r.person_name && <span style={{ color: 'var(--text3)', fontSize: '12px' }}>· flagged by {r.person_name.split(' ')[0]}</span>}
-      {r.note && <span style={{ color: 'var(--text3)', fontSize: '12px', fontStyle: 'italic' }}>"{r.note}"</span>}
+      {r.qty && <span style={{ color: 'var(--text2)', fontSize: 'var(--fz-body)' }}>· {r.qty}</span>}
+      {r.person_name && <span style={{ color: 'var(--text3)', fontSize: 'var(--fz-label)' }}>· flagged by {r.person_name.split(' ')[0]}</span>}
+      {r.note && <span style={{ color: 'var(--text3)', fontSize: 'var(--fz-label)', fontStyle: 'italic' }}>"{r.note}"</span>}
       {/* created_at is a full timestamp — trim to the date part for fmtShortDate */}
-      <span style={{ color: 'var(--text3)', fontSize: '11px' }}>{fmtShortDate(String(r.created_at || '').slice(0, 10))}</span>
+      <span style={{ color: 'var(--text3)', fontSize: 'var(--fz-label)' }}>{fmtShortDate(String(r.created_at || '').slice(0, 10))}</span>
       <span style={{ marginLeft: 'auto' }}>
         {r.status === 'requested'
-          ? <button className="primary" disabled={busy} onClick={() => act(r, 'ordered')} style={{ fontSize: '12px', padding: '5px 14px' }}>Mark ordered</button>
-          : <button className="primary" disabled={busy} onClick={() => act(r, 'received')} style={{ fontSize: '12px', padding: '5px 14px' }}>Mark received</button>}
+          ? <button className="primary" disabled={busy} onClick={() => act(r, 'ordered')} style={{ fontSize: 'var(--fz-label)', padding: '5px 14px' }}>Mark ordered</button>
+          : <button className="primary" disabled={busy} onClick={() => act(r, 'received')} style={{ fontSize: 'var(--fz-label)', padding: '5px 14px' }}>Mark received</button>}
       </span>
     </div>
   );
@@ -63,14 +63,14 @@ function Board({ locId }) {
   return (
     <div>
       <div className="card" style={{ marginBottom: '16px' }}>
-        <div style={{ fontWeight: 600, marginBottom: '4px' }}>Waiting to be ordered <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>· flagged by the crew on the shop kiosk</span></div>
-        <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '12px' }}>Mark ordered when you place it — the tech sees the status flip on the kiosk board.</div>
-        {requested.length === 0 && <div style={{ color: 'var(--text3)', fontSize: '13px' }}>Nothing waiting — the crew hasn't flagged anything.</div>}
+        <div style={{ fontWeight: 600, marginBottom: '4px' }}>Waiting to be ordered <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: 'var(--fz-label)' }}>· flagged by the crew on the shop kiosk</span></div>
+        <div style={{ fontSize: 'var(--fz-label)', color: 'var(--text3)', marginBottom: '12px' }}>Mark ordered when you place it — the tech sees the status flip on the kiosk board.</div>
+        {requested.length === 0 && <div style={{ color: 'var(--text3)', fontSize: 'var(--fz-body)' }}>Nothing waiting — the crew hasn't flagged anything.</div>}
         {requested.map((r) => <Row key={r.id} r={r} />)}
       </div>
       <div className="card">
-        <div style={{ fontWeight: 600, marginBottom: '12px' }}>On order <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: '12px' }}>· mark received when it lands — that clears it everywhere</span></div>
-        {ordered.length === 0 && <div style={{ color: 'var(--text3)', fontSize: '13px' }}>Nothing on order.</div>}
+        <div style={{ fontWeight: 600, marginBottom: '12px' }}>On order <span style={{ color: 'var(--text3)', fontWeight: 400, fontSize: 'var(--fz-label)' }}>· mark received when it lands — that clears it everywhere</span></div>
+        {ordered.length === 0 && <div style={{ color: 'var(--text3)', fontSize: 'var(--fz-body)' }}>Nothing on order.</div>}
         {ordered.map((r) => <Row key={r.id} r={r} />)}
       </div>
       {err && <div style={{ color: 'var(--danger)', marginTop: '12px' }}>{err}</div>}
