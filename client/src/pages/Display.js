@@ -326,7 +326,7 @@ export default function Display() {
         <div key={notice.id} style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', marginBottom: '28px', background: 'var(--bg2)', border: `1px solid ${nStyle.color}`, borderLeft: `8px solid ${nStyle.color}`, borderRadius: '16px', padding: '20px 28px' }}>
           <div style={{ fontSize: '40px', lineHeight: 1 }}>{nStyle.icon}</div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '11px', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: nStyle.color, marginBottom: '4px' }}>{nStyle.label}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: nStyle.color, marginBottom: '4px' }}>{nStyle.label}</div>
             {notice.title && <div style={{ fontSize: '26px', fontWeight: 700, color: 'var(--text)' }}>{notice.title}</div>}
             {notice.body && <div style={{ fontSize: '19px', color: 'var(--text2)', marginTop: '6px', whiteSpace: 'pre-wrap' }}>{notice.body}</div>}
           </div>
@@ -339,11 +339,11 @@ export default function Display() {
       <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '28px 32px', marginBottom: '28px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '16px' }}>
           <div>
-            <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>Revenue this month</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>Revenue this month</div>
             <div style={{ fontFamily: 'var(--font-disp)', fontSize: '72px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.02, fontVariantNumeric: 'tabular-nums' }}>{money(data.revenue)}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>Target</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>Target</div>
             <div style={{ fontFamily: 'var(--font-disp)', fontSize: '44px', fontWeight: 700, color: 'var(--text2)', fontVariantNumeric: 'tabular-nums' }}>{target != null ? money(target) : 'Not set'}</div>
           </div>
         </div>
@@ -384,7 +384,7 @@ export default function Display() {
       {/* Cars this month — board-legal, same treatment as revenue. */}
       {data.cars && data.cars.actual != null && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px', background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '18px 32px', marginBottom: '28px' }}>
-          <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em', width: '170px' }}>Cars this month</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em', width: '170px' }}>Cars this month</div>
           <div style={{ fontFamily: 'var(--font-disp)', fontSize: '40px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
             {data.cars.actual}{data.cars.target ? <span style={{ fontSize: '22px', color: 'var(--text3)', fontWeight: 600 }}> / {data.cars.target}</span> : null}
           </div>
@@ -415,7 +415,7 @@ export default function Display() {
       {data.reviews && data.reviews.rating != null && (
         <div style={{ display: 'flex', gap: '28px', marginBottom: '28px' }}>
           <div style={{ flex: 1, background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '24px 32px' }}>
-            <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>Google rating</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>Google rating</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', marginTop: '8px' }}>
               <span style={{ fontFamily: 'var(--font-disp)', fontSize: '60px', fontWeight: 700, lineHeight: 1 }}>{Number(data.reviews.rating).toFixed(1)}</span>
               <span style={{ fontSize: '28px', color: 'var(--accent)', letterSpacing: '2px' }}>★★★★★</span>
@@ -425,7 +425,7 @@ export default function Display() {
             </div>
           </div>
           <div style={{ flex: 1, background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', padding: '24px 32px' }}>
-            <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>New reviews this month</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>New reviews this month</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px' }}>
               <div style={{ fontFamily: 'var(--font-disp)', fontSize: '60px', fontWeight: 700, lineHeight: 1, marginTop: '8px', color: data.reviews.delta > 0 ? 'var(--success)' : 'var(--text)' }}>
                 {data.reviews.delta > 0 ? `+${data.reviews.delta}` : (data.reviews.delta || 0)}
@@ -443,7 +443,7 @@ export default function Display() {
 
       {/* Tech leaderboard — cycles between this month and year-to-date */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-        <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>
           Technicians · hours sold {!showYtd && data.totals && `(${hrs(data.totals.hours_sold)} sold / ${hrs(data.totals.hours_billed)} billed)`}
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -452,7 +452,7 @@ export default function Display() {
         </div>
       </div>
       <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', overflow: 'hidden', opacity: fade ? 1 : 0, transition: 'opacity 0.4s ease' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: showYtd ? '2fr 1fr 1fr 1.2fr' : '2fr 0.9fr 1fr 1fr 1.2fr', padding: '12px 24px', borderBottom: '0.5px solid var(--border)', fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: showYtd ? '2fr 1fr 1fr 1.2fr' : '2fr 0.9fr 1fr 1fr 1.2fr', padding: '12px 24px', borderBottom: '0.5px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
           <div>Technician</div>
           {!showYtd && <div style={{ textAlign: 'right' }}>This week</div>}
           <div style={{ textAlign: 'right' }}>Billed</div>
@@ -494,7 +494,7 @@ export default function Display() {
       {/* All-locations revenue standings (revenue only) */}
       {data.leaderboard && data.leaderboard.length >= 2 && (
         <div style={{ marginTop: '28px' }}>
-          <div style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: '10px' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: '10px' }}>
             Group standings · revenue to date
           </div>
           <div style={{ background: 'var(--bg2)', border: '0.5px solid var(--border)', borderRadius: '16px', overflow: 'hidden' }}>
