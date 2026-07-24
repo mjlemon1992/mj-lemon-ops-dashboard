@@ -352,3 +352,10 @@ textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* --- Phase 2: the unified Inbox drawer (rail + alerts + push landing) --- */
+.inbox-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 70; animation: inbox-fade var(--dur-base) ease-out; }
+.inbox-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); background: var(--bg2); border-left: 0.5px solid var(--border); z-index: 71; overflow-y: auto; display: flex; flex-direction: column; animation: inbox-in var(--dur-slow) cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes inbox-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes inbox-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .inbox-scrim, .inbox-panel { animation: none; } }
